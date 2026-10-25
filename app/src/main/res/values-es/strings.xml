@@ -1324,6 +1324,12 @@
     <string name="free_up_explainer">Cada foto de abajo tiene una copia en Drive. Solo se elimina la copia de este dispositivo.</string>
     <string name="free_up_progress">%1$d de %2$d liberadas</string>
     <string name="free_up_leaving_stops">Salir de esta pantalla detiene la limpieza. Lo ya liberado sigue liberado.</string>
+    <string name="free_up_verify_channel_name">Liberar espacio</string>
+    <string name="free_up_verify_channel_desc">Muestra el progreso al comprobar las copias en Drive antes de liberar espacio.</string>
+    <string name="free_up_verify_notification_title">Comprobando copias en Drive…</string>
+    <string name="free_up_verify_progress">Comprobadas %1$d de %2$d</string>
+    <string name="free_up_ready_notification_title">Listo para liberar espacio</string>
+    <string name="free_up_ready_notification_text">Abre Liberar espacio para terminar de eliminar %1$d copias del dispositivo.</string>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d foto, %2$s por liberar</item>
         <item quantity="other">%1$d fotos, %2$s por liberar</item>
