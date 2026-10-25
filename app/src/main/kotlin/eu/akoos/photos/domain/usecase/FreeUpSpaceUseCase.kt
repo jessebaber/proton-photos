@@ -96,25 +96,6 @@ class FreeUpSpaceUseCase @Inject constructor(
     }
 
     /**
-     * Legacy all-at-once verify used by the foreground ViewModel until Phase 10 migrates to the
-     * worker + [verifyForReclaim] pipeline. Prefer [verifyForReclaim] for new callers.
-     */
-    suspend fun verifyActiveBackups(
-        userId: UserId,
-        candidates: List<SyncState>,
-    ): List<SyncState> = withContext(Dispatchers.IO) {
-        val checkable = candidates.filter { !it.cloudFileId.isNullOrBlank() }
-        if (checkable.isEmpty()) return@withContext emptyList()
-        val volumeId = cloudRepo.getVolumeId(userId)
-        val linkIds = checkable.mapNotNull { it.cloudFileId }.distinct()
-        val details = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, linkIds)
-        checkable.filter { row ->
-            val linkId = row.cloudFileId ?: return@filter false
-            details[linkId]?.link?.state == ACTIVE_LINK_STATE
-        }
-    }
-
-    /**
      * Chunked Drive verify that persists successes into `free_up_verified`. Skips candidates already
      * verified within [VERIFY_FRESHNESS_MS]. Each chunk uses the strict link fetch + [retryWithBackoff]
      * (including offline); a failed chunk never writes ready markers. Manual waits on [mutex].
@@ -185,6 +166,30 @@ class FreeUpSpaceUseCase @Inject constructor(
         for (chunk in uris.chunked(500)) {
             freeUpVerifiedDao.deleteForUris(userId.id, chunk)
         }
+    }
+
+    /**
+     * Live Drive re-check of the persisted ready set before any delete. Never reclaims on
+     * [verifiedAtMs] alone — a park without this step recreates the trash-after-verify hole.
+     * Drops verified markers for links that are no longer active.
+     */
+    suspend fun confirmReadyForReclaim(userId: UserId): List<SyncState> = withContext(Dispatchers.IO) {
+        val ready = readyToReclaim(userId)
+        if (ready.isEmpty()) return@withContext emptyList()
+        val volumeId = cloudRepo.getVolumeId(userId)
+        val linkIds = ready.mapNotNull { it.cloudFileId }.distinct()
+        val details = retryWithBackoff(
+            shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
+        ) {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
+        }
+        val stillActive = ready.filter { row ->
+            val linkId = row.cloudFileId ?: return@filter false
+            details[linkId]?.link?.state == ACTIVE_LINK_STATE
+        }
+        val dropped = ready.map { it.localUri }.toSet() - stillActive.map { it.localUri }.toSet()
+        if (dropped.isNotEmpty()) clearVerified(userId, dropped.toList())
+        stillActive
     }
 
     /**

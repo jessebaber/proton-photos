@@ -1323,7 +1323,6 @@
     <string name="free_up_verifying">Verifica con Drive che ogni copia sia al sicuro…</string>
     <string name="free_up_explainer">Ogni foto qui sotto ha una copia su Drive. Viene eliminata solo la copia su questo dispositivo.</string>
     <string name="free_up_progress">%1$d di %2$d liberate</string>
-    <string name="free_up_leaving_stops">Uscire da questa schermata ferma la pulizia. Quanto già liberato resta liberato.</string>
     <string name="free_up_verify_channel_name">Libera spazio</string>
     <string name="free_up_verify_channel_desc">Mostra l\'avanzamento del controllo delle copie su Drive prima di liberare spazio.</string>
     <string name="free_up_verify_notification_title">Controllo delle copie su Drive…</string>

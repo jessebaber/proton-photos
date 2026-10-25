@@ -22,17 +22,18 @@
 
 package eu.akoos.photos.presentation.settings
 
-import android.app.PendingIntent
 import android.content.Context
+import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.SyncState
-import eu.akoos.photos.domain.entity.SyncStatus
-import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.worker.ManualFreeUpWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,67 +44,42 @@ import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
 /**
- * Backs the Free up space screen: the photos whose device copy can be reclaimed, shown before
- * anything is deleted, and the progress of the sweep that deletes them.
- *
- * The screen exists because the reclaim is a permanent local delete of potentially thousands of
- * files, and the Storage row it replaced started that with nothing but a spinner. Listing the exact
- * rows first lets the user check them, and every row here is `SYNCED`, so the backed-up badge each
- * cell draws is a check rather than a decoration.
- *
- * The sweep is deliberately tied to this screen's lifetime: leaving cancels it. Nothing is lost by
- * that, since each photo is committed on its own, and [load] on the next open lists what is left.
+ * Free up space screen: lists reclaimable candidates, enqueues [ManualFreeUpWorker] for background
+ * Drive verify, observes WorkInfo + ready count, and runs the foreground finisher (live re-check
+ * then permanent delete). Leaving the screen no longer cancels verify.
  */
 @HiltViewModel
 class FreeUpSpaceViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val freeUpSpace: FreeUpSpaceUseCase,
-    private val syncStateRepo: SyncStateRepository,
     private val localRepo: eu.akoos.photos.domain.repository.LocalMediaRepository,
     private val accountManager: AccountManager,
+    private val pendingDeleteBridge: FreeUpPendingDeleteBridge,
 ) : ViewModel() {
 
     data class UiState(
         val loading: Boolean = true,
-        /** The rows the sweep will act on, in the order it will act on them. */
         val candidates: List<SyncState> = emptyList(),
-        val running: Boolean = false,
-        /** The Drive check that runs before a single file is deleted. Its own flag because it is the
-         *  part with nothing to count: the screen says what it is doing instead of showing 0 of 0. */
-        val verifying: Boolean = false,
-        val done: Int = 0,
-        val total: Int = 0,
-        /** Terminal message for the finished sweep, shown on this screen rather than the one the
-         *  button used to live on. */
+        val phase: FreeUpSpacePhase = FreeUpSpacePhase.Idle,
+        val checked: Int = 0,
+        val checkTotal: Int = 0,
+        val readyCount: Int = 0,
         val message: String? = null,
-        /** Android 11+ batch consent for files this app does not own. */
-        val pendingIntent: PendingIntent? = null,
-        /**
-         * How much device space the listed photos actually occupy.
-         *
-         * Resolved when the list is built rather than summed off the rows: a sync row's own
-         * `sizeBytes` is 0 on rows minted by a path that never had the local file's size to hand, so
-         * summing the column alone reports 0 B for a real list of photos. MediaStore is asked once
-         * for every local item and the row's own value is used only where MediaStore has nothing
-         * (the same "trust the non-zero one" rule `HiddenFolderRecords` already applies).
-         */
         val reclaimableBytes: Long = 0L,
     ) {
-        val isEmpty: Boolean get() = !loading && candidates.isEmpty()
+        val isEmpty: Boolean get() = !loading && candidates.isEmpty() && readyCount == 0
     }
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    /** URIs handed to the system consent dialog, settled once it returns. */
-    private var pendingLocalUris: List<String> = emptyList()
+    private var finishStartedForSuccess = false
 
-    init { load() }
+    init {
+        load()
+        observeWorker()
+    }
 
-    /**
-     * Re-read what can be reclaimed. Called on open and after a sweep, so a screen returned to shows
-     * what is actually left rather than the list it was opened with.
-     */
     fun load() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: run {
@@ -111,85 +87,63 @@ class FreeUpSpaceViewModel @Inject constructor(
                 return@launch
             }
             _uiState.update { it.copy(loading = true) }
-            // Long.MAX_VALUE and protectDownloaded = false are what the Storage button always passed:
-            // an explicit tap reclaims every backed-up copy, including ones downloaded back.
             val rows = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
+            val ready = freeUpSpace.readyToReclaim(userId)
             _uiState.update {
-                it.copy(loading = false, candidates = rows, reclaimableBytes = totalBytes(rows))
+                it.copy(
+                    loading = false,
+                    candidates = rows,
+                    readyCount = ready.size,
+                    reclaimableBytes = totalBytes(rows),
+                )
             }
         }
     }
 
+    /** Enqueue background verify for the listed candidates. */
     fun start() {
-        if (_uiState.value.running) return
+        if (_uiState.value.phase == FreeUpSpacePhase.Checking) return
+        finishStartedForSuccess = false
+        ManualFreeUpWorker.enqueue(context)
+    }
+
+    /** Foreground finish: live Drive re-check then permanent delete. */
+    fun finishReclaim() {
+        if (_uiState.value.phase == FreeUpSpacePhase.Freeing) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update {
-                it.copy(running = true, verifying = true, done = 0, total = it.candidates.size, message = null)
-            }
+            _uiState.update { it.copy(phase = FreeUpSpacePhase.Freeing, message = null) }
             try {
-                // Check against Drive before deleting anything. This reclaims every backed-up photo,
-                // including copies the user downloaded back, so acting on a sync_state that nothing
-                // has verified lately could take a last copy. The check confirms only the on-device
-                // candidates' cloud links are active right now (one batched call per 50), which is
-                // bounded by the on-device count. The refresh-plus-reconcile pass this replaced walked
-                // the entire Drive volume first, so on a large library it ran past the point the sweep
-                // could start and nothing was reclaimed.
-                //
-                // A thrown transient error (a rate-limited verification batch) is deliberately NOT
-                // swallowed: sweeping against links that could not be confirmed is the situation this
-                // exists to prevent, so it falls through to the catch and the sweep does not run.
-                val candidates = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
-                val verified = freeUpSpace.verifyActiveBackups(userId, candidates)
-                // Settle the grid onto the confirmed set before a single file is deleted: only links
-                // that came back active survive here, so a candidate whose cloud copy is gone or
-                // trashed is dropped rather than reclaimed.
-                _uiState.update {
-                    it.copy(
-                        verifying = false,
-                        candidates = verified,
-                        reclaimableBytes = totalBytes(verified),
-                        done = 0,
-                        total = verified.size,
-                    )
+                val confirmed = freeUpSpace.confirmReadyForReclaim(userId)
+                if (confirmed.isEmpty()) {
+                    _uiState.update {
+                        it.copy(
+                            phase = FreeUpSpacePhase.Done,
+                            readyCount = 0,
+                            message = context.getString(R.string.settings_free_up_none),
+                        )
+                    }
+                    load()
+                    return@launch
                 }
-                val result = freeUpSpace.reclaimCandidates(
-                    candidates = verified,
-                    onProgress = { done, total ->
-                        _uiState.update { it.copy(done = done, total = total) }
-                    },
-                )
-                when (result) {
-                    is FreeUpSpaceUseCase.FreeUpResult.Done -> {
-                        _uiState.update { it.copy(running = false, verifying = false, message = freedMessage(result.freed)) }
-                        load()
+                if (Environment.isExternalStorageManager()) {
+                    val result = freeUpSpace.reclaimCandidates(confirmed) { done, total ->
+                        _uiState.update { it.copy(checked = done, checkTotal = total) }
                     }
-                    is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                        pendingLocalUris = result.localUris
-                        _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }
+                    handleReclaimResult(userId, result)
+                } else {
+                    // Direct deletes may free some; NeedsPermission URIs go to the permanent-delete
+                    // handler (never trash / PENDING_DELETE_URIS).
+                    val result = freeUpSpace.reclaimCandidates(confirmed) { done, total ->
+                        _uiState.update { it.copy(checked = done, checkTotal = total) }
                     }
-                    is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
-                        _uiState.update {
-                            it.copy(
-                                running = false,
-                                verifying = false,
-                                message = context.getString(
-                                    R.string.settings_free_up_error,
-                                    result.message,
-                                ),
-                            )
-                        }
-                        if (result.freed > 0) load()
-                    }
+                    handleReclaimResult(userId, result)
                 }
             } catch (e: Exception) {
-                // Cancellation is the ordinary way this ends: the user left the screen, which stops
-                // the sweep by design. Everything already reclaimed stays reclaimed.
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update {
                     it.copy(
-                        running = false,
-                        verifying = false,
+                        phase = FreeUpSpacePhase.Error,
                         message = context.getString(R.string.settings_free_up_error, e.message ?: ""),
                     )
                 }
@@ -197,29 +151,85 @@ class FreeUpSpaceViewModel @Inject constructor(
         }
     }
 
-    /** The system consent dialog returned OK: it did the deleting, so only the rows move here. */
-    fun onPermissionGranted() {
+    fun clearMessage() = _uiState.update { it.copy(message = null) }
+
+    private fun observeWorker() {
         viewModelScope.launch {
-            val uris = pendingLocalUris
-            pendingLocalUris = emptyList()
-            syncStateRepo.updateStatusAndDeleteLocal(uris, SyncStatus.CLOUD_ONLY)
-            _uiState.update { it.copy(pendingIntent = null, message = freedMessage(uris.size)) }
-            load()
+            WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWorkFlow(ManualFreeUpWorker.UNIQUE_NAME)
+                .collect { infos ->
+                    val info = infos.firstOrNull()
+                    val running = info?.state == WorkInfo.State.RUNNING ||
+                        info?.state == WorkInfo.State.ENQUEUED ||
+                        info?.state == WorkInfo.State.BLOCKED
+                    val succeeded = info?.state == WorkInfo.State.SUCCEEDED
+                    val failed = info?.state == WorkInfo.State.FAILED
+                    val progress = info?.progress
+                    val checked = progress?.getInt(ManualFreeUpWorker.KEY_DONE, 0) ?: 0
+                    val total = progress?.getInt(ManualFreeUpWorker.KEY_TOTAL, 0) ?: 0
+
+                    val userId = accountManager.getPrimaryUserId().first()
+                    val readyCount = if (userId != null) {
+                        freeUpSpace.readyToReclaim(userId).size
+                    } else {
+                        0
+                    }
+                    val current = _uiState.value
+                    val freeing = current.phase == FreeUpSpacePhase.Freeing
+                    val doneMessage = current.message != null && current.phase == FreeUpSpacePhase.Done
+                    val phase = deriveFreeUpSpaceState(
+                        workRunning = running,
+                        workSucceeded = succeeded,
+                        workFailed = failed,
+                        readyCount = readyCount,
+                        freeing = freeing,
+                        doneMessage = doneMessage,
+                    )
+                    _uiState.update {
+                        it.copy(
+                            phase = if (freeing) FreeUpSpacePhase.Freeing else phase,
+                            checked = checked,
+                            checkTotal = total,
+                            readyCount = readyCount,
+                        )
+                    }
+                    // Auto-start reclaim when verify succeeds and the screen is open.
+                    if (succeeded && readyCount > 0 && !finishStartedForSuccess && !freeing) {
+                        finishStartedForSuccess = true
+                        finishReclaim()
+                    }
+                }
         }
     }
 
-    fun onPermissionDenied() {
-        pendingLocalUris = emptyList()
-        _uiState.update { it.copy(pendingIntent = null) }
-        load()
+    private suspend fun handleReclaimResult(
+        userId: me.proton.core.domain.entity.UserId,
+        result: FreeUpSpaceUseCase.FreeUpResult,
+    ) {
+        when (result) {
+            is FreeUpSpaceUseCase.FreeUpResult.Done -> {
+                freeUpSpace.clearVerified(userId)
+                _uiState.update {
+                    it.copy(phase = FreeUpSpacePhase.Done, message = freedMessage(result.freed), readyCount = 0)
+                }
+                load()
+            }
+            is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+                pendingDeleteBridge.offer(result.localUris)
+                _uiState.update { it.copy(phase = FreeUpSpacePhase.Ready) }
+            }
+            is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
+                _uiState.update {
+                    it.copy(
+                        phase = FreeUpSpacePhase.Error,
+                        message = context.getString(R.string.settings_free_up_error, result.message),
+                    )
+                }
+                if (result.freed > 0) load()
+            }
+        }
     }
 
-    fun clearMessage() = _uiState.update { it.copy(message = null) }
-
-    /**
-     * Device bytes the [rows] occupy. One MediaStore read for the whole library rather than a query
-     * per photo, matching how the upload pass resolves the same kind of per-uri fact.
-     */
     private suspend fun totalBytes(rows: List<SyncState>): Long {
         if (rows.isEmpty()) return 0L
         val sizeByUri = runCatching {

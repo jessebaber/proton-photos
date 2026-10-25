@@ -22,10 +22,6 @@
 
 package eu.akoos.photos.presentation.settings
 
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,7 +48,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,26 +67,16 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.SyncedCloudBadge
 import eu.akoos.photos.presentation.settings.components.SettingsCard
-import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.formatBytes
 
 /**
- * Shows exactly which photos will lose their device copy, then reclaims them.
- *
- * The reclaim permanently deletes the local file, often for thousands of photos at once, so the list
- * comes first and the button second. Every cell carries the same green backed-up badge the timeline
- * draws, from the same composable, because the one thing worth checking before agreeing is that each
- * photo really does have a Drive copy to fall back on.
- *
- * Leaving the screen stops the sweep. Nothing is lost by that: each photo is committed on its own,
- * so coming back lists what is left and the count carries on from there.
- *
- * A LazyVerticalGrid with the pill header overlaid, rather than `SettingsSubPageScaffold`, because a
- * library of thousands must not be laid out at once (see that scaffold's own note on the choice).
+ * Shows reclaimable photos, enqueues background Drive verify, and finishes permanent delete in the
+ * foreground. Leaving the screen no longer stops verify — WorkManager continues the check.
  */
 @Composable
 fun FreeUpSpaceScreen(
@@ -101,18 +86,7 @@ fun FreeUpSpaceScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     var showConfirm by remember { mutableStateOf(false) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.onPermissionGranted()
-        else viewModel.onPermissionDenied()
-    }
-    LaunchedEffect(state.pendingIntent) {
-        state.pendingIntent?.let { pi ->
-            permissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-        }
-    }
+    val busy = state.phase == FreeUpSpacePhase.Checking || state.phase == FreeUpSpacePhase.Freeing
 
     state.message?.let { message ->
         ErrorPopup(
@@ -168,40 +142,74 @@ fun FreeUpSpaceScreen(
                                     )
                                 }
                             }
-                            if (state.running) {
-                                Spacer(Modifier.height(14.dp))
-                                Text(
-                                    // The Drive check has nothing to count, so it says what it is
-                                    // doing rather than showing a bar sitting at zero.
-                                    if (state.verifying) {
-                                        stringResource(R.string.free_up_verifying)
-                                    } else {
-                                        stringResource(R.string.free_up_progress, state.done, state.total)
-                                    },
-                                    color = colors.fgDim,
-                                    fontSize = 12.5.sp,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                if (state.verifying) {
-                                    LinearProgressIndicator(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = colors.accent,
+                            when (state.phase) {
+                                FreeUpSpacePhase.Checking -> {
+                                    Spacer(Modifier.height(14.dp))
+                                    Text(
+                                        if (state.checkTotal > 0) {
+                                            stringResource(
+                                                R.string.free_up_verify_progress,
+                                                state.checked,
+                                                state.checkTotal,
+                                            )
+                                        } else {
+                                            stringResource(R.string.free_up_verifying)
+                                        },
+                                        color = colors.fgDim,
+                                        fontSize = 12.5.sp,
                                     )
-                                } else {
+                                    Spacer(Modifier.height(8.dp))
+                                    if (state.checkTotal > 0) {
+                                        LinearProgressIndicator(
+                                            progress = {
+                                                state.checked.toFloat() / state.checkTotal
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = colors.accent,
+                                        )
+                                    } else {
+                                        LinearProgressIndicator(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = colors.accent,
+                                        )
+                                    }
+                                }
+                                FreeUpSpacePhase.Ready -> {
+                                    Spacer(Modifier.height(14.dp))
+                                    Text(
+                                        stringResource(
+                                            R.string.free_up_ready_notification_text,
+                                            state.readyCount,
+                                        ),
+                                        color = colors.fgDim,
+                                        fontSize = 12.5.sp,
+                                    )
+                                }
+                                FreeUpSpacePhase.Freeing -> {
+                                    Spacer(Modifier.height(14.dp))
+                                    Text(
+                                        stringResource(
+                                            R.string.free_up_progress,
+                                            state.checked,
+                                            state.checkTotal,
+                                        ),
+                                        color = colors.fgDim,
+                                        fontSize = 12.5.sp,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
                                     LinearProgressIndicator(
                                         progress = {
-                                            if (state.total > 0) state.done.toFloat() / state.total else 0f
+                                            if (state.checkTotal > 0) {
+                                                state.checked.toFloat() / state.checkTotal
+                                            } else {
+                                                0f
+                                            }
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         color = colors.accent,
                                     )
                                 }
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    stringResource(R.string.free_up_leaving_stops),
-                                    color = colors.fgMute,
-                                    fontSize = 11.5.sp,
-                                )
+                                else -> Unit
                             }
                         }
                     }
@@ -211,18 +219,29 @@ fun FreeUpSpaceScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = !state.running) { showConfirm = true }
+                                    .clickable(enabled = !busy) {
+                                        when (state.phase) {
+                                            FreeUpSpacePhase.Ready -> viewModel.finishReclaim()
+                                            else -> showConfirm = true
+                                        }
+                                    }
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(
-                                    stringResource(R.string.settings_storage_free_up),
-                                    color = if (state.running) colors.fgMute else colors.accent,
+                                    stringResource(
+                                        if (state.phase == FreeUpSpacePhase.Ready) {
+                                            R.string.free_up_ready_notification_title
+                                        } else {
+                                            R.string.settings_storage_free_up
+                                        },
+                                    ),
+                                    color = if (busy) colors.fgMute else colors.accent,
                                     fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Medium,
                                 )
-                                if (state.running) {
+                                if (busy) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(18.dp),
                                         strokeWidth = 2.dp,
@@ -249,9 +268,6 @@ fun FreeUpSpaceScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    // The same badge the timeline draws, from the same composable. The point of this
-                    // screen is that the user can see each photo has a Drive copy before its device
-                    // copy goes, and a lookalike drawn here could drift from the real one.
                     SyncedCloudBadge()
                 }
             }

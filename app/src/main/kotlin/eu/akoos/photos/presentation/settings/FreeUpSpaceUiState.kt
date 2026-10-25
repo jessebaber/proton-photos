@@ -37,9 +37,7 @@ enum class FreeUpSpacePhase {
 
 /**
  * Derives the screen phase from background-verify work state and the persisted ready set.
- *
- * Stub until Phase 10 wires the real WorkInfo observation: always [FreeUpSpacePhase.Idle] so the
- * contract tests stay red until the real reducer lands.
+ * Freeing wins over Ready while the foreground finisher runs; a terminal message maps to Done.
  */
 fun deriveFreeUpSpaceState(
     workRunning: Boolean,
@@ -48,4 +46,11 @@ fun deriveFreeUpSpaceState(
     readyCount: Int,
     freeing: Boolean,
     doneMessage: Boolean,
-): FreeUpSpacePhase = FreeUpSpacePhase.Idle
+): FreeUpSpacePhase = when {
+    workFailed -> FreeUpSpacePhase.Error
+    freeing -> FreeUpSpacePhase.Freeing
+    doneMessage -> FreeUpSpacePhase.Done
+    workRunning -> FreeUpSpacePhase.Checking
+    workSucceeded && readyCount > 0 -> FreeUpSpacePhase.Ready
+    else -> FreeUpSpacePhase.Idle
+}

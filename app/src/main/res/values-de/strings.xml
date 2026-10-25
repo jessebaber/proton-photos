@@ -1306,7 +1306,6 @@
     <string name="free_up_verifying">Prüfung mit Drive, dass jede Kopie vorhanden ist…</string>
     <string name="free_up_explainer">Jedes Foto unten hat eine Kopie auf Drive. Nur die Kopie auf diesem Gerät wird gelöscht.</string>
     <string name="free_up_progress">%1$d von %2$d freigegeben</string>
-    <string name="free_up_leaving_stops">Das Verlassen dieser Seite stoppt die Bereinigung. Bereits Freigegebenes bleibt freigegeben.</string>
     <string name="free_up_verify_channel_name">Speicher freigeben</string>
     <string name="free_up_verify_channel_desc">Zeigt den Fortschritt beim Prüfen der Drive-Kopien vor dem Freigeben.</string>
     <string name="free_up_verify_notification_title">Drive-Kopien werden geprüft…</string>
