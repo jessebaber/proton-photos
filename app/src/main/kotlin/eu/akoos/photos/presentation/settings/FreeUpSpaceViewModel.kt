@@ -202,7 +202,7 @@ class FreeUpSpaceViewModel @Inject constructor(
         viewModelScope.launch {
             val uris = pendingLocalUris
             pendingLocalUris = emptyList()
-            uris.forEach { syncStateRepo.updateStatusAndDeleteLocal(it, SyncStatus.CLOUD_ONLY) }
+            syncStateRepo.updateStatusAndDeleteLocal(uris, SyncStatus.CLOUD_ONLY)
             _uiState.update { it.copy(pendingIntent = null, message = freedMessage(uris.size)) }
             load()
         }
