@@ -103,7 +103,9 @@ class FreeUpSpaceProgressTest {
                 repo.updateStatusAndDeleteLocal(row.localUri, SyncStatus.CLOUD_ONLY)
             }
         }
-        coVerify(exactly = listed.size) { repo.updateStatusAndDeleteLocal(any(), any()) }
+        coVerify(exactly = listed.size) {
+            repo.updateStatusAndDeleteLocal(any<String>(), any())
+        }
     }
 
     @Test
@@ -135,7 +137,8 @@ class FreeUpSpaceProgressTest {
         val result = useCase(userId, Long.MAX_VALUE)
 
         // Nothing was reclaimed, so no row may claim its device copy is gone.
-        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any(), any()) }
+        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<String>(), any()) }
+        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
         // On a JVM unit test Build.VERSION.SDK_INT reads 0, so the consent branch is skipped and the
         // run reports Done with zero freed. The invariant that matters either way is that a refused
         // photo is never counted.
