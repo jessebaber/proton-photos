@@ -23,7 +23,6 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -126,19 +125,13 @@ class FreeUpSpaceViewModel @Inject constructor(
                     load()
                     return@launch
                 }
-                if (Environment.isExternalStorageManager()) {
-                    val result = freeUpSpace.reclaimCandidates(confirmed) { done, total ->
-                        _uiState.update { it.copy(checked = done, checkTotal = total) }
-                    }
-                    handleReclaimResult(userId, result)
-                } else {
-                    // Direct deletes may free some; NeedsPermission URIs go to the permanent-delete
-                    // handler (never trash / PENDING_DELETE_URIS).
-                    val result = freeUpSpace.reclaimCandidates(confirmed) { done, total ->
-                        _uiState.update { it.copy(checked = done, checkTotal = total) }
-                    }
-                    handleReclaimResult(userId, result)
+                // Direct deletes free what this app owns; NeedsPermission URIs go to the
+                // permanent-delete handler (never trash / PENDING_DELETE_URIS). All-files
+                // access is optional and not required for free-up.
+                val result = freeUpSpace.reclaimCandidates(confirmed) { done, total ->
+                    _uiState.update { it.copy(checked = done, checkTotal = total) }
                 }
+                handleReclaimResult(userId, result)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update {
