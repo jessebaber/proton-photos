@@ -24,7 +24,6 @@ package eu.akoos.photos.domain.usecase
 
 import android.app.NotificationManager
 import android.content.Context
-import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
@@ -101,8 +100,8 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         }
         if (stale.isNotEmpty()) {
             Log.d(TAG, "Pruning ${stale.size} stale URI(s) from delete queue")
-            stale.forEach { uri ->
-                runCatching { syncStateRepo.updateStatusAndDeleteLocal(uri, SyncStatus.CLOUD_ONLY) }
+            runCatching {
+                syncStateRepo.updateStatusAndDeleteLocal(stale, SyncStatus.CLOUD_ONLY)
             }
         }
 
