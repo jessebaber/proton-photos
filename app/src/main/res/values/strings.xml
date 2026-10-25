@@ -1647,6 +1647,12 @@
     <string name="free_up_explainer">Each photo below has a copy on Drive. Only the copy on this device is deleted.</string>
     <string name="free_up_progress">Freed %1$d of %2$d</string>
     <string name="free_up_leaving_stops">Leaving this screen stops the clean-up. Everything already freed stays freed.</string>
+    <string name="free_up_verify_channel_name">Free up space</string>
+    <string name="free_up_verify_channel_desc">Shows progress while checking Drive copies before freeing space.</string>
+    <string name="free_up_verify_notification_title">Checking Drive copies…</string>
+    <string name="free_up_verify_progress">Checked %1$d of %2$d</string>
+    <string name="free_up_ready_notification_title">Ready to free space</string>
+    <string name="free_up_ready_notification_text">Open Free up space to finish removing %1$d device copies.</string>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d photo, %2$s to free</item>
         <item quantity="other">%1$d photos, %2$s to free</item>
