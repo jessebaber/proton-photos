@@ -28,22 +28,40 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
+import eu.akoos.photos.data.db.entity.FreeUpVerifiedEntity
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.isOfflineError
+import eu.akoos.photos.util.isTransientApiError
+import eu.akoos.photos.util.retryWithBackoff
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import me.proton.core.domain.entity.UserId
 import javax.inject.Inject
+import javax.inject.Singleton
 
+/**
+ * Free-up candidates, chunked Drive verify into `free_up_verified`, and foreground reclaim.
+ *
+ * A [Mutex] serialises verify/reclaim so manual and scheduled paths cannot process the same rows
+ * concurrently: manual waits; scheduled (PR3) uses [tryLock] and skips when busy.
+ */
+@Singleton
 class FreeUpSpaceUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncStateRepo: SyncStateRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val linkDetailHelpers: LinkDetailHelpers,
+    private val freeUpVerifiedDao: FreeUpVerifiedDao,
 ) {
+    private val mutex = Mutex()
+
     sealed class FreeUpResult {
         data class Done(val freed: Int) : FreeUpResult()
         /** Android 11+: system delete dialog must be shown for these URIs. */
@@ -78,32 +96,109 @@ class FreeUpSpaceUseCase @Inject constructor(
     }
 
     /**
-     * The subset of [candidates] whose Drive copy is confirmed active right now, so only those get
-     * deleted. Each candidate's cloudFileId is looked up in one batched link-details call (chunked at
-     * 50), and a candidate is kept only when its link comes back State == 1: present on Drive and not
-     * trashed. Checking the candidates alone is bounded by the on-device count, where the listing walk
-     * this replaced grew with the whole Drive volume and on a large library ran long enough that the
-     * sweep never started.
-     *
-     * A candidate is DROPPED (kept on the device, never deleted) when its link is absent from the
-     * returned map, comes back at any State other than 1, or carries no cloudFileId to check with. A
-     * transient failure (429 / 5xx / network) from the lookup PROPAGATES so the caller aborts and
-     * deletes nothing against an unconfirmed batch, rather than reading a rate-limited short map as an
-     * all-trashed answer.
+     * Chunked Drive verify that persists successes into `free_up_verified`. Skips candidates already
+     * verified within [VERIFY_FRESHNESS_MS]. Each chunk uses the strict link fetch + [retryWithBackoff]
+     * (including offline); a failed chunk never writes ready markers. Manual waits on [mutex].
      */
-    suspend fun verifyActiveBackups(
+    suspend fun verifyForReclaim(
         userId: UserId,
         candidates: List<SyncState>,
-    ): List<SyncState> = withContext(Dispatchers.IO) {
-        val checkable = candidates.filter { !it.cloudFileId.isNullOrBlank() }
-        if (checkable.isEmpty()) return@withContext emptyList<SyncState>()
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val checkable = candidates.filter { !it.cloudFileId.isNullOrBlank() }
+            val total = checkable.size
+            if (total == 0) {
+                onProgress(0, 0)
+                return@withContext
+            }
+            val sinceMs = System.currentTimeMillis() - VERIFY_FRESHNESS_MS
+            val alreadyFresh = freeUpVerifiedDao.freshLocalUris(userId.id, sinceMs).toHashSet()
+            val pending = checkable.filter { it.localUri !in alreadyFresh }
+            var done = checkable.size - pending.size
+            onProgress(done, total)
+            if (pending.isEmpty()) return@withContext
+
+            val volumeId = cloudRepo.getVolumeId(userId)
+            for (chunk in pending.chunked(VERIFY_CHUNK_SIZE)) {
+                val linkIds = chunk.mapNotNull { it.cloudFileId }.distinct()
+                val details = retryWithBackoff(
+                    shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
+                ) {
+                    linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
+                }
+                val now = System.currentTimeMillis()
+                val verifiedRows = chunk.mapNotNull { row ->
+                    val linkId = row.cloudFileId ?: return@mapNotNull null
+                    if (details[linkId]?.link?.state != ACTIVE_LINK_STATE) return@mapNotNull null
+                    FreeUpVerifiedEntity(
+                        userId = userId.id,
+                        localUri = row.localUri,
+                        cloudFileId = linkId,
+                        verifiedAtMs = now,
+                    )
+                }
+                if (verifiedRows.isNotEmpty()) {
+                    freeUpVerifiedDao.upsert(verifiedRows)
+                }
+                done += chunk.size
+                onProgress(done, total)
+            }
+        }
+    }
+
+    /**
+     * SYNCED rows whose `free_up_verified` marker still matches [cloudFileId] and is fresh.
+     */
+    suspend fun readyToReclaim(userId: UserId): List<SyncState> = withContext(Dispatchers.IO) {
+        val sinceMs = System.currentTimeMillis() - VERIFY_FRESHNESS_MS
+        freeUpVerifiedDao.readyToReclaim(userId.id, sinceMs).map { it.toDomain() }
+    }
+
+    /** Clears verified markers for [userId] (manual cancel of a verify run). */
+    suspend fun clearVerified(userId: UserId) = withContext(Dispatchers.IO) {
+        freeUpVerifiedDao.deleteAllForUser(userId.id)
+    }
+
+    /** Clears verified markers for the given URIs only (consent deny). */
+    suspend fun clearVerified(userId: UserId, uris: List<String>) = withContext(Dispatchers.IO) {
+        if (uris.isEmpty()) return@withContext
+        for (chunk in uris.chunked(500)) {
+            freeUpVerifiedDao.deleteForUris(userId.id, chunk)
+        }
+    }
+
+    /**
+     * Live Drive re-check of the persisted ready set before any delete. Never reclaims on
+     * [verifiedAtMs] alone — a park without this step recreates the trash-after-verify hole.
+     * Drops verified markers for links that are no longer active.
+     */
+    suspend fun confirmReadyForReclaim(userId: UserId): List<SyncState> = withContext(Dispatchers.IO) {
+        val ready = readyToReclaim(userId)
+        if (ready.isEmpty()) return@withContext emptyList()
         val volumeId = cloudRepo.getVolumeId(userId)
-        val linkIds = checkable.mapNotNull { it.cloudFileId }.distinct()
-        val details = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, linkIds)
-        checkable.filter { row ->
+        val linkIds = ready.mapNotNull { it.cloudFileId }.distinct()
+        val details = retryWithBackoff(
+            shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
+        ) {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
+        }
+        val stillActive = ready.filter { row ->
             val linkId = row.cloudFileId ?: return@filter false
             details[linkId]?.link?.state == ACTIVE_LINK_STATE
         }
+        val dropped = ready.map { it.localUri }.toSet() - stillActive.map { it.localUri }.toSet()
+        if (dropped.isNotEmpty()) clearVerified(userId, dropped.toList())
+        stillActive
+    }
+
+    /**
+     * Non-blocking attempt to take the verify/reclaim mutex. Scheduled path (PR3) skips when busy.
+     */
+    fun tryLock(): Boolean = mutex.tryLock()
+
+    fun unlock() {
+        mutex.unlock()
     }
 
     /**
@@ -114,9 +209,8 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [onProgress] is called with (done, total) as the sweep advances, so a caller can show movement
      * over a run that takes minutes on a large library. It is called from the IO context this runs on.
      *
-     * Selects the candidates and reclaims them in one call, for the scheduled sweep that has no cloud
-     * check to run first. The manual button splits the two: it verifies the candidates with
-     * [verifyActiveBackups] and hands only the confirmed set to [reclaimCandidates].
+     * Selects the candidates and reclaims them in one call. Prefer [verifyForReclaim] + finisher for
+     * new paths; this remains for the scheduled worker until PR3.
      */
     suspend operator fun invoke(
         userId: UserId,
@@ -129,15 +223,10 @@ class FreeUpSpaceUseCase @Inject constructor(
     /**
      * Deletes the device copy of each row in [candidates], in order, committing each on its own, and
      * reports how many were freed (or the batched consent request for files this app does not own).
-     * The caller states the exact set: [invoke] passes what [candidates] selected, and the manual
-     * button passes only the rows [verifyActiveBackups] confirmed, so a row that failed the check is
-     * never deleted here.
      *
      * The body runs on [Dispatchers.IO] rather than the caller's context. `ContentResolver.delete` is
      * a blocking binder call and there is one per photo, so on a library of thousands the loop owns
-     * whatever thread it is given for minutes. Called from a ViewModel that is exactly the main
-     * thread: the deletes still land, while the UI cannot repaint, which reads as a spinner that
-     * never stops. The scheduled run never showed it because a CoroutineWorker is already off-main.
+     * whatever thread it is given for minutes.
      */
     suspend fun reclaimCandidates(
         candidates: List<SyncState>,
@@ -202,7 +291,13 @@ class FreeUpSpaceUseCase @Inject constructor(
 
         /** Link.State the batch link-details endpoint returns for a link that exists and is not
          *  trashed. Any other value (or an absent link) means the cloud copy is not confirmed. */
-        private const val ACTIVE_LINK_STATE = 1
+        const val ACTIVE_LINK_STATE = 1
+
+        /** Drive batch link-details chunk size (matches [LinkDetailHelpers]). */
+        const val VERIFY_CHUNK_SIZE = 50
+
+        /** How long a persisted verify marker stays valid for [readyToReclaim] / resume skip. */
+        const val VERIFY_FRESHNESS_MS = 24L * 60L * 60L * 1000L
 
         /**
          * Whether free-up-space may reclaim the device copy behind [state]: true only for a photo

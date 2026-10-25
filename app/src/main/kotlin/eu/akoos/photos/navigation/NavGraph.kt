@@ -126,6 +126,7 @@ import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LandingTabScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
 import eu.akoos.photos.presentation.settings.NotificationSettingsScreen
+import eu.akoos.photos.presentation.settings.FreeUpPermanentDeleteHandler
 import eu.akoos.photos.presentation.settings.PendingDeleteHandler
 import eu.akoos.photos.presentation.settings.SettingsScreen
 import eu.akoos.photos.presentation.settings.ExcludedFoldersScreen
@@ -710,6 +711,8 @@ fun NavGraph(
             // session and renders nothing of its own until there is actually a queue
             // to surface to the user.
             PendingDeleteHandler()
+            // Permanent-delete sink for free-up reclaim — hard-separated from the trash queue above.
+            FreeUpPermanentDeleteHandler()
             // One-time post-update highlights. The startup router only lands here once the user is
             // fully Ready (logged in AND onboarded), so reaching this composable already implies
             // that gate. We read the seen-version pref once and, if this build's versionCode is
