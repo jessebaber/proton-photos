@@ -27,6 +27,7 @@ import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
 import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
 import eu.akoos.photos.data.db.entity.FreeUpVerifiedEntity
+import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -48,8 +49,6 @@ import java.net.UnknownHostException
  * Pins chunked [FreeUpSpaceUseCase.verifyForReclaim] / [FreeUpSpaceUseCase.readyToReclaim]:
  * successful chunks persist and appear in the ready set; resume skips fresh verified rows; a failed
  * or offline chunk never marks those URIs ready.
- *
- * Red until Phase 8 wires persistence + strict fetch into the use case.
  */
 class FreeUpSpaceVerifyTest {
 
@@ -77,6 +76,19 @@ class FreeUpSpaceVerifyTest {
     private fun linkAt(linkId: String, state: Int) =
         BatchLinkDto(link = LinkCoreDto(linkId = linkId, type = 2, state = state))
 
+    private fun entityFor(row: FreeUpVerifiedEntity) = SyncStateEntity(
+        localUri = row.localUri,
+        userId = row.userId,
+        cloudFileId = row.cloudFileId,
+        localHash = "hash",
+        cloudHash = null,
+        status = SyncStatus.SYNCED,
+        lastSyncAttemptMs = 0L,
+        lastSyncSuccessMs = 1L,
+        backedUpAtMs = 1L,
+        sizeBytes = 1024L,
+    )
+
     @Before
     fun setUp() {
         persisted.clear()
@@ -85,14 +97,18 @@ class FreeUpSpaceVerifyTest {
         freeUpVerifiedDao = mockk(relaxed = true)
         val context = mockk<Context>(relaxed = true)
         val syncStateRepo = mockk<SyncStateRepository>(relaxed = true)
-        // Phase 8 injects FreeUpVerifiedDao; until then construct with the four collaborators and
-        // assert against the stub verifyForReclaim / readyToReclaim surface.
-        useCase = FreeUpSpaceUseCase(context, syncStateRepo, cloudRepo, linkDetailHelpers)
+        useCase = FreeUpSpaceUseCase(
+            context,
+            syncStateRepo,
+            cloudRepo,
+            linkDetailHelpers,
+            freeUpVerifiedDao,
+        )
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
-        coEvery { freeUpVerifiedDao.upsert(any<FreeUpVerifiedEntity>()) } answers {
-            persisted += firstArg()
+        coEvery { freeUpVerifiedDao.upsert(any<FreeUpVerifiedEntity>()) } coAnswers {
+            persisted += firstArg<FreeUpVerifiedEntity>()
         }
-        coEvery { freeUpVerifiedDao.upsert(any<List<FreeUpVerifiedEntity>>()) } answers {
+        coEvery { freeUpVerifiedDao.upsert(any<List<FreeUpVerifiedEntity>>()) } coAnswers {
             persisted += firstArg<List<FreeUpVerifiedEntity>>()
         }
         coEvery { freeUpVerifiedDao.freshLocalUris(any(), any()) } answers {
@@ -100,7 +116,10 @@ class FreeUpSpaceVerifyTest {
             persisted.filter { it.userId == userId.id && it.verifiedAtMs >= since }.map { it.localUri }
         }
         coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } answers {
-            emptyList()
+            val since = secondArg<Long>()
+            persisted
+                .filter { it.userId == userId.id && it.verifiedAtMs >= since }
+                .map { entityFor(it) }
         }
     }
 
@@ -115,6 +134,7 @@ class FreeUpSpaceVerifyTest {
         val ready = useCase.readyToReclaim(userId)
 
         assertEquals(listOf(row.localUri), ready.map { it.localUri })
+        assertTrue("successful chunk must persist a verified row", persisted.isNotEmpty())
     }
 
     @Test
@@ -126,7 +146,6 @@ class FreeUpSpaceVerifyTest {
             cloudFileId = "cloud-1",
             verifiedAtMs = System.currentTimeMillis(),
         )
-        coEvery { freeUpVerifiedDao.freshLocalUris(userId.id, any()) } returns listOf(row.localUri)
 
         useCase.verifyForReclaim(userId, listOf(row))
 
@@ -146,6 +165,7 @@ class FreeUpSpaceVerifyTest {
         val ready = useCase.readyToReclaim(userId)
 
         assertTrue("failed chunk must not persist ready rows", ready.isEmpty())
+        assertTrue(persisted.isEmpty())
     }
 
     @Test
@@ -162,6 +182,7 @@ class FreeUpSpaceVerifyTest {
         }
 
         assertNotNull("offline must propagate for WorkManager retry", propagated)
+        assertTrue(persisted.isEmpty())
     }
 
     @Test
@@ -174,5 +195,6 @@ class FreeUpSpaceVerifyTest {
         val ready = useCase.readyToReclaim(userId)
 
         assertTrue(ready.isEmpty())
+        assertTrue(persisted.isEmpty())
     }
 }
