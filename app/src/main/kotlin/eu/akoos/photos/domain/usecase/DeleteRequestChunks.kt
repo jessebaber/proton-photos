@@ -34,14 +34,13 @@ const val DELETE_REQUEST_MAX_URIS = 2_000
  * Slice [uris] into batches of at most [max] for MediaStore delete/trash request builders.
  *
  * Pure and side-effect-free so the Binder / platform ceiling can be pinned by a plain JVM test.
- *
- * Phase 1 stub: returns the input as one chunk (no slicing) so acceptance tests stay red until
- * Phase 3 lands the real [chunked] implementation.
+ * An empty input yields no chunks; every non-empty input is covered exactly once in order.
  */
 fun deleteRequestChunks(
     uris: List<String>,
     max: Int = DELETE_REQUEST_MAX_URIS,
 ): List<List<String>> {
+    require(max > 0) { "max must be positive, was $max" }
     if (uris.isEmpty()) return emptyList()
-    return listOf(uris)
+    return uris.chunked(max)
 }
