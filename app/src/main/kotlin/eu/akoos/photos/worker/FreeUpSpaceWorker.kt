@@ -37,6 +37,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -58,6 +59,13 @@ class FreeUpSpaceWorker @AssistedInject constructor(
         // Skip reclaiming device space while the OS is throttling to cool the device; freeing space
         // is never urgent and the hourly cadence retries once the phone is cool.
         if (deviceHealth.thermallyThrottled()) return Result.success()
+        // cancel() stops both unique names, but a deferred oneshot can still fire after the user
+        // turns AUTO_FREE_UP off; re-check the setting here so that run is a no-op.
+        val autoFreeUp = context.settingsDataStore.data.first()[SettingsKeys.AUTO_FREE_UP] ?: false
+        if (shouldSkipWhenAutoFreeUpDisabled(autoFreeUp)) {
+            Log.d(TAG, "Skipping sweep: AUTO_FREE_UP is off")
+            return Result.success()
+        }
         val userId = accountManager.getPrimaryUserId().first() ?: return Result.failure()
         val intervalMs = inputData.getLong(KEY_INTERVAL_MS, NO_INTERVAL_MS)
         if (!isUsableInterval(intervalMs)) {
@@ -91,8 +99,16 @@ class FreeUpSpaceWorker @AssistedInject constructor(
                     }
                     Log.d(TAG, "Sweep queued ${result.localUris.size} photo(s) for batched consent dialog")
                 }
+                is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
+                    Log.w(TAG, "Sweep failed after reclaiming ${result.freed}: ${result.message}")
+                    return Result.failure()
+                }
             }
             Result.success()
+        } catch (e: CancellationException) {
+            // Cooperative cancel must not be classified as a permanent IllegalStateException
+            // failure — WorkManager treats a rethrown CancellationException as cancellation.
+            throw e
         } catch (e: Exception) {
             // Categorise failures so we only burn the retry budget on transient ones.
             // Permanent failures (file disappeared mid-sweep, MediaStore revoked write
@@ -101,20 +117,43 @@ class FreeUpSpaceWorker @AssistedInject constructor(
             // a permanent error just chews battery and timer slots for nothing.
             // Transient failures (IO error, database lock contention) get the existing
             // 3-attempt budget.
-            val isPermanent = e is SecurityException ||
-                e is IllegalStateException ||
-                e is java.io.FileNotFoundException
-            if (isPermanent || runAttemptCount >= 3) Result.failure() else Result.retry()
+            if (isPermanentSweepFailure(e) || runAttemptCount >= 3) Result.failure() else Result.retry()
         }
     }
 
     companion object {
         const val TAG = "free_up_worker"
-        private const val NAME_ONESHOT = "free_up_worker_oneshot"
+        const val NAME_ONESHOT = "free_up_worker_oneshot"
         const val KEY_INTERVAL_MS = "interval_ms"
 
         /** Read-back sentinel for input data that carries no [KEY_INTERVAL_MS] at all. */
         internal const val NO_INTERVAL_MS = -1L
+
+        /**
+         * Whether [doWork] should return success without sweeping when the AUTO_FREE_UP setting is
+         * off. Pure so the setting gate can be pinned by a plain JVM test.
+         */
+        fun shouldSkipWhenAutoFreeUpDisabled(enabled: Boolean): Boolean = !enabled
+
+        /**
+         * Unique work names [cancel] must stop. Turning AUTO_FREE_UP off used to leave the launch
+         * oneshot ([NAME_ONESHOT]) queued after only cancelling the periodic entry ([TAG]).
+         */
+        fun uniqueWorkNamesToCancel(): List<String> = listOf(TAG, NAME_ONESHOT)
+
+        /**
+         * Whether [error] is a permanent reclaim failure that should burn as [Result.failure]
+         * rather than [Result.retry]. Pure so the catch classification can be pinned by a JVM test.
+         *
+         * [CancellationException] is an [IllegalStateException], but cooperative cancel must not
+         * look permanent — callers rethrow it before consulting this classifier.
+         */
+        fun isPermanentSweepFailure(error: Throwable): Boolean {
+            if (error is CancellationException) return false
+            return error is SecurityException ||
+                error is IllegalStateException ||
+                error is java.io.FileNotFoundException
+        }
 
         /**
          * Whether [intervalMs] is an age the sweep may enforce: true only for a strictly positive
@@ -208,7 +247,9 @@ class FreeUpSpaceWorker @AssistedInject constructor(
         }
 
         fun cancel(workManager: WorkManager) {
-            workManager.cancelUniqueWork(TAG)
+            for (name in uniqueWorkNamesToCancel()) {
+                workManager.cancelUniqueWork(name)
+            }
         }
     }
 }
