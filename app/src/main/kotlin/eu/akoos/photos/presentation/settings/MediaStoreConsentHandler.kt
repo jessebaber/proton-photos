@@ -24,10 +24,8 @@ package eu.akoos.photos.presentation.settings
 
 import android.app.Activity
 import android.app.PendingIntent
-import android.content.ContentResolver
 import android.net.Uri
 import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -105,21 +103,16 @@ fun MediaStoreConsentHandler(
         lastPromptedSize = snapshot.size
         scope.launch {
             runCatching {
-                val pi = buildConsentRequest(context.contentResolver, uris, mode)
+                val resolver = context.contentResolver
+                val pi = when (mode) {
+                    MediaStoreConsentMode.Trash ->
+                        android.provider.MediaStore.createTrashRequest(resolver, uris, true)
+                    MediaStoreConsentMode.PermanentDelete ->
+                        android.provider.MediaStore.createDeleteRequest(resolver, uris)
+                }
                 launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
             }.onFailure { inFlight = false }
         }
     }
 }
 
-@RequiresApi(Build.VERSION_CODES.R)
-internal fun buildConsentRequest(
-    resolver: ContentResolver,
-    uris: List<Uri>,
-    mode: MediaStoreConsentMode,
-): PendingIntent = when (mode) {
-    MediaStoreConsentMode.Trash ->
-        android.provider.MediaStore.createTrashRequest(resolver, uris, true)
-    MediaStoreConsentMode.PermanentDelete ->
-        android.provider.MediaStore.createDeleteRequest(resolver, uris)
-}
