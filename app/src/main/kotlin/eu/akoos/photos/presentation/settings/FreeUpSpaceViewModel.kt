@@ -96,6 +96,12 @@ class FreeUpSpaceViewModel @Inject constructor(
                     reclaimableBytes = totalBytes(rows),
                 )
             }
+            // Scheduled verify parks rows in free_up_verified; start the permanent-delete finisher
+            // when the Free-up screen opens with a non-empty ready set.
+            if (ready.isNotEmpty() && !finishStartedForSuccess) {
+                finishStartedForSuccess = true
+                finishReclaim()
+            }
         }
     }
 
@@ -186,8 +192,9 @@ class FreeUpSpaceViewModel @Inject constructor(
                             readyCount = readyCount,
                         )
                     }
-                    // Auto-start reclaim when verify succeeds and the screen is open.
-                    if (succeeded && readyCount > 0 && !finishStartedForSuccess && !freeing) {
+                    // Auto-start reclaim when a ready set exists (manual SUCCEEDED or scheduled
+                    // verify) and the screen is open.
+                    if (readyCount > 0 && !finishStartedForSuccess && !freeing && !running) {
                         finishStartedForSuccess = true
                         finishReclaim()
                     }
