@@ -110,11 +110,40 @@ class FreeUpSpaceWorker @AssistedInject constructor(
 
     companion object {
         const val TAG = "free_up_worker"
-        private const val NAME_ONESHOT = "free_up_worker_oneshot"
+        const val NAME_ONESHOT = "free_up_worker_oneshot"
         const val KEY_INTERVAL_MS = "interval_ms"
 
         /** Read-back sentinel for input data that carries no [KEY_INTERVAL_MS] at all. */
         internal const val NO_INTERVAL_MS = -1L
+
+        /**
+         * Whether [doWork] should return success without sweeping when the AUTO_FREE_UP setting is
+         * off. Pure so the setting gate can be pinned by a plain JVM test.
+         *
+         * Phase 1 stub: always false so acceptance tests stay red until Phase 2 wires the real gate.
+         */
+        fun shouldSkipWhenAutoFreeUpDisabled(enabled: Boolean): Boolean = false
+
+        /**
+         * Unique work names [cancel] must stop. Turning AUTO_FREE_UP off used to leave the launch
+         * oneshot ([NAME_ONESHOT]) queued after only cancelling the periodic entry ([TAG]).
+         *
+         * Phase 1 stub: periodic only, so acceptance tests stay red until Phase 2.
+         */
+        fun uniqueWorkNamesToCancel(): List<String> = listOf(TAG)
+
+        /**
+         * Whether [error] is a permanent reclaim failure that should burn as [Result.failure]
+         * rather than [Result.retry]. Pure so the catch classification can be pinned by a JVM test.
+         *
+         * Phase 1 stub: matches today's catch block, which treats [CancellationException] as
+         * permanent because it is an [IllegalStateException] — acceptance tests stay red until
+         * Phase 2 excludes cancellation.
+         */
+        fun isPermanentSweepFailure(error: Throwable): Boolean =
+            error is SecurityException ||
+                error is IllegalStateException ||
+                error is java.io.FileNotFoundException
 
         /**
          * Whether [intervalMs] is an age the sweep may enforce: true only for a strictly positive
