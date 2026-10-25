@@ -107,6 +107,23 @@ class FreeUpSpaceUseCase @Inject constructor(
     }
 
     /**
+     * Chunked Drive verify that persists successes into `free_up_verified`. Stub until Phase 8 —
+     * contract tests stay red until the real implementation lands.
+     */
+    suspend fun verifyForReclaim(
+        userId: UserId,
+        candidates: List<SyncState>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ) {
+        error("verifyForReclaim not implemented")
+    }
+
+    /**
+     * SYNCED rows with a fresh matching `free_up_verified` marker. Stub until Phase 8.
+     */
+    suspend fun readyToReclaim(userId: UserId): List<SyncState> = emptyList()
+
+    /**
      * [protectDownloaded] keeps copies the user put on the device on purpose (a download, or a delete
      * they undid) out of the sweep. The automatic schedule passes true; the manual "free up space"
      * button leaves it false, so a deliberate tap still reclaims every backed-up copy as before.
