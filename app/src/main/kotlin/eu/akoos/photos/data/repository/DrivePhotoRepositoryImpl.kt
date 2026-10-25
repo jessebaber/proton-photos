@@ -104,6 +104,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
+    private val freeUpVerifiedDao: eu.akoos.photos.data.db.dao.FreeUpVerifiedDao,
     private val dayMetaDao: DayMetaDao,
     private val perceptualHashDao: PerceptualHashDao,
     private val offlineStore: OfflineStorageManager,
@@ -522,6 +523,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // The refresh sweep's candidate set names the same rows, so it goes with them.
         runCatching { listingSweepSnapshotDao.clearForUser(userId.id) }
         runCatching { syncStateDao.deleteAll(userId.id) }
+        // Free-up verified markers are account-scoped; wipe with the session so another account
+        // cannot reclaim URIs that were verified under a previous sign-in.
+        runCatching { freeUpVerifiedDao.deleteAllForUser(userId.id) }
         runCatching { dayMetaDao.deleteAll(userId.id) }
         // Drop the cached cloud album list so the next signed-in user doesn't see the previous
         // account's albums. Awaited now (the method is suspend) so the wipe completes before the
