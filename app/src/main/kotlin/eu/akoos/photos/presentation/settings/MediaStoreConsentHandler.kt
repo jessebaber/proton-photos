@@ -27,6 +27,7 @@ import android.app.PendingIntent
 import android.content.ContentResolver
 import android.net.Uri
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -111,6 +112,7 @@ fun MediaStoreConsentHandler(
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.R)
 internal fun buildConsentRequest(
     resolver: ContentResolver,
     uris: List<Uri>,
