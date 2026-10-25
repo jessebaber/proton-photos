@@ -99,6 +99,10 @@ class FreeUpSpaceWorker @AssistedInject constructor(
                     }
                     Log.d(TAG, "Sweep queued ${result.localUris.size} photo(s) for batched consent dialog")
                 }
+                is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
+                    Log.w(TAG, "Sweep failed after reclaiming ${result.freed}: ${result.message}")
+                    return Result.failure()
+                }
             }
             Result.success()
         } catch (e: CancellationException) {

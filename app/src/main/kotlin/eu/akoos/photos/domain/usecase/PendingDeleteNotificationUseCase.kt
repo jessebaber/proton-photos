@@ -70,30 +70,20 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         val pendingRaw = prefs[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
         if (pendingRaw.isEmpty()) return
 
-        // Probe each URI for a row and its trashed flag, and let
-        // [pendingDeleteEntryIsStale] rule on the pair. Stale entries get their
-        // SyncState collapsed to CLOUD_ONLY so the gallery stops painting them as
-        // locally present, and they're removed from the queue so the next
-        // createTrashRequest doesn't trip over them.
+        // Bulk-probe which queued URIs still exist (and whether they are trashed), then let
+        // [pendingDeleteEntryIsStale] rule on each. Stale entries get their SyncState collapsed to
+        // CLOUD_ONLY so the gallery stops painting them as locally present, and they're removed
+        // from the queue so the next createTrashRequest doesn't trip over them.
+        val presenceById = runCatching {
+            queryExistingMediaStoreRows(context.contentResolver, pendingRaw)
+        }.getOrDefault(emptyMap())
         val (aliveAll, stale) = pendingRaw.partition { uriStr ->
-            !runCatching {
-                val uri = Uri.parse(uriStr)
-                context.contentResolver.query(
-                    uri,
-                    arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.IS_TRASHED),
-                    null, null, null,
-                )?.use { c ->
-                    if (!c.moveToFirst()) {
-                        pendingDeleteEntryIsStale(rowExists = false, isTrashed = false)
-                    } else {
-                        val col = c.getColumnIndex(MediaStore.MediaColumns.IS_TRASHED)
-                        pendingDeleteEntryIsStale(
-                            rowExists = true,
-                            isTrashed = col >= 0 && c.getInt(col) != 0,
-                        )
-                    }
-                } ?: pendingDeleteEntryIsStale(rowExists = false, isTrashed = false)
-            }.getOrDefault(true)
+            val id = mediaStoreRowId(uriStr)
+            val presence = id?.let { presenceById[it] }
+            !pendingDeleteEntryIsStale(
+                rowExists = presence != null,
+                isTrashed = presence?.isTrashed == true,
+            )
         }
         // A queue that outgrows the cap is one the user keeps declining; drop the
         // longest-waiting entries so it can't grow without bound. Those files stay on
@@ -124,7 +114,9 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             nm.cancel(DELETE_NOTIFICATION_ID)
             return
         }
-        val uris = alive.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+        // createTrashRequest shares the same 2000-URI platform ceiling as createDeleteRequest.
+        val firstChunk = deleteRequestChunks(alive).firstOrNull().orEmpty()
+        val uris = firstChunk.mapNotNull { parseContentUriOrNull(it) }
         if (uris.isEmpty()) {
             nm.cancel(DELETE_NOTIFICATION_ID)
             return
