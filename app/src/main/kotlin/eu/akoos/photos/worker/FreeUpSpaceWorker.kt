@@ -24,7 +24,6 @@ package eu.akoos.photos.worker
 
 import android.content.Context
 import android.util.Log
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -44,8 +43,16 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.isOfflineError
+import eu.akoos.photos.util.isTransientApiError
 import java.util.concurrent.TimeUnit
 
+/**
+ * Scheduled / launch-oneshot free-up: chunked Drive [FreeUpSpaceUseCase.verifyForReclaim] with
+ * `protectDownloaded = true`, persisted into `free_up_verified`. Does **not** reclaim device copies
+ * and never writes [SettingsKeys.PENDING_DELETE_URIS] — permanent delete stays on the foreground
+ * finisher when the Free-up screen (or app) opens. [sweepConstraints] require [NetworkType.CONNECTED].
+ */
 @HiltWorker
 class FreeUpSpaceWorker @AssistedInject constructor(
     @Assisted private val context: Context,
@@ -74,49 +81,38 @@ class FreeUpSpaceWorker @AssistedInject constructor(
         }
         val nowMs = System.currentTimeMillis()
         val olderThanMs = nowMs - intervalMs
-        // The sweep deletes a device copy purely on the strength of sync_state calling the photo
-        // SYNCED, which is only worth acting on while reconcile has recently checked that against
-        // the cloud. Backup being off cancels the background sync that drives reconcile, so an
-        // unopened app can otherwise keep sweeping hourly against a frozen picture of Drive and
-        // reclaim the device copy of a photo that was deleted from Drive weeks ago.
+        // Coarse gate kept briefly after live verify became mandatory: skip when reconcile has not
+        // refreshed sync_state against Drive recently (e.g. backup off, app unopened for weeks).
         val verifiedAtMs = context.settingsDataStore.data.first()[SettingsKeys.cloudVerifiedAtKey(userId.id)]
         if (!isCloudStateFreshEnough(verifiedAtMs, nowMs)) {
             Log.w(TAG, "Skipping sweep: cloud state last verified at $verifiedAtMs, now $nowMs")
             return Result.success()
         }
         return try {
-            // The automatic sweep protects copies the user placed on the device (downloads, undone
+            // Automatic sweep protects copies the user placed on the device (downloads, undone
             // deletes); only the manual button reclaims those.
-            when (val result = freeUpSpace(userId, olderThanMs, protectDownloaded = true)) {
-                is FreeUpSpaceUseCase.FreeUpResult.Done ->
-                    Log.d(TAG, "Sweep reclaimed ${result.freed} photo(s)")
-                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                    // A worker has no Activity to drive the system delete dialog, so the URIs go on
-                    // the batched consent queue that the foreground handler drains.
-                    context.settingsDataStore.edit { p ->
-                        val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
-                        p[SettingsKeys.PENDING_DELETE_URIS] = existing + result.localUris
-                    }
-                    Log.d(TAG, "Sweep queued ${result.localUris.size} photo(s) for batched consent dialog")
-                }
-                is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
-                    Log.w(TAG, "Sweep failed after reclaiming ${result.freed}: ${result.message}")
-                    return Result.failure()
-                }
+            val candidates = freeUpSpace.candidates(userId, olderThanMs, protectDownloaded = true)
+            if (candidates.isEmpty()) {
+                Log.d(TAG, "Sweep: no eligible candidates")
+                return Result.success()
             }
+            val ran = freeUpSpace.tryVerifyForReclaim(userId, candidates)
+            if (!ran) {
+                Log.d(TAG, "Skipping sweep: verify mutex busy (manual free-up in progress)")
+                return Result.success()
+            }
+            val ready = freeUpSpace.readyToReclaim(userId).size
+            Log.d(TAG, "Sweep verified; $ready photo(s) ready for foreground permanent delete")
             Result.success()
         } catch (e: CancellationException) {
             // Cooperative cancel must not be classified as a permanent IllegalStateException
             // failure — WorkManager treats a rethrown CancellationException as cancellation.
             throw e
         } catch (e: Exception) {
-            // Categorise failures so we only burn the retry budget on transient ones.
-            // Permanent failures (file disappeared mid-sweep, MediaStore revoked write
-            // access for a foreign-owned URI, the SAF tree we picked got abandoned by
-            // the OS) won't fix themselves on the next attempt; three retries against
-            // a permanent error just chews battery and timer slots for nothing.
-            // Transient failures (IO error, database lock contention) get the existing
-            // 3-attempt budget.
+            // Offline / transient API → retry. Permanent reclaim-style failures still fail closed.
+            if (isTransientApiError(e) || isOfflineError(e)) {
+                return if (runAttemptCount >= 3) Result.failure() else Result.retry()
+            }
             if (isPermanentSweepFailure(e) || runAttemptCount >= 3) Result.failure() else Result.retry()
         }
     }
@@ -197,11 +193,11 @@ class FreeUpSpaceWorker @AssistedInject constructor(
          * The constraint set every scheduled sweep runs under. Pure and side-effect-free so it can
          * be pinned by a plain JVM test.
          *
-         * The reclaim is a local MediaStore delete driven by already-persisted sync state, so a
-         * network constraint would only stop the sweep running offline.
+         * Verify talks to Drive, so the sweep needs [NetworkType.CONNECTED]. Battery-not-low stays
+         * so hourly runs avoid low-power sessions.
          */
         fun sweepConstraints(): Constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
             .build()
 
@@ -229,9 +225,10 @@ class FreeUpSpaceWorker @AssistedInject constructor(
         /**
          * A one-shot sweep for app foreground. The periodic worker fires only hourly and an OEM doze
          * can delay it for hours, so a photo can sit past its age gate long after the app is opened.
-         * Running the same sweep on launch reclaims eligible copies right then. Same [intervalMs] age
-         * gate and [sweepConstraints]; its own unique name (so it never displaces the periodic entry)
-         * with `APPEND_OR_REPLACE` so repeated launches coalesce instead of stacking.
+         * Running the same verify on launch parks eligible copies for the foreground finisher. Same
+         * [intervalMs] age gate and [sweepConstraints]; its own unique name (so it never displaces
+         * the periodic entry) with `APPEND_OR_REPLACE` so repeated launches coalesce instead of
+         * stacking.
          */
         fun runNow(workManager: WorkManager, intervalMs: Long) {
             val request = OneTimeWorkRequestBuilder<FreeUpSpaceWorker>()

@@ -105,45 +105,69 @@ class FreeUpSpaceUseCase @Inject constructor(
         candidates: List<SyncState>,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ) = mutex.withLock {
-        withContext(Dispatchers.IO) {
-            val checkable = candidates.filter { !it.cloudFileId.isNullOrBlank() }
-            val total = checkable.size
-            if (total == 0) {
-                onProgress(0, 0)
-                return@withContext
-            }
-            val sinceMs = System.currentTimeMillis() - VERIFY_FRESHNESS_MS
-            val alreadyFresh = freeUpVerifiedDao.freshLocalUris(userId.id, sinceMs).toHashSet()
-            val pending = checkable.filter { it.localUri !in alreadyFresh }
-            var done = checkable.size - pending.size
-            onProgress(done, total)
-            if (pending.isEmpty()) return@withContext
+        verifyForReclaimLocked(userId, candidates, onProgress)
+    }
 
-            val volumeId = cloudRepo.getVolumeId(userId)
-            for (chunk in pending.chunked(VERIFY_CHUNK_SIZE)) {
-                val linkIds = chunk.mapNotNull { it.cloudFileId }.distinct()
-                val details = retryWithBackoff(
-                    shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
-                ) {
-                    linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
-                }
-                val now = System.currentTimeMillis()
-                val verifiedRows = chunk.mapNotNull { row ->
-                    val linkId = row.cloudFileId ?: return@mapNotNull null
-                    if (details[linkId]?.link?.state != ACTIVE_LINK_STATE) return@mapNotNull null
-                    FreeUpVerifiedEntity(
-                        userId = userId.id,
-                        localUri = row.localUri,
-                        cloudFileId = linkId,
-                        verifiedAtMs = now,
-                    )
-                }
-                if (verifiedRows.isNotEmpty()) {
-                    freeUpVerifiedDao.upsert(verifiedRows)
-                }
-                done += chunk.size
-                onProgress(done, total)
+    /**
+     * Scheduled-path entry: [tryLock] and skip when manual verify holds the mutex. Returns false when
+     * skipped so the worker can end success without dumping into the delete-after-backup URI queue.
+     */
+    suspend fun tryVerifyForReclaim(
+        userId: UserId,
+        candidates: List<SyncState>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Boolean {
+        if (!mutex.tryLock()) return false
+        try {
+            verifyForReclaimLocked(userId, candidates, onProgress)
+            return true
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    private suspend fun verifyForReclaimLocked(
+        userId: UserId,
+        candidates: List<SyncState>,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val checkable = candidates.filter { !it.cloudFileId.isNullOrBlank() }
+        val total = checkable.size
+        if (total == 0) {
+            onProgress(0, 0)
+            return@withContext
+        }
+        val sinceMs = System.currentTimeMillis() - VERIFY_FRESHNESS_MS
+        val alreadyFresh = freeUpVerifiedDao.freshLocalUris(userId.id, sinceMs).toHashSet()
+        val pending = checkable.filter { it.localUri !in alreadyFresh }
+        var done = checkable.size - pending.size
+        onProgress(done, total)
+        if (pending.isEmpty()) return@withContext
+
+        val volumeId = cloudRepo.getVolumeId(userId)
+        for (chunk in pending.chunked(VERIFY_CHUNK_SIZE)) {
+            val linkIds = chunk.mapNotNull { it.cloudFileId }.distinct()
+            val details = retryWithBackoff(
+                shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
+            ) {
+                linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
             }
+            val now = System.currentTimeMillis()
+            val verifiedRows = chunk.mapNotNull { row ->
+                val linkId = row.cloudFileId ?: return@mapNotNull null
+                if (details[linkId]?.link?.state != ACTIVE_LINK_STATE) return@mapNotNull null
+                FreeUpVerifiedEntity(
+                    userId = userId.id,
+                    localUri = row.localUri,
+                    cloudFileId = linkId,
+                    verifiedAtMs = now,
+                )
+            }
+            if (verifiedRows.isNotEmpty()) {
+                freeUpVerifiedDao.upsert(verifiedRows)
+            }
+            done += chunk.size
+            onProgress(done, total)
         }
     }
 
@@ -203,14 +227,16 @@ class FreeUpSpaceUseCase @Inject constructor(
 
     /**
      * [protectDownloaded] keeps copies the user put on the device on purpose (a download, or a delete
-     * they undid) out of the sweep. The automatic schedule passes true; the manual "free up space"
-     * button leaves it false, so a deliberate tap still reclaims every backed-up copy as before.
+     * they undid) out of the sweep. The automatic schedule passes true into [candidates] before
+     * [tryVerifyForReclaim]; the manual "free up space" button leaves it false, so a deliberate tap
+     * still reclaims every backed-up copy as before.
      *
      * [onProgress] is called with (done, total) as the sweep advances, so a caller can show movement
      * over a run that takes minutes on a large library. It is called from the IO context this runs on.
      *
-     * Selects the candidates and reclaims them in one call. Prefer [verifyForReclaim] + finisher for
-     * new paths; this remains for the scheduled worker until PR3.
+     * Selects the candidates and reclaims them in one call. Prefer [verifyForReclaim] /
+     * [tryVerifyForReclaim] + the foreground permanent-delete finisher — do not use this from the
+     * scheduled worker (it would bypass live Drive verify and tempt a `PENDING_DELETE_URIS` dump).
      */
     suspend operator fun invoke(
         userId: UserId,
