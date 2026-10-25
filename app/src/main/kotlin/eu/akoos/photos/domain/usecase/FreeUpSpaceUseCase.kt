@@ -51,6 +51,12 @@ class FreeUpSpaceUseCase @Inject constructor(
             val pendingIntent: PendingIntent,
             val localUris: List<String>,
         ) : FreeUpResult()
+        /**
+         * Consent-request construction failed after [freed] direct deletes already landed. Surfaced
+         * instead of silently reporting [Done] with a leftover NeedsPermission intent the user never
+         * sees.
+         */
+        data class Failed(val message: String, val freed: Int = 0) : FreeUpResult()
     }
 
     /**
@@ -166,12 +172,24 @@ class FreeUpSpaceUseCase @Inject constructor(
         }
 
         if (needsDialog.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Building the consent request can throw on some OEMs for a foreign or oversized batch;
-            // fall through to Done rather than letting it escape uncaught.
-            val pi = runCatching {
-                MediaStore.createDeleteRequest(context.contentResolver, needsDialog.map { it.second })
-            }.getOrNull()
-            if (pi != null) return@withContext FreeUpResult.NeedsPermission(pi, needsDialog.map { it.first })
+            // One stale URI makes createDeleteRequest throw for the whole batch — prune first via a
+            // chunked MediaStore _ID probe, then slice at the platform 2000-URI ceiling.
+            val candidateUris = needsDialog.map { it.first }
+            val existingIds = queryExistingMediaStoreRows(context.contentResolver, candidateUris).keys
+            val aliveUris = urisPresentInMediaStore(candidateUris, existingIds)
+            if (aliveUris.isEmpty()) return@withContext FreeUpResult.Done(freed)
+            val uriByString = needsDialog.associate { it.first to it.second }
+            val firstChunk = deleteRequestChunks(aliveUris).first()
+            val chunkContentUris = firstChunk.mapNotNull { uriByString[it] }
+            val built = runCatching {
+                MediaStore.createDeleteRequest(context.contentResolver, chunkContentUris)
+            }
+            val pi = built.getOrNull()
+            if (pi != null) {
+                return@withContext FreeUpResult.NeedsPermission(pi, firstChunk)
+            }
+            val cause = built.exceptionOrNull()?.message ?: "createDeleteRequest failed"
+            return@withContext FreeUpResult.Failed(cause, freed)
         }
 
         FreeUpResult.Done(freed)
