@@ -22,7 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.ContentResolver
 import android.content.Context
+import android.net.Uri
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
 import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
@@ -35,7 +37,10 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
 import org.junit.Assert.assertEquals
@@ -57,14 +62,15 @@ class FreeUpSpaceVerifyTest {
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var linkDetailHelpers: LinkDetailHelpers
     private lateinit var freeUpVerifiedDao: FreeUpVerifiedDao
+    private lateinit var syncStateRepo: SyncStateRepository
     private lateinit var useCase: FreeUpSpaceUseCase
 
     private val persisted = mutableListOf<FreeUpVerifiedEntity>()
 
-    private fun candidate(linkId: String?) = SyncState(
+    private fun candidate(linkId: String?, localHash: String = "hash-${linkId ?: "none"}") = SyncState(
         localUri = "content://media/external/images/media/${linkId ?: "none"}",
         cloudFileId = linkId,
-        localHash = "hash-${linkId ?: "none"}",
+        localHash = localHash,
         cloudHash = null,
         status = SyncStatus.SYNCED,
         lastSyncAttemptMs = 0L,
@@ -92,11 +98,16 @@ class FreeUpSpaceVerifyTest {
     @Before
     fun setUp() {
         persisted.clear()
+        mockkStatic(Uri::class)
+        every { Uri.parse(any()) } returns mockk(relaxed = true)
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
         freeUpVerifiedDao = mockk(relaxed = true)
+        syncStateRepo = mockk(relaxed = true)
+        val resolver = mockk<ContentResolver>(relaxed = true)
+        every { resolver.delete(any(), any(), any()) } returns 1
         val context = mockk<Context>(relaxed = true)
-        val syncStateRepo = mockk<SyncStateRepository>(relaxed = true)
+        every { context.contentResolver } returns resolver
         useCase = FreeUpSpaceUseCase(
             context,
             syncStateRepo,
@@ -293,4 +304,88 @@ class FreeUpSpaceVerifyTest {
             )
         }
     }
+
+    @Test
+    fun `cancel between verify chunks keeps the first chunk and skips the rest`() = runTest {
+        val rows = (1..51).map { candidate("cloud-$it") }
+        var fetches = 0
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            fetches++
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { linkAt(it, state = 1) }
+        }
+
+        try {
+            useCase.verifyForReclaim(userId, rows) { done, _ ->
+                if (done >= FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE) {
+                    throw CancellationException("cancel after first verify chunk")
+                }
+            }
+        } catch (_: CancellationException) {
+            // expected — cooperative cancel between Drive chunks
+        }
+
+        assertEquals(1, fetches)
+        assertEquals(FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE, persisted.size)
+        assertTrue(persisted.none { it.cloudFileId == "cloud-51" })
+    }
+
+    @Test
+    fun `runPipeline reports verifying then rechecking then deleting phases`() = runTest {
+        val rows = (1..3).map { candidate("cloud-$it") }
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns rows
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { linkAt(it, state = 1) }
+        }
+
+        val phases = mutableListOf<FreeUpSpaceUseCase.PipelinePhase>()
+        val result = useCase.runPipeline(userId, Long.MAX_VALUE) { progress ->
+            if (phases.lastOrNull() != progress.phase) phases += progress.phase
+        }
+
+        assertEquals(
+            listOf(
+                FreeUpSpaceUseCase.PipelinePhase.Verifying,
+                FreeUpSpaceUseCase.PipelinePhase.Rechecking,
+                FreeUpSpaceUseCase.PipelinePhase.Deleting,
+            ),
+            phases,
+        )
+        assertEquals(3, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+    }
+
+    @Test
+    fun `runPipeline automatic eligibility excludes empty-hash downloads from verify`() = runTest {
+        val uploaded = candidate("cloud-1", localHash = "hash-1")
+        val downloaded = candidate("cloud-2", localHash = "")
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns listOf(uploaded, downloaded)
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { linkAt(it, state = 1) }
+        }
+
+        useCase.runPipeline(userId, Long.MAX_VALUE, protectDownloaded = true)
+
+        assertEquals(listOf(uploaded.localUri), persisted.map { it.localUri })
+        coVerify {
+            syncStateRepo.updateStatusAndDeleteLocal(listOf(uploaded.localUri), SyncStatus.CLOUD_ONLY)
+        }
+        coVerify(exactly = 0) {
+            syncStateRepo.updateStatusAndDeleteLocal(
+                match<List<String>> { downloaded.localUri in it },
+                any(),
+            )
+        }
+    }
 }
+

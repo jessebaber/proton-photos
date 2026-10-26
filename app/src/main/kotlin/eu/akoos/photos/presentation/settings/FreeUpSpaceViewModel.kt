@@ -32,22 +32,22 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.worker.FreeUpPipelineWorker
 import eu.akoos.photos.worker.ManualFreeUpWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import javax.inject.Inject
 
 /**
- * Free up space screen: lists reclaimable candidates, enqueues [ManualFreeUpWorker] for background
- * Drive verify, observes WorkInfo + ready count, and runs the foreground finisher (live re-check
- * then permanent delete). Leaving the screen no longer cancels verify.
+ * Free up space screen: lists reclaimable candidates, enqueues/cancels [ManualFreeUpWorker]
+ * (shared [FreeUpPipelineWorker]), and observes WorkInfo phase/counts. Reclaim runs in the worker
+ * — this ViewModel does not own a foreground finish loop.
  */
 @HiltViewModel
 class FreeUpSpaceViewModel @Inject constructor(
@@ -79,9 +79,14 @@ class FreeUpSpaceViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    private var finishStartedForSuccess = false
-    private var finishJob: Job? = null
+    /** User-initiated stop; cleared by [start] / [continueWork]. Does not freeze WorkInfo counts. */
     private var stoppedLatch = false
+
+    /** Dedupes ready-set reloads against identical progress fingerprints. */
+    private var lastReadyReloadKey: String? = null
+
+    /** Tracks WorkInfo id+state so Done/Error messages fire once per terminal transition. */
+    private var lastTerminalWorkKey: String? = null
 
     init {
         load()
@@ -91,15 +96,16 @@ class FreeUpSpaceViewModel @Inject constructor(
 
     fun load() {
         viewModelScope.launch {
-            refreshFromStore(autoFinish = true)
+            refreshFromStore()
         }
     }
 
     /**
      * Refresh candidates / ready count from the store. While Rechecking or Freeing, preserves the
-     * live grid (candidates + reclaimableBytes) and only clears loading / updates readyCount.
+     * live grid (candidates + reclaimableBytes) and only clears loading / updates readyCount —
+     * coherent-grid load guard; mid-run bytes come from settle/prune, not MediaStore.
      */
-    private suspend fun refreshFromStore(autoFinish: Boolean) {
+    private suspend fun refreshFromStore() {
         val userId = accountManager.getPrimaryUserId().first() ?: run {
             _uiState.update { it.copy(loading = false, candidates = emptyList()) }
             return
@@ -118,24 +124,12 @@ class FreeUpSpaceViewModel @Inject constructor(
                 reclaimableBytes = if (liveGrid) it.reclaimableBytes else bytes,
             )
         }
-        // Scheduled verify parks rows in free_up_verified; start the permanent-delete finisher
-        // when the Free-up screen opens with a non-empty ready set.
-        val phase = _uiState.value.phase
-        if (
-            autoFinish &&
-            ready.isNotEmpty() &&
-            !finishStartedForSuccess &&
-            !stoppedLatch &&
-            phase != FreeUpSpacePhase.Checking &&
-            phase != FreeUpSpacePhase.Rechecking &&
-            phase != FreeUpSpacePhase.Freeing
-        ) {
-            finishStartedForSuccess = true
-            finishReclaim()
-        }
     }
 
-    /** Enqueue background verify for the listed candidates. */
+    /**
+     * Enqueue the manual pipeline. No-ops while Checking/Rechecking/Freeing, or while a consent
+     * chunk is already queued (avoid a second pipeline racing the MediaStore dialog).
+     */
     fun start() {
         if (_uiState.value.phase in setOf(
                 FreeUpSpacePhase.Checking,
@@ -143,66 +137,14 @@ class FreeUpSpaceViewModel @Inject constructor(
                 FreeUpSpacePhase.Freeing,
             )
         ) return
+        if (pendingDeleteBridge.uris.value.isNotEmpty()) return
         stoppedLatch = false
-        finishStartedForSuccess = false
+        lastReadyReloadKey = null
         _uiState.update {
             it.copy(
                 phase = FreeUpSpacePhase.Checking,
                 checked = 0,
                 checkTotal = 0,
-                message = null,
-            )
-        }
-        ManualFreeUpWorker.enqueue(context)
-    }
-
-    /** Continue a stopped operation without creating a second foreground finisher. */
-    fun continueWork() {
-        if (_uiState.value.phase != FreeUpSpacePhase.Stopped) return
-        stoppedLatch = false
-        finishStartedForSuccess = false
-        if (_uiState.value.readyCount > 0) {
-            finishReclaim()
-        } else {
-            start()
-        }
-    }
-
-    /**
-     * Stop either WorkManager verification or the foreground finisher. Foreground cancellation is
-     * cooperative: the use case completes the current item and leaves the remaining verified rows
-     * recoverable for Continue.
-     */
-    fun stop() {
-        when (_uiState.value.phase) {
-            FreeUpSpacePhase.Checking -> {
-                stoppedLatch = true
-                ManualFreeUpWorker.cancel(context)
-                _uiState.update { it.copy(phase = FreeUpSpacePhase.Stopped) }
-            }
-            FreeUpSpacePhase.Rechecking,
-            FreeUpSpacePhase.Freeing,
-            -> {
-                stoppedLatch = true
-                _uiState.update { it.copy(phase = FreeUpSpacePhase.Stopped) }
-                finishJob?.cancel()
-            }
-            else -> Unit
-        }
-        if (stoppedLatch) load()
-    }
-
-    /** Foreground finish: live Drive re-check then permanent delete. */
-    fun finishReclaim() {
-        if (_uiState.value.phase in setOf(
-                FreeUpSpacePhase.Rechecking,
-                FreeUpSpacePhase.Freeing,
-            )
-        ) return
-        finishStartedForSuccess = true
-        _uiState.update {
-            it.copy(
-                phase = FreeUpSpacePhase.Rechecking,
                 rechecked = 0,
                 recheckTotal = 0,
                 processed = 0,
@@ -211,86 +153,37 @@ class FreeUpSpaceViewModel @Inject constructor(
                 message = null,
             )
         }
-        val job = viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            try {
-                // Direct deletes free what this app owns; NeedsPermission URIs go to the
-                // permanent-delete handler (never trash / PENDING_DELETE_URIS). All-files
-                // access is optional and not required for free-up.
-                val result = freeUpSpace.finishReadyForReclaim(
-                    userId = userId,
-                    onRecheckStarted = { ready ->
-                        _uiState.update { current ->
-                            val known = current.candidates.associate { it.localUri to it.sizeBytes }
-                            val (settled, settleBytes) = settleFreeUpCandidates(ready, known)
-                            current.copy(candidates = settled, reclaimableBytes = settleBytes)
-                        }
-                    },
-                    onRecheckProgress = { done, total, newlyDropped ->
-                        _uiState.update {
-                            val stopped = it.phase == FreeUpSpacePhase.Stopped
-                            var next = it.copy(rechecked = done, recheckTotal = total)
-                            if (!stopped) {
-                                val (pruned, pruneBytes) = pruneFreeUpCandidates(
-                                    next.candidates,
-                                    next.reclaimableBytes,
-                                    newlyDropped,
-                                )
-                                next = next.copy(
-                                    candidates = pruned,
-                                    reclaimableBytes = pruneBytes,
-                                )
-                            }
-                            next
-                        }
-                    },
-                    onReclaimProgress = { processed, removed, total, newlyCompleted ->
-                        // Prune in the same update that sets Freeing (unless already Stopped).
-                        // Do not call load()/totalBytes() mid-run.
-                        _uiState.update {
-                            val stopped = it.phase == FreeUpSpacePhase.Stopped
-                            var next = it.copy(
-                                phase = if (stopped) {
-                                    FreeUpSpacePhase.Stopped
-                                } else {
-                                    FreeUpSpacePhase.Freeing
-                                },
-                                processed = processed,
-                                removed = removed,
-                                deletionTotal = total,
-                            )
-                            if (!stopped) {
-                                val (pruned, pruneBytes) = pruneFreeUpCandidates(
-                                    next.candidates,
-                                    next.reclaimableBytes,
-                                    newlyCompleted,
-                                )
-                                next = next.copy(
-                                    candidates = pruned,
-                                    reclaimableBytes = pruneBytes,
-                                )
-                            }
-                            next
-                        }
-                    },
-                )
-                handleReclaimResult(userId, result)
-            } catch (_: CancellationException) {
-                // stop() publishes Stopped before cancelling this job. Nothing is cleared here:
-                // completed local deletes remain completed and unprocessed verified rows remain
-                // eligible for the next Continue.
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        phase = FreeUpSpacePhase.Error,
-                        message = context.getString(R.string.settings_free_up_error, e.message ?: ""),
-                    )
-                }
+        ManualFreeUpWorker.enqueue(context)
+    }
+
+    /** Resume after Stopped (or Ready with residual markers and empty consent queue). */
+    fun continueWork() {
+        when (_uiState.value.phase) {
+            FreeUpSpacePhase.Stopped,
+            FreeUpSpacePhase.Ready,
+            -> {
+                if (pendingDeleteBridge.uris.value.isNotEmpty()) return
+                stoppedLatch = false
+                lastReadyReloadKey = null
+                ManualFreeUpWorker.enqueue(context)
             }
+            else -> Unit
         }
-        finishJob = job
-        job.invokeOnCompletion {
-            if (finishJob === job) finishJob = null
+    }
+
+    /** Cancel manual unique work only; remaining verified markers stay recoverable for Continue. */
+    fun stop() {
+        when (_uiState.value.phase) {
+            FreeUpSpacePhase.Checking,
+            FreeUpSpacePhase.Rechecking,
+            FreeUpSpacePhase.Freeing,
+            -> {
+                stoppedLatch = true
+                ManualFreeUpWorker.cancel(context)
+                _uiState.update { it.copy(phase = FreeUpSpacePhase.Stopped) }
+                load()
+            }
+            else -> Unit
         }
     }
 
@@ -302,27 +195,30 @@ class FreeUpSpaceViewModel @Inject constructor(
                 .getWorkInfosForUniqueWorkFlow(ManualFreeUpWorker.UNIQUE_NAME)
                 .collect { infos ->
                     val info = infos.firstOrNull()
-                    val running = info?.state == WorkInfo.State.RUNNING ||
-                        info?.state == WorkInfo.State.ENQUEUED ||
-                        info?.state == WorkInfo.State.BLOCKED
-                    val succeeded = info?.state == WorkInfo.State.SUCCEEDED
-                    val failed = info?.state == WorkInfo.State.FAILED
+                    val workState = info?.state
+                    val running = workState == WorkInfo.State.RUNNING ||
+                        workState == WorkInfo.State.ENQUEUED ||
+                        workState == WorkInfo.State.BLOCKED
+                    val succeeded = workState == WorkInfo.State.SUCCEEDED
+                    val failed = workState == WorkInfo.State.FAILED
+                    val cancelled = workState == WorkInfo.State.CANCELLED
+
                     val progress = info?.progress
                     val output = info?.outputData
-                    val checked = if (
-                        progress?.keyValueMap?.containsKey(ManualFreeUpWorker.KEY_DONE) == true
-                    ) {
-                        progress.getInt(ManualFreeUpWorker.KEY_DONE, 0)
-                    } else {
-                        output?.getInt(ManualFreeUpWorker.KEY_DONE, 0) ?: 0
-                    }
-                    val total = if (
-                        progress?.keyValueMap?.containsKey(ManualFreeUpWorker.KEY_TOTAL) == true
-                    ) {
-                        progress.getInt(ManualFreeUpWorker.KEY_TOTAL, 0)
-                    } else {
-                        output?.getInt(ManualFreeUpWorker.KEY_TOTAL, 0) ?: 0
-                    }
+                    val workerPhase = workString(progress, output, FreeUpPipelineWorker.KEY_PHASE)
+                    val processed = workInt(
+                        progress,
+                        output,
+                        FreeUpPipelineWorker.KEY_PROCESSED,
+                        fallbackKey = FreeUpPipelineWorker.KEY_DONE,
+                    )
+                    val total = workInt(progress, output, FreeUpPipelineWorker.KEY_TOTAL)
+                    val removed = workInt(progress, output, FreeUpPipelineWorker.KEY_REMOVED)
+                    val needsPermission = workInt(
+                        progress,
+                        output,
+                        FreeUpPipelineWorker.KEY_NEEDS_PERMISSION_COUNT,
+                    )
 
                     val userId = accountManager.getPrimaryUserId().first()
                     val readyCount = if (userId != null) {
@@ -330,49 +226,94 @@ class FreeUpSpaceViewModel @Inject constructor(
                     } else {
                         0
                     }
+
                     val current = _uiState.value
-                    val foreground = current.phase == FreeUpSpacePhase.Rechecking ||
-                        current.phase == FreeUpSpacePhase.Freeing ||
-                        current.phase == FreeUpSpacePhase.Stopped
-                    val doneMessage = current.message != null && current.phase == FreeUpSpacePhase.Done
+                    val terminalKey = info?.let { "${it.id}:$workState" }
+                    val isNewTerminal = terminalKey != null &&
+                        terminalKey != lastTerminalWorkKey &&
+                        (succeeded || failed)
+                    if (isNewTerminal) lastTerminalWorkKey = terminalKey
+
+                    val awaitingConsent = workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT ||
+                        needsPermission > 0
+                    val shouldPublishDone = isNewTerminal &&
+                        succeeded &&
+                        !awaitingConsent &&
+                        removed > 0
+                    val doneMessage = shouldPublishDone ||
+                        (current.message != null && current.phase == FreeUpSpacePhase.Done)
+
                     val phase = deriveFreeUpSpaceState(
                         workRunning = running,
                         workSucceeded = succeeded,
                         workFailed = failed,
                         readyCount = readyCount,
-                        freeing = current.phase == FreeUpSpacePhase.Freeing,
-                        doneMessage = doneMessage,
-                        rechecking = current.phase == FreeUpSpacePhase.Rechecking,
+                        doneMessage = doneMessage && !running,
+                        workerPhase = workerPhase,
                         stopped = stoppedLatch,
+                        workCancelled = cancelled,
                     )
-                    _uiState.update {
-                        it.copy(
-                            phase = if (foreground) current.phase else phase,
-                            checked = if (foreground) it.checked else checked,
-                            checkTotal = if (foreground) it.checkTotal else total,
+
+                    _uiState.update { state ->
+                        var next = state.copy(
+                            phase = phase,
                             readyCount = readyCount,
                         )
+                        when (workerPhase) {
+                            FreeUpPipelineWorker.PHASE_RECHECKING -> {
+                                next = next.copy(rechecked = processed, recheckTotal = total)
+                            }
+                            FreeUpPipelineWorker.PHASE_DELETING,
+                            FreeUpPipelineWorker.PHASE_AWAITING_CONSENT,
+                            -> {
+                                next = next.copy(
+                                    processed = processed,
+                                    removed = removed,
+                                    deletionTotal = total,
+                                )
+                            }
+                            else -> {
+                                // verifying / enqueued / unknown — drive the check progress bar
+                                if (running || succeeded || failed) {
+                                    next = next.copy(checked = processed, checkTotal = total)
+                                }
+                            }
+                        }
+                        when {
+                            shouldPublishDone -> next.copy(
+                                phase = FreeUpSpacePhase.Done,
+                                message = freedMessage(removed),
+                                readyCount = 0,
+                            )
+                            isNewTerminal && failed -> next.copy(
+                                phase = FreeUpSpacePhase.Error,
+                                message = context.getString(
+                                    R.string.settings_free_up_error,
+                                    "",
+                                ),
+                            )
+                            else -> next
+                        }
                     }
-                    // Auto-start reclaim when a ready set exists (manual SUCCEEDED or scheduled
-                    // verify) and the screen is open — only after the initial load has finished.
-                    if (readyCount > 0 &&
-                        !finishStartedForSuccess &&
-                        !stoppedLatch &&
-                        !foreground &&
-                        !running &&
-                        !current.loading
-                    ) {
-                        finishStartedForSuccess = true
-                        finishReclaim()
+
+                    if (userId != null && shouldReloadReadyGrid(running, succeeded, workerPhase)) {
+                        reloadReadyCandidates(
+                            userId = userId,
+                            reloadKey = "$workerPhase|$processed|$total|$removed",
+                        )
+                    }
+
+                    if (shouldPublishDone) {
+                        refreshFromStore()
                     }
                 }
         }
     }
 
     /**
-     * Reconcile typed MediaStore consent outcomes when not mid Checking/Rechecking/Freeing.
-     * Grant: prune settled URIs, refresh, Done/Idle or Ready with finish latch cleared.
-     * Deny: Stopped (or Idle), clear finish latch, refresh; do not auto-relaunch consent.
+     * Reconcile typed MediaStore consent outcomes when not mid pipeline run.
+     * Grant: prune settled URIs, refresh, Done/Idle or Ready.
+     * Deny: Stopped (or Idle), refresh; do not auto-relaunch consent.
      */
     private fun observeConsentSettlement() {
         viewModelScope.launch {
@@ -393,12 +334,9 @@ class FreeUpSpaceViewModel @Inject constructor(
                         )
                         it.copy(candidates = pruned, reclaimableBytes = pruneBytes)
                     }
-                    // Keep finishStartedForSuccess true through refresh so load does not auto-finish
-                    // before we decide Done vs Ready.
-                    refreshFromStore(autoFinish = false)
-                    finishStartedForSuccess = false
+                    refreshFromStore()
                     val readyCount = _uiState.value.readyCount
-                    if (readyCount == 0) {
+                    if (readyCount == 0 && pendingDeleteBridge.uris.value.isEmpty()) {
                         val freed = settlement.uris.size
                         _uiState.update {
                             it.copy(
@@ -414,7 +352,6 @@ class FreeUpSpaceViewModel @Inject constructor(
                         _uiState.update { it.copy(phase = FreeUpSpacePhase.Ready) }
                     }
                 } else {
-                    finishStartedForSuccess = false
                     val userId = accountManager.getPrimaryUserId().first()
                     val readyCount = if (userId != null) {
                         freeUpSpace.readyToReclaimCount(userId)
@@ -428,52 +365,47 @@ class FreeUpSpaceViewModel @Inject constructor(
                         stoppedLatch = false
                         _uiState.update { it.copy(phase = FreeUpSpacePhase.Idle) }
                     }
-                    refreshFromStore(autoFinish = false)
+                    refreshFromStore()
                 }
             }
         }
     }
 
-    private suspend fun handleReclaimResult(
-        userId: me.proton.core.domain.entity.UserId,
-        result: FreeUpSpaceUseCase.FreeUpResult,
-    ) {
-        when (result) {
-            is FreeUpSpaceUseCase.FreeUpResult.Done -> {
-                if (result.completedUris.isNotEmpty()) {
-                    freeUpSpace.clearVerified(userId, result.completedUris)
-                } else if (result.remainingUris.isEmpty()) {
-                    freeUpSpace.clearVerified(userId)
-                }
-                _uiState.update {
-                    it.copy(
-                        phase = FreeUpSpacePhase.Done,
-                        message = freedMessage(result.freed),
-                        readyCount = 0,
-                    )
-                }
-                load()
-            }
-            is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                if (result.completedUris.isNotEmpty()) {
-                    freeUpSpace.clearVerified(userId, result.completedUris)
-                }
-                pendingDeleteBridge.offer(result.localUris)
-                _uiState.update { it.copy(phase = FreeUpSpacePhase.Ready) }
-            }
-            is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
-                if (result.completedUris.isNotEmpty()) {
-                    freeUpSpace.clearVerified(userId, result.completedUris)
-                }
-                _uiState.update {
-                    it.copy(
-                        phase = FreeUpSpacePhase.Error,
-                        message = context.getString(R.string.settings_free_up_error, result.message),
-                    )
-                }
-                if (result.freed > 0) load()
-            }
+    /**
+     * Reload indexed remaining candidates from [FreeUpSpaceUseCase.readyToReclaim] and settle
+     * size-aware onto the live grid. Never calls MediaStore [totalBytes] mid-run.
+     */
+    private suspend fun reloadReadyCandidates(userId: UserId, reloadKey: String) {
+        if (reloadKey == lastReadyReloadKey) return
+        lastReadyReloadKey = reloadKey
+        val ready = freeUpSpace.readyToReclaim(userId)
+        _uiState.update { current ->
+            val known = current.candidates.associate { it.localUri to it.sizeBytes }
+            val (settled, settleBytes) = settleFreeUpCandidates(ready, known)
+            // Phase is owned by WorkInfo / stoppedLatch — only refresh the indexed grid here.
+            current.copy(
+                candidates = settled,
+                reclaimableBytes = settleBytes,
+                readyCount = ready.size,
+            )
         }
+    }
+
+    private fun shouldReloadReadyGrid(
+        running: Boolean,
+        succeeded: Boolean,
+        workerPhase: String?,
+    ): Boolean {
+        if (workerPhase == FreeUpPipelineWorker.PHASE_RECHECKING ||
+            workerPhase == FreeUpPipelineWorker.PHASE_DELETING ||
+            workerPhase == FreeUpPipelineWorker.PHASE_VERIFYING
+        ) {
+            return running
+        }
+        if (workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT) {
+            return running || succeeded
+        }
+        return false
     }
 
     private suspend fun totalBytes(rows: List<SyncState>): Long {
@@ -492,4 +424,30 @@ class FreeUpSpaceViewModel @Inject constructor(
         } else {
             context.getString(R.string.settings_free_up_none)
         }
+
+    private fun workString(
+        progress: androidx.work.Data?,
+        output: androidx.work.Data?,
+        key: String,
+    ): String? = when {
+        progress?.keyValueMap?.containsKey(key) == true -> progress.getString(key)
+        output?.keyValueMap?.containsKey(key) == true -> output.getString(key)
+        else -> null
+    }
+
+    private fun workInt(
+        progress: androidx.work.Data?,
+        output: androidx.work.Data?,
+        key: String,
+        fallbackKey: String? = null,
+        default: Int = 0,
+    ): Int = when {
+        progress?.keyValueMap?.containsKey(key) == true -> progress.getInt(key, default)
+        output?.keyValueMap?.containsKey(key) == true -> output.getInt(key, default)
+        fallbackKey != null && progress?.keyValueMap?.containsKey(fallbackKey) == true ->
+            progress.getInt(fallbackKey, default)
+        fallbackKey != null && output?.keyValueMap?.containsKey(fallbackKey) == true ->
+            output.getInt(fallbackKey, default)
+        else -> default
+    }
 }

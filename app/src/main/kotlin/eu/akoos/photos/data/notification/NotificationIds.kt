@@ -86,12 +86,18 @@ object NotificationIds {
      *  recognition and photo search share it, one download at a time). */
     const val MODEL_DOWNLOAD = 4256
 
-    /** Manual free-up Drive-verify worker's foreground progress notification. */
+    /** Manual free-up pipeline worker's foreground progress notification. */
     const val MANUAL_FREE_UP = 4257
 
-    /** Terminal "ready to free space" notice after background verify succeeds. Own id so WorkManager
-     *  teardown of [MANUAL_FREE_UP] does not dismiss it. */
+    /**
+     * Terminal "open Free up space" / awaiting-consent notice after the pipeline needs MediaStore
+     * permission. Own id so WorkManager teardown of [MANUAL_FREE_UP] / [AUTO_FREE_UP] does not
+     * dismiss it.
+     */
     const val MANUAL_FREE_UP_READY = 4258
+
+    /** Automatic free-up pipeline worker's foreground progress notification. */
+    const val AUTO_FREE_UP = 4259
 
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep

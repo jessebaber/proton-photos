@@ -22,231 +22,121 @@
 
 package eu.akoos.photos.worker
 
-import android.content.Context
-import android.util.Log
-import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.WorkerParameters
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.first
-import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
-import eu.akoos.photos.util.DeviceHealthPolicy
-import eu.akoos.photos.util.isOfflineError
-import eu.akoos.photos.util.isTransientApiError
-import java.util.concurrent.TimeUnit
 
 /**
- * Scheduled / launch-oneshot free-up: chunked Drive [FreeUpSpaceUseCase.verifyForReclaim] with
- * `protectDownloaded = true`, persisted into `free_up_verified`. Does **not** reclaim device copies
- * and never writes [SettingsKeys.PENDING_DELETE_URIS] — permanent delete stays on the foreground
- * finisher when the Free-up screen (or app) opens. [sweepConstraints] require [NetworkType.CONNECTED].
+ * Automatic Free-up scheduling: age / AUTO_FREE_UP / thermal / battery / network gates, then the
+ * shared [FreeUpPipelineWorker] for full verify → recheck → reclaim under distinct unique names.
+ *
+ * Cancel targets only the automatic unique names and does not touch the manual pipeline.
  */
-@HiltWorker
-class FreeUpSpaceWorker @AssistedInject constructor(
-    @Assisted private val context: Context,
-    @Assisted params: WorkerParameters,
-    private val freeUpSpace: FreeUpSpaceUseCase,
-    private val accountManager: AccountManager,
-    private val deviceHealth: DeviceHealthPolicy,
-) : CoroutineWorker(context, params) {
+object FreeUpSpaceWorker {
+    const val TAG = "free_up_worker"
+    const val NAME_ONESHOT = "free_up_worker_oneshot"
+    const val KEY_INTERVAL_MS = "interval_ms"
 
-    override suspend fun doWork(): Result {
-        // Skip reclaiming device space while the OS is throttling to cool the device; freeing space
-        // is never urgent and the hourly cadence retries once the phone is cool.
-        if (deviceHealth.thermallyThrottled()) return Result.success()
-        // cancel() stops both unique names, but a deferred oneshot can still fire after the user
-        // turns AUTO_FREE_UP off; re-check the setting here so that run is a no-op.
-        val autoFreeUp = context.settingsDataStore.data.first()[SettingsKeys.AUTO_FREE_UP] ?: false
-        if (shouldSkipWhenAutoFreeUpDisabled(autoFreeUp)) {
-            Log.d(TAG, "Skipping sweep: AUTO_FREE_UP is off")
-            return Result.success()
-        }
-        val userId = accountManager.getPrimaryUserId().first() ?: return Result.failure()
-        val intervalMs = inputData.getLong(KEY_INTERVAL_MS, NO_INTERVAL_MS)
-        if (!isUsableInterval(intervalMs)) {
-            Log.w(TAG, "Skipping sweep: request carries no usable interval ($intervalMs)")
-            return Result.failure()
-        }
-        val nowMs = System.currentTimeMillis()
-        val olderThanMs = nowMs - intervalMs
-        // Coarse gate kept briefly after live verify became mandatory: skip when reconcile has not
-        // refreshed sync_state against Drive recently (e.g. backup off, app unopened for weeks).
-        val verifiedAtMs = context.settingsDataStore.data.first()[SettingsKeys.cloudVerifiedAtKey(userId.id)]
-        if (!isCloudStateFreshEnough(verifiedAtMs, nowMs)) {
-            Log.w(TAG, "Skipping sweep: cloud state last verified at $verifiedAtMs, now $nowMs")
-            return Result.success()
-        }
-        return try {
-            // Automatic sweep protects copies the user placed on the device (downloads, undone
-            // deletes); only the manual button reclaims those.
-            val candidates = freeUpSpace.candidates(userId, olderThanMs, protectDownloaded = true)
-            if (candidates.isEmpty()) {
-                Log.d(TAG, "Sweep: no eligible candidates")
-                return Result.success()
-            }
-            val ran = freeUpSpace.tryVerifyForReclaim(userId, candidates)
-            if (!ran) {
-                Log.d(TAG, "Skipping sweep: verify mutex busy (manual free-up in progress)")
-                return Result.success()
-            }
-            val ready = freeUpSpace.readyToReclaim(userId).size
-            Log.d(TAG, "Sweep verified; $ready photo(s) ready for foreground permanent delete")
-            Result.success()
-        } catch (e: CancellationException) {
-            // Cooperative cancel must not be classified as a permanent IllegalStateException
-            // failure — WorkManager treats a rethrown CancellationException as cancellation.
-            throw e
-        } catch (e: Exception) {
-            // Offline / transient API → retry. Permanent reclaim-style failures still fail closed.
-            if (isTransientApiError(e) || isOfflineError(e)) {
-                return if (runAttemptCount >= 3) Result.failure() else Result.retry()
-            }
-            if (isPermanentSweepFailure(e) || runAttemptCount >= 3) Result.failure() else Result.retry()
-        }
+    /** Read-back sentinel for input data that carries no [KEY_INTERVAL_MS] at all. */
+    const val NO_INTERVAL_MS = -1L
+
+    /**
+     * Whether [doWork] should return success without sweeping when the AUTO_FREE_UP setting is
+     * off. Pure so the setting gate can be pinned by a plain JVM test.
+     */
+    fun shouldSkipWhenAutoFreeUpDisabled(enabled: Boolean): Boolean = !enabled
+
+    /**
+     * Unique work names [cancel] must stop. Turning AUTO_FREE_UP off used to leave the launch
+     * oneshot ([NAME_ONESHOT]) queued after only cancelling the periodic entry ([TAG]).
+     */
+    fun uniqueWorkNamesToCancel(): List<String> = listOf(TAG, NAME_ONESHOT)
+
+    /**
+     * Whether [error] is a permanent reclaim failure that should burn as failure rather than
+     * retry. Pure so the catch classification can be pinned by a JVM test.
+     *
+     * [CancellationException] is an [IllegalStateException], but cooperative cancel must not
+     * look permanent — callers rethrow it before consulting this classifier.
+     */
+    fun isPermanentSweepFailure(error: Throwable): Boolean {
+        if (error is CancellationException) return false
+        return error is SecurityException ||
+            error is IllegalStateException ||
+            error is java.io.FileNotFoundException
     }
 
-    companion object {
-        const val TAG = "free_up_worker"
-        const val NAME_ONESHOT = "free_up_worker_oneshot"
-        const val KEY_INTERVAL_MS = "interval_ms"
+    /**
+     * Whether [intervalMs] is an age the sweep may enforce: true only for a strictly positive
+     * value. Pure and side-effect-free so the interval gate can be pinned by a plain JVM test.
+     *
+     * An age of zero puts the cutoff at "now", which matches every backed-up photo, so a
+     * regression here reclaims the device copy of a whole library in one sweep. A request
+     * carrying no usable interval is refused rather than run against a guessed one: reclaiming
+     * a device copy is irreversible, so a sweep nobody asked for is worse than no sweep.
+     */
+    fun isUsableInterval(intervalMs: Long): Boolean = intervalMs > 0L
 
-        /** Read-back sentinel for input data that carries no [KEY_INTERVAL_MS] at all. */
-        internal const val NO_INTERVAL_MS = -1L
+    /**
+     * How recently reconcile must have checked sync_state against a fully-listed cloud library
+     * for the automatic sweep to delete anything on the strength of it.
+     *
+     * Seven days rather than something tighter because reconcile also runs on app launch, so
+     * anyone who opens the app even weekly stays inside the window and the feature keeps
+     * working. The case this shuts out is the app going untouched for far longer with backup
+     * off, which is exactly when sync_state stops being refreshed at all.
+     */
+    const val CLOUD_FRESHNESS_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
 
-        /**
-         * Whether [doWork] should return success without sweeping when the AUTO_FREE_UP setting is
-         * off. Pure so the setting gate can be pinned by a plain JVM test.
-         */
-        fun shouldSkipWhenAutoFreeUpDisabled(enabled: Boolean): Boolean = !enabled
+    /**
+     * Whether [verifiedAtMs] is recent enough to sweep against. Pure and side-effect-free so
+     * the freshness gate can be pinned by a plain JVM test.
+     *
+     * Every uncertain answer is false, because the cost is asymmetric: a blocked sweep only
+     * means storage is not reclaimed automatically and the manual button still works, while an
+     * unblocked one can delete a photo's last copy. So an absent timestamp (a fresh install, or
+     * an install predating it) does NOT pass, and neither does one in the future, which is what
+     * a clock moved backwards looks like and would otherwise read as infinitely fresh.
+     */
+    fun isCloudStateFreshEnough(verifiedAtMs: Long?, nowMs: Long): Boolean {
+        if (verifiedAtMs == null || verifiedAtMs <= 0L) return false
+        if (verifiedAtMs > nowMs) return false
+        return nowMs - verifiedAtMs < CLOUD_FRESHNESS_WINDOW_MS
+    }
 
-        /**
-         * Unique work names [cancel] must stop. Turning AUTO_FREE_UP off used to leave the launch
-         * oneshot ([NAME_ONESHOT]) queued after only cancelling the periodic entry ([TAG]).
-         */
-        fun uniqueWorkNamesToCancel(): List<String> = listOf(TAG, NAME_ONESHOT)
+    /**
+     * The constraint set every scheduled sweep runs under. Pure and side-effect-free so it can
+     * be pinned by a plain JVM test.
+     *
+     * Verify talks to Drive, so the sweep needs [NetworkType.CONNECTED]. Battery-not-low stays
+     * so hourly runs avoid low-power sessions.
+     */
+    fun sweepConstraints(): Constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .setRequiresBatteryNotLow(true)
+        .build()
 
-        /**
-         * Whether [error] is a permanent reclaim failure that should burn as [Result.failure]
-         * rather than [Result.retry]. Pure so the catch classification can be pinned by a JVM test.
-         *
-         * [CancellationException] is an [IllegalStateException], but cooperative cancel must not
-         * look permanent — callers rethrow it before consulting this classifier.
-         */
-        fun isPermanentSweepFailure(error: Throwable): Boolean {
-            if (error is CancellationException) return false
-            return error is SecurityException ||
-                error is IllegalStateException ||
-                error is java.io.FileNotFoundException
-        }
+    /**
+     * [intervalMs] is how long a photo must have been backed up before its device copy may be
+     * reclaimed, and has no default: every scheduled sweep states the age it enforces.
+     */
+    fun schedule(workManager: WorkManager, intervalMs: Long) {
+        FreeUpPipelineWorker.scheduleAutomatic(workManager, intervalMs)
+    }
 
-        /**
-         * Whether [intervalMs] is an age the sweep may enforce: true only for a strictly positive
-         * value. Pure and side-effect-free so the interval gate can be pinned by a plain JVM test.
-         *
-         * An age of zero puts the cutoff at "now", which matches every backed-up photo, so a
-         * regression here reclaims the device copy of a whole library in one sweep. A request
-         * carrying no usable interval is refused rather than run against a guessed one: reclaiming
-         * a device copy is irreversible, so a sweep nobody asked for is worse than no sweep.
-         */
-        fun isUsableInterval(intervalMs: Long): Boolean = intervalMs > 0L
+    /**
+     * A one-shot sweep for app foreground. The periodic worker fires only hourly and an OEM doze
+     * can delay it for hours, so a photo can sit past its age gate long after the app is opened.
+     * Running the same full pipeline on launch reclaims eligible copies. Same [intervalMs] age
+     * gate and [sweepConstraints]; its own unique name (so it never displaces the periodic entry)
+     * with `APPEND_OR_REPLACE` so repeated launches coalesce instead of stacking.
+     */
+    fun runNow(workManager: WorkManager, intervalMs: Long) {
+        FreeUpPipelineWorker.runAutomaticNow(workManager, intervalMs)
+    }
 
-        /**
-         * How recently reconcile must have checked sync_state against a fully-listed cloud library
-         * for the automatic sweep to delete anything on the strength of it.
-         *
-         * Seven days rather than something tighter because reconcile also runs on app launch, so
-         * anyone who opens the app even weekly stays inside the window and the feature keeps
-         * working. The case this shuts out is the app going untouched for far longer with backup
-         * off, which is exactly when sync_state stops being refreshed at all.
-         */
-        internal const val CLOUD_FRESHNESS_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
-
-        /**
-         * Whether [verifiedAtMs] is recent enough to sweep against. Pure and side-effect-free so
-         * the freshness gate can be pinned by a plain JVM test.
-         *
-         * Every uncertain answer is false, because the cost is asymmetric: a blocked sweep only
-         * means storage is not reclaimed automatically and the manual button still works, while an
-         * unblocked one can delete a photo's last copy. So an absent timestamp (a fresh install, or
-         * an install predating it) does NOT pass, and neither does one in the future, which is what
-         * a clock moved backwards looks like and would otherwise read as infinitely fresh.
-         */
-        fun isCloudStateFreshEnough(verifiedAtMs: Long?, nowMs: Long): Boolean {
-            if (verifiedAtMs == null || verifiedAtMs <= 0L) return false
-            if (verifiedAtMs > nowMs) return false
-            return nowMs - verifiedAtMs < CLOUD_FRESHNESS_WINDOW_MS
-        }
-
-        /**
-         * The constraint set every scheduled sweep runs under. Pure and side-effect-free so it can
-         * be pinned by a plain JVM test.
-         *
-         * Verify talks to Drive, so the sweep needs [NetworkType.CONNECTED]. Battery-not-low stays
-         * so hourly runs avoid low-power sessions.
-         */
-        fun sweepConstraints(): Constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .setRequiresBatteryNotLow(true)
-            .build()
-
-        /**
-         * [intervalMs] is how long a photo must have been backed up before its device copy may be
-         * reclaimed, and has no default: every scheduled sweep states the age it enforces.
-         */
-        fun schedule(workManager: WorkManager, intervalMs: Long) {
-            val request = PeriodicWorkRequestBuilder<FreeUpSpaceWorker>(1, TimeUnit.HOURS)
-                .setConstraints(sweepConstraints())
-                .setInputData(
-                    androidx.work.Data.Builder()
-                        .putLong(KEY_INTERVAL_MS, intervalMs)
-                        .build()
-                )
-                .addTag(TAG)
-                .build()
-            // UPDATE (not KEEP) is essential when the user changes the interval: with KEEP,
-            // WorkManager ignores the new input data because the unique-work entry already exists,
-            // so every later sweep keeps reclaiming on the old age. UPDATE replaces it while
-            // preserving the existing work ID and run history.
-            workManager.enqueueUniquePeriodicWork(TAG, ExistingPeriodicWorkPolicy.UPDATE, request)
-        }
-
-        /**
-         * A one-shot sweep for app foreground. The periodic worker fires only hourly and an OEM doze
-         * can delay it for hours, so a photo can sit past its age gate long after the app is opened.
-         * Running the same verify on launch parks eligible copies for the foreground finisher. Same
-         * [intervalMs] age gate and [sweepConstraints]; its own unique name (so it never displaces
-         * the periodic entry) with `APPEND_OR_REPLACE` so repeated launches coalesce instead of
-         * stacking.
-         */
-        fun runNow(workManager: WorkManager, intervalMs: Long) {
-            val request = OneTimeWorkRequestBuilder<FreeUpSpaceWorker>()
-                .setConstraints(sweepConstraints())
-                .setInputData(
-                    androidx.work.Data.Builder()
-                        .putLong(KEY_INTERVAL_MS, intervalMs)
-                        .build()
-                )
-                .addTag(TAG)
-                .build()
-            workManager.enqueueUniqueWork(NAME_ONESHOT, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
-        }
-
-        fun cancel(workManager: WorkManager) {
-            for (name in uniqueWorkNamesToCancel()) {
-                workManager.cancelUniqueWork(name)
-            }
-        }
+    fun cancel(workManager: WorkManager) {
+        FreeUpPipelineWorker.cancelAutomatic(workManager)
     }
 }
