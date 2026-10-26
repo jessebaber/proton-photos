@@ -91,7 +91,6 @@ fun FreeUpSpaceScreen(
     val colors = AppColors.current
     var showConfirm by remember { mutableStateOf(false) }
     val busy = state.phase == FreeUpSpacePhase.Checking ||
-        state.phase == FreeUpSpacePhase.Rechecking ||
         state.phase == FreeUpSpacePhase.Freeing
 
     state.message?.let { message ->
@@ -150,9 +149,8 @@ fun FreeUpSpaceScreen(
                             }
                             when (state.phase) {
                                 FreeUpSpacePhase.Checking -> {
-                                    Spacer(Modifier.height(14.dp))
-                                    Text(
-                                        if (state.checkTotal > 0) {
+                                    FreeUpProgressSection(
+                                        label = if (state.checkTotal > 0) {
                                             stringResource(
                                                 R.string.free_up_verify_progress,
                                                 state.checked,
@@ -161,96 +159,40 @@ fun FreeUpSpaceScreen(
                                         } else {
                                             stringResource(R.string.free_up_verifying)
                                         },
-                                        color = colors.fgDim,
-                                        fontSize = 12.5.sp,
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    if (state.checkTotal > 0) {
-                                        LinearProgressIndicator(
-                                            progress = {
-                                                state.checked.toFloat() / state.checkTotal
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = colors.accent,
-                                        )
-                                    } else {
-                                        LinearProgressIndicator(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = colors.accent,
-                                        )
-                                    }
-                                }
-                                FreeUpSpacePhase.Rechecking -> {
-                                    Spacer(Modifier.height(14.dp))
-                                    Text(
-                                        if (state.recheckTotal > 0) {
-                                            stringResource(
-                                                R.string.free_up_recheck_progress,
-                                                state.rechecked,
-                                                state.recheckTotal,
-                                            )
+                                        progress = if (state.checkTotal > 0) {
+                                            state.checked.toFloat() / state.checkTotal
                                         } else {
-                                            stringResource(R.string.free_up_rechecking)
+                                            null
                                         },
-                                        color = colors.fgDim,
-                                        fontSize = 12.5.sp,
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    if (state.recheckTotal > 0) {
-                                        LinearProgressIndicator(
-                                            progress = {
-                                                state.rechecked.toFloat() / state.recheckTotal
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = colors.accent,
-                                        )
-                                    } else {
-                                        LinearProgressIndicator(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = colors.accent,
-                                        )
-                                    }
-                                }
-                                FreeUpSpacePhase.Ready -> {
-                                    Spacer(Modifier.height(14.dp))
-                                    Text(
-                                        stringResource(
-                                            R.string.free_up_ready_notification_text,
-                                            state.readyCount,
-                                        ),
-                                        color = colors.fgDim,
-                                        fontSize = 12.5.sp,
                                     )
                                 }
                                 FreeUpSpacePhase.Freeing -> {
-                                    Spacer(Modifier.height(14.dp))
-                                    Text(
-                                        stringResource(
+                                    FreeUpProgressSection(
+                                        label = stringResource(
                                             R.string.free_up_progress,
                                             state.processed,
                                             state.deletionTotal,
                                             state.removed,
                                         ),
-                                        color = colors.fgDim,
-                                        fontSize = 12.5.sp,
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (state.deletionTotal > 0) {
-                                                state.processed.toFloat() / state.deletionTotal
-                                            } else {
-                                                0f
-                                            }
+                                        progress = if (state.deletionTotal > 0) {
+                                            state.processed.toFloat() / state.deletionTotal
+                                        } else {
+                                            0f
                                         },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = colors.accent,
                                     )
                                 }
                                 FreeUpSpacePhase.Stopped -> {
                                     Spacer(Modifier.height(14.dp))
                                     Text(
-                                        stringResource(R.string.free_up_stopped),
+                                        if (state.awaitingConsentCount > 0) {
+                                            pluralStringResource(
+                                                R.plurals.free_up_awaiting_consent_notification_text,
+                                                state.awaitingConsentCount,
+                                                state.awaitingConsentCount,
+                                            )
+                                        } else {
+                                            stringResource(R.string.free_up_stopped)
+                                        },
                                         color = colors.fgDim,
                                         fontSize = 12.5.sp,
                                     )
@@ -268,12 +210,9 @@ fun FreeUpSpaceScreen(
                                     .clickable {
                                         when (state.phase) {
                                             FreeUpSpacePhase.Checking,
-                                            FreeUpSpacePhase.Rechecking,
                                             FreeUpSpacePhase.Freeing,
                                             -> viewModel.stop()
-                                            FreeUpSpacePhase.Stopped,
-                                            FreeUpSpacePhase.Ready,
-                                            -> viewModel.continueWork()
+                                            FreeUpSpacePhase.Stopped -> viewModel.continueWork()
                                             else -> showConfirm = true
                                         }
                                     }
@@ -285,11 +224,8 @@ fun FreeUpSpaceScreen(
                                     stringResource(
                                         when (state.phase) {
                                             FreeUpSpacePhase.Checking -> R.string.free_up_stop_checking
-                                            FreeUpSpacePhase.Rechecking,
-                                            FreeUpSpacePhase.Freeing,
-                                            -> R.string.free_up_stop_freeing
+                                            FreeUpSpacePhase.Freeing -> R.string.free_up_stop_freeing
                                             FreeUpSpacePhase.Stopped -> R.string.free_up_continue
-                                            FreeUpSpacePhase.Ready -> R.string.free_up_ready_notification_title
                                             else -> R.string.settings_storage_free_up
                                         },
                                     ),
@@ -314,7 +250,7 @@ fun FreeUpSpaceScreen(
             items(state.candidates, key = { it.localUri }) { row ->
                 // Dead localUri (already pruned from MediaStore) leaves Coil with nothing to
                 // draw — track Error and show a muted broken-image glyph over cardBg so the
-                // tile is not an unexplained black square. Prune remains the real fix.
+                // tile is not an unexplained black square.
                 var decodeFailed by remember(row.localUri) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
@@ -366,6 +302,34 @@ fun FreeUpSpaceScreen(
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = { showConfirm = false; viewModel.start() },
             onDismiss = { showConfirm = false },
+        )
+    }
+}
+
+/** Shared Checking / Freeing progress: label + determinate or indeterminate bar. */
+@Composable
+private fun FreeUpProgressSection(
+    label: String,
+    progress: Float?,
+) {
+    val colors = AppColors.current
+    Spacer(Modifier.height(14.dp))
+    Text(
+        label,
+        color = colors.fgDim,
+        fontSize = 12.5.sp,
+    )
+    Spacer(Modifier.height(8.dp))
+    if (progress != null) {
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth(),
+            color = colors.accent,
+        )
+    } else {
+        LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = colors.accent,
         )
     }
 }

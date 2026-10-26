@@ -39,7 +39,6 @@ class FreeUpSpaceDeriveStateTest {
                 workRunning = true,
                 workSucceeded = false,
                 workFailed = false,
-                readyCount = 0,
                 doneMessage = false,
                 workerPhase = FreeUpPipelineWorker.PHASE_VERIFYING,
             ),
@@ -54,7 +53,6 @@ class FreeUpSpaceDeriveStateTest {
                 workRunning = true,
                 workSucceeded = false,
                 workFailed = false,
-                readyCount = 0,
                 doneMessage = false,
                 workerPhase = null,
             ),
@@ -62,44 +60,28 @@ class FreeUpSpaceDeriveStateTest {
     }
 
     @Test
-    fun `ready when verify succeeded with a non-empty ready set`() {
+    fun `awaiting_consent maps to stopped for continue CTA`() {
         assertEquals(
-            FreeUpSpacePhase.Ready,
+            FreeUpSpacePhase.Stopped,
             deriveFreeUpSpaceState(
                 workRunning = false,
                 workSucceeded = true,
                 workFailed = false,
-                readyCount = 3,
-                doneMessage = false,
-            ),
-        )
-    }
-
-    @Test
-    fun `ready from scheduled verify without manual work SUCCEEDED`() {
-        assertEquals(
-            FreeUpSpacePhase.Ready,
-            deriveFreeUpSpaceState(
-                workRunning = false,
-                workSucceeded = false,
-                workFailed = false,
-                readyCount = 2,
-                doneMessage = false,
-            ),
-        )
-    }
-
-    @Test
-    fun `ready from awaiting_consent worker output`() {
-        assertEquals(
-            FreeUpSpacePhase.Ready,
-            deriveFreeUpSpaceState(
-                workRunning = false,
-                workSucceeded = true,
-                workFailed = false,
-                readyCount = 0,
                 doneMessage = false,
                 workerPhase = FreeUpPipelineWorker.PHASE_AWAITING_CONSENT,
+            ),
+        )
+    }
+
+    @Test
+    fun `idle after success with no ready machinery`() {
+        assertEquals(
+            FreeUpSpacePhase.Idle,
+            deriveFreeUpSpaceState(
+                workRunning = false,
+                workSucceeded = true,
+                workFailed = false,
+                doneMessage = false,
             ),
         )
     }
@@ -112,7 +94,6 @@ class FreeUpSpaceDeriveStateTest {
                 workRunning = true,
                 workSucceeded = false,
                 workFailed = false,
-                readyCount = 3,
                 doneMessage = false,
                 workerPhase = FreeUpPipelineWorker.PHASE_DELETING,
             ),
@@ -120,14 +101,13 @@ class FreeUpSpaceDeriveStateTest {
     }
 
     @Test
-    fun `rechecking is distinct from local deletion`() {
+    fun `unused rechecking wire name still maps to checking while running`() {
         assertEquals(
-            FreeUpSpacePhase.Rechecking,
+            FreeUpSpacePhase.Checking,
             deriveFreeUpSpaceState(
                 workRunning = true,
                 workSucceeded = false,
                 workFailed = false,
-                readyCount = 3,
                 doneMessage = false,
                 workerPhase = FreeUpPipelineWorker.PHASE_RECHECKING,
             ),
@@ -142,7 +122,6 @@ class FreeUpSpaceDeriveStateTest {
                 workRunning = false,
                 workSucceeded = true,
                 workFailed = false,
-                readyCount = 2,
                 doneMessage = false,
                 stopped = true,
             ),
@@ -157,7 +136,6 @@ class FreeUpSpaceDeriveStateTest {
                 workRunning = false,
                 workSucceeded = true,
                 workFailed = false,
-                readyCount = 0,
                 doneMessage = true,
             ),
         )
@@ -171,21 +149,19 @@ class FreeUpSpaceDeriveStateTest {
                 workRunning = false,
                 workSucceeded = false,
                 workFailed = true,
-                readyCount = 0,
                 doneMessage = false,
             ),
         )
     }
 
     @Test
-    fun `cancelled with no ready set maps to stopped`() {
+    fun `cancelled maps to stopped`() {
         assertEquals(
             FreeUpSpacePhase.Stopped,
             deriveFreeUpSpaceState(
                 workRunning = false,
                 workSucceeded = false,
                 workFailed = false,
-                readyCount = 0,
                 doneMessage = false,
                 workCancelled = true,
             ),
