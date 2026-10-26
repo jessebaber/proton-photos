@@ -22,11 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
-import android.app.PendingIntent
 import android.content.Context
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
 import eu.akoos.photos.data.db.entity.FreeUpVerifiedEntity
@@ -50,10 +47,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Free-up candidates, chunked Drive verify into `free_up_verified`, and foreground reclaim.
+ * Free-up candidates, chunked Drive verify into `free_up_verified`, and reclaim.
  *
  * A [Mutex] serialises verify/reclaim so manual and scheduled paths cannot process the same rows
  * concurrently: manual waits; scheduled (PR3) uses [tryLock] and skips when busy.
+ *
+ * Prefer [runPipeline] for background-safe verify → live recheck → direct delete under one lock.
+ * [finishReadyForReclaim] remains the interim Activity-owned finish path until WorkManager owns
+ * reclaim progress.
  */
 @Singleton
 class FreeUpSpaceUseCase @Inject constructor(
@@ -65,22 +66,39 @@ class FreeUpSpaceUseCase @Inject constructor(
 ) {
     private val mutex = Mutex()
 
+    /** Progress phase for [runPipeline] (WorkInfo maps these to UI / notification copy). */
+    enum class PipelinePhase {
+        Verifying,
+        Rechecking,
+        Deleting,
+    }
+
+    /** Bounded progress for [runPipeline]: phase + counters only (never URI lists). */
+    data class PipelineProgress(
+        val phase: PipelinePhase,
+        val processed: Int,
+        val total: Int,
+        val removed: Int = 0,
+    )
+
     sealed class FreeUpResult {
         data class Done(
             val freed: Int,
             val remainingUris: List<String> = emptyList(),
             val completedUris: List<String> = emptyList(),
         ) : FreeUpResult()
-        /** Android 11+: system delete dialog must be shown for these URIs. */
+        /**
+         * Android 11+: surviving local URIs still need a system delete dialog. The use case returns
+         * **all** surviving URI strings; [MediaStore.createDeleteRequest] is owned by the consent
+         * handler, not this domain API.
+         */
         data class NeedsPermission(
-            val pendingIntent: PendingIntent,
             val localUris: List<String>,
             val completedUris: List<String> = emptyList(),
         ) : FreeUpResult()
         /**
-         * Consent-request construction failed after [freed] direct deletes already landed. Surfaced
-         * instead of silently reporting [Done] with a leftover NeedsPermission intent the user never
-         * sees.
+         * Reclaim failed after [freed] direct deletes already landed. Surfaced instead of silently
+         * reporting [Done] when the caller must show an error.
          */
         data class Failed(
             val message: String,
@@ -105,6 +123,73 @@ class FreeUpSpaceUseCase @Inject constructor(
     ): List<SyncState> = withContext(Dispatchers.IO) {
         syncStateRepo.getSyncedBefore(userId, olderThanMs)
             .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) }
+    }
+
+    /**
+     * Mutex-held verify → live recheck → direct reclaim scoped to [olderThanMs] /
+     * [protectDownloaded]. Automatic runs recompute eligibility on retry so they cannot consume
+     * unrelated manual verified markers. [onProgress] carries phase + counts only.
+     */
+    suspend fun runPipeline(
+        userId: UserId,
+        olderThanMs: Long,
+        protectDownloaded: Boolean = false,
+        onProgress: (PipelineProgress) -> Unit = {},
+    ): FreeUpResult = mutex.withLock {
+        runPipelineLocked(userId, olderThanMs, protectDownloaded, onProgress)
+    }
+
+    /**
+     * Scheduled-path entry: [tryLock] and skip when manual pipeline holds the mutex. Returns null
+     * when skipped so the automatic worker can end success without waiting on a foreground run.
+     */
+    suspend fun tryRunPipeline(
+        userId: UserId,
+        olderThanMs: Long,
+        protectDownloaded: Boolean = true,
+        onProgress: (PipelineProgress) -> Unit = {},
+    ): FreeUpResult? {
+        if (!mutex.tryLock()) return null
+        try {
+            return runPipelineLocked(userId, olderThanMs, protectDownloaded, onProgress)
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    private suspend fun runPipelineLocked(
+        userId: UserId,
+        olderThanMs: Long,
+        protectDownloaded: Boolean,
+        onProgress: (PipelineProgress) -> Unit,
+    ): FreeUpResult {
+        val eligible = candidates(userId, olderThanMs, protectDownloaded)
+        val eligibleUris = eligible.map { it.localUri }.toHashSet()
+        verifyForReclaimLocked(userId, eligible) { done, total ->
+            onProgress(PipelineProgress(PipelinePhase.Verifying, done, total))
+        }
+        val confirmed = confirmReadyForReclaimLocked(
+            userId = userId,
+            onRecheckStarted = {},
+            onRecheckProgress = { done, total, _ ->
+                onProgress(PipelineProgress(PipelinePhase.Rechecking, done, total))
+            },
+            eligibleUris = eligibleUris,
+        )
+        return if (confirmed.isEmpty()) {
+            FreeUpResult.Done(freed = 0)
+        } else {
+            reclaimCandidatesLocked(userId, confirmed) { processed, removed, total, _ ->
+                onProgress(
+                    PipelineProgress(
+                        phase = PipelinePhase.Deleting,
+                        processed = processed,
+                        total = total,
+                        removed = removed,
+                    ),
+                )
+            }
+        }
     }
 
     /**
@@ -240,7 +325,7 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [onReclaimProgress]'s [newlyCompleted] lists are **successful deletes only** (deltas since the
      * previous report); the same [PROGRESS_STEP] throttle still avoids per-photo UI churn.
      *
-     * These callbacks are the interim UI path until WorkManager owns reclaim progress. Public
+     * Interim UI path until WorkManager owns reclaim via [runPipeline]. Public
      * [confirmReadyForReclaim] / [reclaimCandidates] keep their `(done, total)` progress shapes.
      */
     suspend fun finishReadyForReclaim(
@@ -259,7 +344,7 @@ class FreeUpSpaceUseCase @Inject constructor(
         if (confirmed.isEmpty()) {
             FreeUpResult.Done(freed = 0)
         } else {
-            reclaimCandidatesLocked(confirmed, onReclaimProgress)
+            reclaimCandidatesLocked(userId, confirmed, onReclaimProgress)
         }
     }
 
@@ -267,8 +352,11 @@ class FreeUpSpaceUseCase @Inject constructor(
         userId: UserId,
         onRecheckStarted: (List<SyncState>) -> Unit,
         onRecheckProgress: (done: Int, total: Int, newlyDropped: List<String>) -> Unit,
+        eligibleUris: Set<String>? = null,
     ): List<SyncState> = withContext(Dispatchers.IO) {
-        val ready = readyToReclaim(userId)
+        val ready = readyToReclaim(userId).let { rows ->
+            if (eligibleUris == null) rows else rows.filter { it.localUri in eligibleUris }
+        }
         onRecheckStarted(ready)
         if (ready.isEmpty()) {
             onRecheckProgress(0, 0, emptyList())
@@ -320,9 +408,10 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [onProgress] is called with (done, total) as the sweep advances, so a caller can show movement
      * over a run that takes minutes on a large library. It is called from the IO context this runs on.
      *
-     * Selects the candidates and reclaims them in one call. Prefer [verifyForReclaim] /
-     * [tryVerifyForReclaim] + the foreground permanent-delete finisher — do not use this from the
-     * scheduled worker (it would bypass live Drive verify and tempt a `PENDING_DELETE_URIS` dump).
+     * Selects the candidates and reclaims them in one call. Prefer [runPipeline] (or
+     * [verifyForReclaim] / [tryVerifyForReclaim] + the foreground permanent-delete finisher) — do not
+     * use this from the scheduled worker (it would bypass live Drive verify and tempt a
+     * `PENDING_DELETE_URIS` dump).
      */
     suspend operator fun invoke(
         userId: UserId,
@@ -330,43 +419,58 @@ class FreeUpSpaceUseCase @Inject constructor(
         protectDownloaded: Boolean = false,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): FreeUpResult =
-        reclaimCandidates(candidates(userId, olderThanMs, protectDownloaded), onProgress)
+        reclaimCandidates(userId, candidates(userId, olderThanMs, protectDownloaded), onProgress)
 
     /**
-     * Deletes the device copy of each row in [candidates], in order, committing each on its own, and
-     * reports how many were freed (or the batched consent request for files this app does not own).
+     * Deletes the device copy of each row in [candidates], in order, committing status/markers in
+     * [PROGRESS_STEP] batches, and reports how many were freed (or the surviving permission URI list
+     * for files this app does not own).
      *
      * The body runs on [Dispatchers.IO] rather than the caller's context. `ContentResolver.delete` is
      * a blocking binder call and there is one per photo, so on a library of thousands the loop owns
      * whatever thread it is given for minutes.
      */
     suspend fun reclaimCandidates(
+        userId: UserId,
         candidates: List<SyncState>,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): FreeUpResult = mutex.withLock {
-        reclaimCandidatesLocked(candidates) { processed, _, total, _ ->
+        reclaimCandidatesLocked(userId, candidates) { processed, _, total, _ ->
             onProgress(processed, total)
         }
     }
 
     private suspend fun reclaimCandidatesLocked(
+        userId: UserId,
         candidates: List<SyncState>,
         onProgress: (processed: Int, removed: Int, total: Int, newlyCompleted: List<String>) -> Unit,
     ): FreeUpResult = withContext(Dispatchers.IO) {
         var freed = 0
-        val needsDialog = mutableListOf<Pair<String, Uri>>()  // localUri → contentUri
+        val needsDialog = mutableListOf<String>()
         val completedUris = mutableListOf<String>()
+        val pendingBatch = mutableListOf<String>()
         val pendingDelta = mutableListOf<String>()
         val total = candidates.size
         onProgress(0, 0, total, emptyList())
 
-        for ((index, state) in candidates.withIndex()) {
-            val contentUri = Uri.parse(state.localUri)
-            // A cancellation is acted on only between items. Once the provider call starts, finish
-            // the provider call and its matching sync-state update so a deleted device copy cannot
-            // remain marked SYNCED when the user taps Stop.
-            currentCoroutineContext().ensureActive()
-            val removed = withContext(NonCancellable) {
+        suspend fun flushPending() {
+            if (pendingBatch.isEmpty()) return
+            val batch = pendingBatch.toList()
+            withContext(NonCancellable) {
+                syncStateRepo.updateStatusAndDeleteLocal(batch, SyncStatus.CLOUD_ONLY)
+                clearVerified(userId, batch)
+            }
+            completedUris += batch
+            pendingBatch.clear()
+        }
+
+        try {
+            for ((index, state) in candidates.withIndex()) {
+                // Cooperative cancel only between items. Status/marker writes for an in-flight
+                // progress chunk are NonCancellable (see [flushPending]); a finally flush covers a
+                // cancel mid-chunk before the next progress report.
+                currentCoroutineContext().ensureActive()
+                val contentUri = Uri.parse(state.localUri)
                 val deleted = try {
                     context.contentResolver.delete(contentUri, null, null)
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -375,65 +479,48 @@ class FreeUpSpaceUseCase @Inject constructor(
                     0
                 }
                 if (deleted > 0) {
-                    syncStateRepo.updateStatusAndDeleteLocal(state.localUri, SyncStatus.CLOUD_ONLY)
-                    true
+                    freed++
+                    pendingBatch += state.localUri
+                    pendingDelta += state.localUri
                 } else {
-                    false
+                    // delete() returned 0: missing row or needs permission on API 30+.
+                    needsDialog += state.localUri
+                }
+                val processed = index + 1
+                if (processed % PROGRESS_STEP == 0 || processed == total) {
+                    flushPending()
+                    onProgress(processed, freed, total, pendingDelta.toList())
+                    pendingDelta.clear()
                 }
             }
-            if (removed) {
-                freed++
-                completedUris += state.localUri
-                pendingDelta += state.localUri
-            } else {
-                // delete() returned 0, likely needs permission on API 30+.
-                needsDialog += state.localUri to contentUri
-            }
-            // Each photo is committed on its own, so a run the user walks away from keeps everything
-            // it already reclaimed; the next open lists what is left and picks up from there.
-            val processed = index + 1
-            if (processed % PROGRESS_STEP == 0 || processed == total) {
-                // Deltas are successful deletes only since the previous report; throttle still
-                // avoids per-photo UI churn.
-                onProgress(processed, freed, total, pendingDelta.toList())
-                pendingDelta.clear()
-            }
+        } finally {
+            flushPending()
         }
 
-        if (needsDialog.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // One stale URI makes createDeleteRequest throw for the whole batch — prune first via a
-            // chunked MediaStore _ID probe, then slice at the platform 2000-URI ceiling.
-            val candidateUris = needsDialog.map { it.first }
-            val existingIds = queryExistingMediaStoreRows(context.contentResolver, candidateUris).keys
-            val aliveUris = urisPresentInMediaStore(candidateUris, existingIds)
-            if (aliveUris.isEmpty()) {
-                return@withContext FreeUpResult.Done(
-                    freed = freed,
-                    completedUris = completedUris + candidateUris,
-                )
+        if (needsDialog.isNotEmpty()) {
+            // Repair already-missing locals to CLOUD_ONLY; return all surviving permission URIs
+            // (consent handler owns createDeleteRequest — no PendingIntent here).
+            val existingIds = queryExistingMediaStoreRows(context.contentResolver, needsDialog).keys
+            val aliveUris = urisPresentInMediaStore(needsDialog, existingIds)
+            val missingUris = needsDialog.filter { it !in aliveUris.toSet() }
+            if (missingUris.isNotEmpty()) {
+                withContext(NonCancellable) {
+                    syncStateRepo.updateStatusAndDeleteLocal(missingUris, SyncStatus.CLOUD_ONLY)
+                    clearVerified(userId, missingUris)
+                }
+                freed += missingUris.size
+                completedUris += missingUris
             }
-            val uriByString = needsDialog.associate { it.first to it.second }
-            val firstChunk = deleteRequestChunks(aliveUris).first()
-            val chunkContentUris = firstChunk.mapNotNull { uriByString[it] }
-            currentCoroutineContext().ensureActive()
-            val built = runCatching {
-                MediaStore.createDeleteRequest(context.contentResolver, chunkContentUris)
-            }
-            val pi = built.getOrNull()
-            if (pi != null) {
+            if (aliveUris.isNotEmpty()) {
                 return@withContext FreeUpResult.NeedsPermission(
-                    pendingIntent = pi,
-                    localUris = firstChunk,
+                    localUris = aliveUris,
                     completedUris = completedUris,
                 )
             }
-            val cause = built.exceptionOrNull()?.message ?: "createDeleteRequest failed"
-            return@withContext FreeUpResult.Failed(cause, freed, completedUris)
         }
 
         FreeUpResult.Done(
             freed = freed,
-            remainingUris = needsDialog.map { it.first },
             completedUris = completedUris,
         )
     }
@@ -441,7 +528,7 @@ class FreeUpSpaceUseCase @Inject constructor(
     companion object {
         /** How many photos pass between progress reports. One report per photo would repaint the
          *  screen thousands of times for a number the user reads as it moves. */
-        private const val PROGRESS_STEP = 20
+        const val PROGRESS_STEP = 20
 
         /** Link.State the batch link-details endpoint returns for a link that exists and is not
          *  trashed. Any other value (or an absent link) means the cloud copy is not confirmed. */

@@ -41,6 +41,9 @@ data class FreeUpConsentSettlement(
 /**
  * In-memory permanent-delete URI queue for free-up reclaim. Hard-separated from
  * [eu.akoos.photos.data.preferences.SettingsKeys.PENDING_DELETE_URIS] (trash / delete-after-backup).
+ *
+ * Process death clears this queue: verified markers plus the ready / awaiting-consent notification
+ * reopen Free-up; the bridge is best-effort only while the process is alive.
  */
 @Singleton
 class FreeUpPendingDeleteBridge @Inject constructor() {
@@ -49,7 +52,9 @@ class FreeUpPendingDeleteBridge @Inject constructor() {
 
     private val _settled = MutableSharedFlow<FreeUpConsentSettlement>(
         replay = 0,
-        extraBufferCapacity = 1,
+        // Multi-chunk grants settle sequentially; keep a small buffer so a slow collector does not
+        // drop an intermediate chunk settlement.
+        extraBufferCapacity = 8,
     )
     val settled: SharedFlow<FreeUpConsentSettlement> = _settled.asSharedFlow()
 
@@ -66,6 +71,16 @@ class FreeUpPendingDeleteBridge @Inject constructor() {
         if (uris.isEmpty()) return
         _uris.update { it - uris }
         _settled.tryEmit(FreeUpConsentSettlement(uris = uris, granted = granted))
+    }
+
+    /**
+     * Settles every URI currently in the queue with [granted]. Used when the user denies a consent
+     * chunk so remaining offered URIs are not prompted again in this session.
+     */
+    fun settleAllPending(granted: Boolean) {
+        val snapshot = _uris.value
+        if (snapshot.isEmpty()) return
+        settle(snapshot, granted)
     }
 
     fun remove(uris: Set<String>) {

@@ -45,16 +45,27 @@ class ManualFreeUpWorkerTest {
     fun `manual free-up notification id is unique and outside the album range`() {
         assertTrue(NotificationIds.MANUAL_FREE_UP !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
         assertTrue(NotificationIds.MANUAL_FREE_UP_READY !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
+        assertTrue(NotificationIds.AUTO_FREE_UP !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
         assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.MANUAL_FREE_UP_READY)
+        assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.AUTO_FREE_UP)
         assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.DELETE_CONSENT)
         assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.METADATA_EDIT)
     }
 
     @Test
     fun `AUTO_FREE_UP and thermal gates do not appear on the manual companion surface`() {
-        // Manual free-up must not reuse FreeUpSpaceWorker's skip helpers: uniqueness of the worker
-        // class + CONNECTED-only constraints is the regression lock here.
+        // Manual free-up must not reuse FreeUpSpaceWorker's skip helpers: uniqueness of the
+        // unique name + CONNECTED-only constraints is the regression lock here.
         assertEquals("manual_free_up", ManualFreeUpWorker.UNIQUE_NAME)
         assertEquals("manual_free_up_worker", ManualFreeUpWorker.TAG)
+        assertEquals(FreeUpPipelineWorker.manualConstraints(), ManualFreeUpWorker.verifyConstraints())
+    }
+
+    @Test
+    fun `manual enqueue targets the shared pipeline with a distinct unique name`() {
+        assertTrue(
+            FreeUpPipelineWorker.runsFullReclaim(FreeUpPipelineWorker.TRIGGER_MANUAL),
+        )
+        assertNotEquals(ManualFreeUpWorker.UNIQUE_NAME, FreeUpSpaceWorker.TAG)
     }
 }

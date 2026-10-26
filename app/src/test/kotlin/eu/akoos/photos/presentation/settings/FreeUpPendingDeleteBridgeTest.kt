@@ -79,4 +79,38 @@ class FreeUpPendingDeleteBridgeTest {
         assertTrue(emissions.isEmpty())
         assertEquals(setOf("content://a"), bridge.uris.value)
     }
+
+    @Test
+    fun settleAllPending_denied_drains_queue_so_no_uris_remain_to_reoffer() = runTest {
+        val bridge = FreeUpPendingDeleteBridge()
+        bridge.offer(listOf("content://chunk1-a", "content://chunk1-b", "content://chunk2-a"))
+
+        val settlement = async(start = CoroutineStart.UNDISPATCHED) { bridge.settled.first() }
+        // Deny path: settle the entire queue, not only the dialog batch.
+        bridge.settleAllPending(granted = false)
+
+        assertEquals(
+            FreeUpConsentSettlement(
+                uris = setOf("content://chunk1-a", "content://chunk1-b", "content://chunk2-a"),
+                granted = false,
+            ),
+            settlement.await(),
+        )
+        assertTrue(bridge.uris.value.isEmpty())
+    }
+
+    @Test
+    fun grant_chunk_then_remaining_stay_pending_for_next_offer() = runTest {
+        val bridge = FreeUpPendingDeleteBridge()
+        bridge.offer(listOf("content://a", "content://b", "content://c"))
+
+        val settlement = async(start = CoroutineStart.UNDISPATCHED) { bridge.settled.first() }
+        bridge.settle(setOf("content://a", "content://b"), granted = true)
+
+        assertEquals(
+            FreeUpConsentSettlement(uris = setOf("content://a", "content://b"), granted = true),
+            settlement.await(),
+        )
+        assertEquals(setOf("content://c"), bridge.uris.value)
+    }
 }

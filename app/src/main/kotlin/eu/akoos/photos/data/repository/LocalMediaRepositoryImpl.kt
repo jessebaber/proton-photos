@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -137,7 +138,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = callbackFlow {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                trySend(Unit)
+                // Observer path is coalesced below — camera / free-up bursts must not each
+                // pay for a full MediaStore scan.
+                trySend(MediaRefreshTrigger.Observer)
                 // New camera photos otherwise sit until the next periodic SyncWorker fire
                 // (up to 15 minutes by default). Kicking here closes the gap to "a few
                 // seconds after the picture is saved", subject to the upload-pipeline's
@@ -153,13 +156,18 @@ class LocalMediaRepositoryImpl @Inject constructor(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
         )
 
-        trySend(Unit) // initial query
+        trySend(MediaRefreshTrigger.Immediate) // initial query — not subject to settle
 
         awaitClose {
             context.contentResolver.unregisterContentObserver(observer)
         }
     }.let { contentChanges ->
-        merge(contentChanges, refreshTrigger.asSharedFlow())
+        // Manual / permission refreshes stay Immediate; MediaStore onChange is Observer and
+        // waits for a quiet window so a burst collapses to one trailing queryAllMedia.
+        merge(
+            contentChanges,
+            refreshTrigger.asSharedFlow().map { MediaRefreshTrigger.Immediate },
+        ).coalesceMediaRefresh(MEDIA_REFRESH_SETTLE_MS)
             .let { allTriggers ->
                 flow {
                     allTriggers.collect {

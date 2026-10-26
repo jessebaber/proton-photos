@@ -28,6 +28,7 @@ import android.net.Uri
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
 import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
+import eu.akoos.photos.data.db.entity.FreeUpVerifiedEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
@@ -39,6 +40,8 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.slot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
 import org.junit.Assert.assertEquals
@@ -57,6 +60,9 @@ import org.junit.Test
  *
  * The progress contract is pinned here too, because a screen that reports a count the user watches
  * for minutes must not stall short of the total or run past it.
+ *
+ * [FreeUpSpaceUseCase.runPipeline] adds scoped automatic vs manual eligibility, missing-URI repair,
+ * URI-only [NeedsPermission], batched status/marker writes, and cancel-between-chunk behaviour.
  */
 class FreeUpSpaceProgressTest {
 
@@ -71,10 +77,10 @@ class FreeUpSpaceProgressTest {
     private lateinit var useCase: FreeUpSpaceUseCase
 
     /** Eligible by [FreeUpSpaceUseCase.isEligibleForReclamation]: SYNCED with a real stamp. */
-    private fun eligible(i: Int) = SyncState(
+    private fun eligible(i: Int, localHash: String = "hash-$i") = SyncState(
         localUri = "content://media/external/images/media/$i",
         cloudFileId = "cloud-$i",
-        localHash = "hash-$i",
+        localHash = localHash,
         cloudHash = null,
         status = SyncStatus.SYNCED,
         lastSyncAttemptMs = 0L,
@@ -112,10 +118,26 @@ class FreeUpSpaceProgressTest {
         }
     }
 
+    /** Stub MediaStore _ID probe so [uris] are treated as still present (permission path). */
+    private fun stubMediaStorePresent(uris: List<String>) {
+        val presence = uris.mapNotNull { uri ->
+            val id = mediaStoreRowId(uri) ?: return@mapNotNull null
+            id to MediaStoreRowPresence(id = id, isTrashed = false)
+        }.toMap()
+        every { queryExistingMediaStoreRows(any(), any()) } returns presence
+    }
+
+    /** Stub MediaStore _ID probe so no rows exist (missing-URI repair path). */
+    private fun stubMediaStoreMissing() {
+        every { queryExistingMediaStoreRows(any(), any()) } returns emptyMap()
+    }
+
     @Before
     fun setUp() {
         mockkStatic(Uri::class)
+        mockkStatic("eu.akoos.photos.domain.usecase.MediaStoreUriProbeKt")
         every { Uri.parse(any()) } returns mockk(relaxed = true)
+        every { queryExistingMediaStoreRows(any(), any()) } answers { callOriginal() }
         resolver = mockk(relaxed = true)
         context = mockk(relaxed = true)
         every { context.contentResolver } returns resolver
@@ -143,15 +165,12 @@ class FreeUpSpaceProgressTest {
 
         assertEquals(rows.map { it.localUri }, listed.map { it.localUri })
         assertEquals(rows.size, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
-        // Every listed photo, and nothing else, had its row moved off the device.
-        for (row in listed) {
-            coVerify(exactly = 1) {
-                repo.updateStatusAndDeleteLocal(row.localUri, SyncStatus.CLOUD_ONLY)
-            }
+        // Batched status write covers every listed photo, and nothing else.
+        val batchSlot = slot<List<String>>()
+        coVerify(exactly = 1) {
+            repo.updateStatusAndDeleteLocal(capture(batchSlot), SyncStatus.CLOUD_ONLY)
         }
-        coVerify(exactly = listed.size) {
-            repo.updateStatusAndDeleteLocal(any<String>(), any())
-        }
+        assertEquals(listed.map { it.localUri }.toSet(), batchSlot.captured.toSet())
     }
 
     @Test
@@ -174,21 +193,187 @@ class FreeUpSpaceProgressTest {
     }
 
     @Test
-    fun `a photo the system refuses is left for the consent dialog rather than counted as freed`() = runTest {
+    fun `a photo the system refuses stays NeedsPermission when the MediaStore row still exists`() =
+        runTest {
+            val rows = (1..3).map { eligible(it) }
+            coEvery { repo.getSyncedBefore(userId, any()) } returns rows
+            every { resolver.delete(any(), any(), any()) } returns 0
+            stubMediaStorePresent(rows.map { it.localUri })
+
+            val result = useCase(userId, Long.MAX_VALUE)
+
+            assertTrue(
+                "expected NeedsPermission, got $result",
+                result is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission,
+            )
+            val needs = result as FreeUpSpaceUseCase.FreeUpResult.NeedsPermission
+            assertEquals(rows.map { it.localUri }, needs.localUris)
+            assertTrue(needs.completedUris.isEmpty())
+            // Permission survivors must not be marked CLOUD_ONLY yet.
+            coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
+            coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<String>(), any()) }
+        }
+
+    @Test
+    fun `missing local URIs are repaired to CLOUD_ONLY without NeedsPermission`() = runTest {
         val rows = (1..3).map { eligible(it) }
         coEvery { repo.getSyncedBefore(userId, any()) } returns rows
-        // delete() answering 0 is how the platform reports "not yours to delete" on API 30+.
         every { resolver.delete(any(), any(), any()) } returns 0
+        stubMediaStoreMissing()
 
         val result = useCase(userId, Long.MAX_VALUE)
 
-        // Nothing was reclaimed, so no row may claim its device copy is gone.
-        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<String>(), any()) }
-        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
-        // On a JVM unit test Build.VERSION.SDK_INT reads 0, so the consent branch is skipped and the
-        // run reports Done with zero freed. The invariant that matters either way is that a refused
-        // photo is never counted.
-        if (result is FreeUpSpaceUseCase.FreeUpResult.Done) assertEquals(0, result.freed)
+        assertEquals(3, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(rows.map { it.localUri }, result.completedUris)
+        coVerify(exactly = 1) {
+            repo.updateStatusAndDeleteLocal(rows.map { it.localUri }, SyncStatus.CLOUD_ONLY)
+        }
+        coVerify {
+            freeUpVerifiedDao.deleteForUris(userId.id, rows.map { it.localUri })
+        }
+    }
+
+    @Test
+    fun `direct deletes batch status and clearVerified on the progress step cadence`() = runTest {
+        val rows = (1..45).map { eligible(it) }
+        stubFinishPath(rows)
+        every { resolver.delete(any(), any(), any()) } returns 1
+        val batches = mutableListOf<List<String>>()
+        coEvery { repo.updateStatusAndDeleteLocal(any<List<String>>(), any()) } coAnswers {
+            batches += firstArg<List<String>>()
+        }
+        val cleared = mutableListOf<List<String>>()
+        coEvery { freeUpVerifiedDao.deleteForUris(userId.id, any()) } coAnswers {
+            cleared += secondArg<List<String>>()
+        }
+
+        useCase.finishReadyForReclaim(userId = userId)
+
+        assertEquals(listOf(20, 20, 5), batches.map { it.size })
+        assertEquals(rows.map { it.localUri }, batches.flatten())
+        assertEquals(listOf(20, 20, 5), cleared.map { it.size })
+        assertEquals(rows.map { it.localUri }.toSet(), cleared.flatten().toSet())
+    }
+
+    @Test
+    fun `runPipeline automatic scope skips protected downloads while manual reclaims them`() =
+        runTest {
+            val uploaded = eligible(1, localHash = "hash-1")
+            val downloaded = eligible(2, localHash = "")
+            val rows = listOf(uploaded, downloaded)
+            coEvery { repo.getSyncedBefore(userId, any()) } returns rows
+            every { resolver.delete(any(), any(), any()) } returns 1
+            coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
+            coEvery {
+                linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+            } answers {
+                @Suppress("UNCHECKED_CAST")
+                val ids = args[2] as List<String>
+                ids.associateWith { linkAt(it) }
+            }
+            val verified = mutableListOf<FreeUpVerifiedEntity>()
+            coEvery { freeUpVerifiedDao.upsert(any<List<FreeUpVerifiedEntity>>()) } coAnswers {
+                verified += firstArg<List<FreeUpVerifiedEntity>>()
+            }
+            coEvery { freeUpVerifiedDao.freshLocalUris(any(), any()) } returns emptyList()
+            coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } answers {
+                verified.map { entityFor(eligible(it.localUri.substringAfterLast('/').toInt())) }
+            }
+
+            useCase.runPipeline(userId, Long.MAX_VALUE, protectDownloaded = true)
+
+            assertEquals(listOf(uploaded.localUri), verified.map { it.localUri })
+            coVerify {
+                repo.updateStatusAndDeleteLocal(listOf(uploaded.localUri), SyncStatus.CLOUD_ONLY)
+            }
+            coVerify(exactly = 0) {
+                repo.updateStatusAndDeleteLocal(
+                    match<List<String>> { downloaded.localUri in it },
+                    any(),
+                )
+            }
+
+            verified.clear()
+            useCase.runPipeline(userId, Long.MAX_VALUE, protectDownloaded = false)
+            assertEquals(
+                setOf(uploaded.localUri, downloaded.localUri),
+                verified.map { it.localUri }.toSet(),
+            )
+        }
+
+    @Test
+    fun `runPipeline intersects ready markers with recomputed eligibility so auto skips manual-only`() =
+        runTest {
+            val uploaded = eligible(1, localHash = "hash-1")
+            val downloaded = eligible(2, localHash = "")
+            coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(uploaded, downloaded)
+            every { resolver.delete(any(), any(), any()) } returns 1
+            coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
+            coEvery {
+                linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+            } answers {
+                @Suppress("UNCHECKED_CAST")
+                val ids = args[2] as List<String>
+                ids.associateWith { linkAt(it) }
+            }
+            // Manual previously verified both; automatic must not reclaim the protected download.
+            coEvery { freeUpVerifiedDao.freshLocalUris(any(), any()) } returns listOf(
+                uploaded.localUri,
+                downloaded.localUri,
+            )
+            coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } returns listOf(
+                entityFor(uploaded),
+                entityFor(downloaded),
+            )
+
+            useCase.runPipeline(userId, Long.MAX_VALUE, protectDownloaded = true)
+
+            coVerify {
+                repo.updateStatusAndDeleteLocal(listOf(uploaded.localUri), SyncStatus.CLOUD_ONLY)
+            }
+            coVerify(exactly = 0) {
+                repo.updateStatusAndDeleteLocal(
+                    match<List<String>> { downloaded.localUri in it },
+                    any(),
+                )
+            }
+            coVerify(exactly = 0) {
+                freeUpVerifiedDao.deleteForUris(
+                    userId.id,
+                    match { downloaded.localUri in it },
+                )
+            }
+        }
+
+    @Test
+    fun `cancel between reclaim progress steps flushes the batch and skips the rest`() = runTest {
+        val rows = (1..45).map { eligible(it) }
+        stubFinishPath(rows)
+        var deletes = 0
+        every { resolver.delete(any(), any(), any()) } answers {
+            deletes++
+            1
+        }
+        val batches = mutableListOf<List<String>>()
+        coEvery { repo.updateStatusAndDeleteLocal(any<List<String>>(), any()) } coAnswers {
+            batches += firstArg<List<String>>()
+        }
+
+        try {
+            useCase.finishReadyForReclaim(
+                userId = userId,
+                onReclaimProgress = { processed, _, _, _ ->
+                    if (processed >= FreeUpSpaceUseCase.PROGRESS_STEP) {
+                        throw CancellationException("cancel after first progress batch")
+                    }
+                },
+            )
+        } catch (_: CancellationException) {
+            // expected — cooperative cancel between progress chunks
+        }
+
+        assertEquals(FreeUpSpaceUseCase.PROGRESS_STEP, deletes)
+        assertEquals(listOf(FreeUpSpaceUseCase.PROGRESS_STEP), batches.map { it.size })
     }
 
     @Test
@@ -290,6 +475,8 @@ class FreeUpSpaceProgressTest {
             call++
             if (call % 2 == 1) 1 else 0
         }
+        val failUris = rows.filterIndexed { index, _ -> index % 2 == 1 }.map { it.localUri }
+        stubMediaStorePresent(failUris)
 
         val reports = mutableListOf<Triple<Int, Int, Int>>()
         val deltaUris = mutableListOf<String>()

@@ -1239,6 +1239,9 @@
     <string name="free_up_verify_channel_desc">Pokazuje postęp sprawdzania kopii w Drive przed zwolnieniem miejsca.</string>
     <string name="free_up_verify_notification_title">Sprawdzanie kopii w Drive…</string>
     <string name="free_up_verify_progress">Sprawdzono %1$d z %2$d</string>
+    <string name="free_up_delete_notification_title">Zwalnianie miejsca…</string>
+    <string name="free_up_awaiting_consent_notification_title">Do zwolnienia miejsca potrzebne jest uprawnienie</string>
+    <string name="free_up_awaiting_consent_notification_text">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</string>
     <string name="free_up_ready_notification_title">Gotowe do zwolnienia miejsca</string>
     <string name="free_up_ready_notification_text">Otwórz Zwolnij miejsce, aby dokończyć usuwanie %1$d kopii na urządzeniu.</string>
     <plurals name="free_up_summary">

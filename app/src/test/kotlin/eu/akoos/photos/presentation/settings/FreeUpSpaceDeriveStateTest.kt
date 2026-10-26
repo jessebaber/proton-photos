@@ -22,12 +22,12 @@
 
 package eu.akoos.photos.presentation.settings
 
+import eu.akoos.photos.worker.FreeUpPipelineWorker
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Pins Free-up screen phase transitions for the background-verify + foreground-finish flow.
- * Red until [deriveFreeUpSpaceState] implements the real reducer (Phase 10).
+ * Pins Free-up screen phase transitions for the observe-only WorkInfo pipeline flow.
  */
 class FreeUpSpaceDeriveStateTest {
 
@@ -40,8 +40,23 @@ class FreeUpSpaceDeriveStateTest {
                 workSucceeded = false,
                 workFailed = false,
                 readyCount = 0,
-                freeing = false,
                 doneMessage = false,
+                workerPhase = FreeUpPipelineWorker.PHASE_VERIFYING,
+            ),
+        )
+    }
+
+    @Test
+    fun `checking when enqueued with no phase yet`() {
+        assertEquals(
+            FreeUpSpacePhase.Checking,
+            deriveFreeUpSpaceState(
+                workRunning = true,
+                workSucceeded = false,
+                workFailed = false,
+                readyCount = 0,
+                doneMessage = false,
+                workerPhase = null,
             ),
         )
     }
@@ -55,7 +70,6 @@ class FreeUpSpaceDeriveStateTest {
                 workSucceeded = true,
                 workFailed = false,
                 readyCount = 3,
-                freeing = false,
                 doneMessage = false,
             ),
         )
@@ -70,23 +84,67 @@ class FreeUpSpaceDeriveStateTest {
                 workSucceeded = false,
                 workFailed = false,
                 readyCount = 2,
-                freeing = false,
                 doneMessage = false,
             ),
         )
     }
 
     @Test
-    fun `freeing while the foreground finisher runs`() {
+    fun `ready from awaiting_consent worker output`() {
         assertEquals(
-            FreeUpSpacePhase.Freeing,
+            FreeUpSpacePhase.Ready,
             deriveFreeUpSpaceState(
                 workRunning = false,
                 workSucceeded = true,
                 workFailed = false,
-                readyCount = 3,
-                freeing = true,
+                readyCount = 0,
                 doneMessage = false,
+                workerPhase = FreeUpPipelineWorker.PHASE_AWAITING_CONSENT,
+            ),
+        )
+    }
+
+    @Test
+    fun `freeing while worker phase is deleting`() {
+        assertEquals(
+            FreeUpSpacePhase.Freeing,
+            deriveFreeUpSpaceState(
+                workRunning = true,
+                workSucceeded = false,
+                workFailed = false,
+                readyCount = 3,
+                doneMessage = false,
+                workerPhase = FreeUpPipelineWorker.PHASE_DELETING,
+            ),
+        )
+    }
+
+    @Test
+    fun `rechecking is distinct from local deletion`() {
+        assertEquals(
+            FreeUpSpacePhase.Rechecking,
+            deriveFreeUpSpaceState(
+                workRunning = true,
+                workSucceeded = false,
+                workFailed = false,
+                readyCount = 3,
+                doneMessage = false,
+                workerPhase = FreeUpPipelineWorker.PHASE_RECHECKING,
+            ),
+        )
+    }
+
+    @Test
+    fun `stopped stays visible even when work info is terminal`() {
+        assertEquals(
+            FreeUpSpacePhase.Stopped,
+            deriveFreeUpSpaceState(
+                workRunning = false,
+                workSucceeded = true,
+                workFailed = false,
+                readyCount = 2,
+                doneMessage = false,
+                stopped = true,
             ),
         )
     }
@@ -100,7 +158,6 @@ class FreeUpSpaceDeriveStateTest {
                 workSucceeded = true,
                 workFailed = false,
                 readyCount = 0,
-                freeing = false,
                 doneMessage = true,
             ),
         )
@@ -115,8 +172,22 @@ class FreeUpSpaceDeriveStateTest {
                 workSucceeded = false,
                 workFailed = true,
                 readyCount = 0,
-                freeing = false,
                 doneMessage = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `cancelled with no ready set maps to stopped`() {
+        assertEquals(
+            FreeUpSpacePhase.Stopped,
+            deriveFreeUpSpaceState(
+                workRunning = false,
+                workSucceeded = false,
+                workFailed = false,
+                readyCount = 0,
+                doneMessage = false,
+                workCancelled = true,
             ),
         )
     }
