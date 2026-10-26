@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.mediastore.mediaStoreRowId
+import eu.akoos.photos.data.mediastore.urisPresentInMediaStore
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

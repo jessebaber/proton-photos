@@ -662,25 +662,13 @@ object Migrations {
         }
     }
 
-    /** v41 to v42: new `free_up_verified` table — Drive-verify markers for free-up, account-scoped
-     *  so a sign-out wipe cannot leave another user's URIs reclaimable. Additive and empty on
-     *  upgrade; the next verify pass fills it. Existing tables are untouched. */
+    /**
+     * v41 to v42: no-op. An earlier branch draft created `free_up_verified` here; single-pass
+     * free-up dropped that marker table before upstream ship. Version stays 42 so any local DB
+     * already at 42 does not need a downgrade; a leftover empty table (if present) is harmless.
+     */
     val MIGRATION_41_42 = object : Migration(41, 42) {
-        override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL(
-                "CREATE TABLE IF NOT EXISTS `free_up_verified` (`userId` TEXT NOT NULL, " +
-                    "`localUri` TEXT NOT NULL, `cloudFileId` TEXT NOT NULL, " +
-                    "`verifiedAtMs` INTEGER NOT NULL, PRIMARY KEY(`userId`, `localUri`))",
-            )
-            db.execSQL(
-                "CREATE INDEX IF NOT EXISTS `index_free_up_verified_userId` " +
-                    "ON `free_up_verified` (`userId`)",
-            )
-            db.execSQL(
-                "CREATE INDEX IF NOT EXISTS `index_free_up_verified_localUri` " +
-                    "ON `free_up_verified` (`localUri`)",
-            )
-        }
+        override fun migrate(db: SupportSQLiteDatabase) = Unit
     }
 
     val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42)
