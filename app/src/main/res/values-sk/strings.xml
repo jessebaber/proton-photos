@@ -1247,9 +1247,19 @@
     <string name="free_up_verify_progress">Skontrolovaných %1$d z %2$d</string>
     <string name="free_up_delete_notification_title">Uvoľňovanie miesta…</string>
     <string name="free_up_awaiting_consent_notification_title">Na uvoľnenie miesta je potrebné povolenie</string>
-    <string name="free_up_awaiting_consent_notification_text">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópií v zariadení.</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópie v zariadení.</item>
+        <item quantity="few">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópie v zariadení.</item>
+        <item quantity="many">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópie v zariadení.</item>
+        <item quantity="other">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópií v zariadení.</item>
+    </plurals>
     <string name="free_up_ready_notification_title">Pripravené na uvoľnenie miesta</string>
-    <string name="free_up_ready_notification_text">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópií v zariadení.</string>
+    <plurals name="free_up_ready_notification_text">
+        <item quantity="one">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópie v zariadení.</item>
+        <item quantity="few">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópie v zariadení.</item>
+        <item quantity="many">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópie v zariadení.</item>
+        <item quantity="other">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópií v zariadení.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d fotka, %2$s na uvoľnenie</item>
         <item quantity="few">%1$d fotky, %2$s na uvoľnenie</item>
@@ -1263,6 +1273,7 @@
         <item quantity="other">Zmazať kópie %1$d fotiek v zariadení a uvoľniť %2$s? Na Drive ostanú.</item>
     </plurals>
     <string name="settings_free_up_error">Nepodarilo sa uvoľniť miesto: %1$s</string>
+    <string name="free_up_skipped_pre_r">Niektoré kópie v zariadení vyžadujú na odstránenie Android 11 alebo novší a boli preskočené.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nahráva sa…</string>
     <string name="upload_status_encrypting">Šifruje sa…</string>

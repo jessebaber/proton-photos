@@ -1335,9 +1335,15 @@
     <string name="free_up_verify_progress">Controllate %1$d di %2$d</string>
     <string name="free_up_delete_notification_title">Liberazione dello spazio…</string>
     <string name="free_up_awaiting_consent_notification_title">Autorizzazione necessaria per liberare spazio</string>
-    <string name="free_up_awaiting_consent_notification_text">Apri Libera spazio per consentire la rimozione di %1$d copie sul dispositivo.</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Apri Libera spazio per consentire la rimozione di %1$d copia sul dispositivo.</item>
+        <item quantity="other">Apri Libera spazio per consentire la rimozione di %1$d copie sul dispositivo.</item>
+    </plurals>
     <string name="free_up_ready_notification_title">Pronto a liberare spazio</string>
-    <string name="free_up_ready_notification_text">Apri Libera spazio per finire di rimuovere %1$d copie sul dispositivo.</string>
+    <plurals name="free_up_ready_notification_text">
+        <item quantity="one">Apri Libera spazio per finire di rimuovere %1$d copia sul dispositivo.</item>
+        <item quantity="other">Apri Libera spazio per finire di rimuovere %1$d copie sul dispositivo.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d foto, %2$s da liberare</item>
         <item quantity="other">%1$d foto, %2$s da liberare</item>
@@ -1347,6 +1353,7 @@
         <item quantity="other">Eliminare la copia locale di %1$d foto e liberare %2$s? Restano su Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Impossibile liberare spazio: %1$s</string>
+    <string name="free_up_skipped_pre_r">Alcune copie sul dispositivo richiedono Android 11 o successivo per essere rimosse e sono state saltate.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Caricamento…</string>
