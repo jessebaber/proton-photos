@@ -28,8 +28,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Pins settle/prune helpers used by the Free-up grid during reclaim: confirm replaces the list;
- * progress deltas remove only named URIs; empty delta is a no-op; bytes never go negative.
+ * Pins settle/prune helpers used by the Free-up grid during reclaim: confirm replaces the list
+ * (merging known per-URI sizes); progress deltas remove only named URIs; empty delta is a no-op;
+ * bytes never go negative.
  */
 class FreeUpSpaceCandidateListTest {
 
@@ -51,6 +52,42 @@ class FreeUpSpaceCandidateListTest {
         val (candidates, bytes) = settleFreeUpCandidates(confirmed)
         assertEquals(confirmed, candidates)
         assertEquals(60L, bytes)
+    }
+
+    @Test
+    fun `settle merges known bytes when row sizeBytes is zero`() {
+        val confirmed = listOf(row(1, 0), row(2, 0), row(3, 5))
+        val known = mapOf(
+            row(1).localUri to 10L,
+            row(2).localUri to 20L,
+            row(3).localUri to 1L, // row wins via max(5, 1)
+        )
+        val (candidates, bytes) = settleFreeUpCandidates(confirmed, known)
+        assertEquals(listOf(row(1, 10), row(2, 20), row(3, 5)), candidates)
+        assertEquals(35L, bytes)
+    }
+
+    @Test
+    fun `sequential settle then drops matches final confirmed set`() {
+        val preview = listOf(row(1, 10), row(2, 20), row(3, 30), row(4, 40))
+        val ready = listOf(row(1, 0), row(2, 0), row(3, 0), row(4, 0))
+        val known = preview.associate { it.localUri to it.sizeBytes }
+        val (settled, settleBytes) = settleFreeUpCandidates(ready, known)
+        assertEquals(preview, settled)
+        assertEquals(100L, settleBytes)
+
+        val (afterFirst, bytesAfterFirst) = pruneFreeUpCandidates(
+            settled,
+            settleBytes,
+            completedUris = listOf(row(2).localUri),
+        )
+        val (afterSecond, bytesAfterSecond) = pruneFreeUpCandidates(
+            afterFirst,
+            bytesAfterFirst,
+            completedUris = listOf(row(4).localUri),
+        )
+        assertEquals(listOf(row(1, 10), row(3, 30)), afterSecond)
+        assertEquals(40L, bytesAfterSecond)
     }
 
     @Test

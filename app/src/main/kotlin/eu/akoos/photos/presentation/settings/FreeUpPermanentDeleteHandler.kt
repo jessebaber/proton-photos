@@ -58,7 +58,7 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
             if (!updated) return@launch
             val userId = accountManager.getPrimaryUserId().first()
             if (userId != null) freeUpSpace.clearVerified(userId, uris.toList())
-            bridge.remove(uris)
+            bridge.settle(uris, granted = true)
         }
     }
 
@@ -66,7 +66,7 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             if (userId != null) freeUpSpace.clearVerified(userId, uris.toList())
-            bridge.remove(uris)
+            bridge.settle(uris, granted = false)
         }
     }
 }
