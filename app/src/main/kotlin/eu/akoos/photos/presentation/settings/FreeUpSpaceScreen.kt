@@ -44,7 +44,10 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.ErrorPopup
@@ -256,6 +260,10 @@ fun FreeUpSpaceScreen(
             }
 
             items(state.candidates, key = { it.localUri }) { row ->
+                // Dead localUri (already pruned from MediaStore) leaves Coil with nothing to
+                // draw — track Error and show a muted broken-image glyph over cardBg so the
+                // tile is not an unexplained black square. Prune remains the real fix.
+                var decodeFailed by remember(row.localUri) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .aspectRatio(1f)
@@ -266,8 +274,25 @@ fun FreeUpSpaceScreen(
                         model = row.localUri,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        onState = { st ->
+                            when (st) {
+                                is AsyncImagePainter.State.Success -> decodeFailed = false
+                                is AsyncImagePainter.State.Error -> decodeFailed = true
+                                else -> Unit
+                            }
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
+                    if (decodeFailed) {
+                        Icon(
+                            Icons.Default.BrokenImage,
+                            contentDescription = null,
+                            tint = colors.fgDim.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(28.dp),
+                        )
+                    }
                     SyncedCloudBadge()
                 }
             }

@@ -86,39 +86,52 @@ class FreeUpSpaceViewModel @Inject constructor(
     init {
         load()
         observeWorker()
+        observeConsentSettlement()
     }
 
     fun load() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.update { it.copy(loading = false, candidates = emptyList()) }
-                return@launch
-            }
-            _uiState.update { it.copy(loading = true) }
-            val rows = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
-            val ready = freeUpSpace.readyToReclaim(userId)
-            _uiState.update {
-                it.copy(
-                    loading = false,
-                    candidates = rows,
-                    readyCount = ready.size,
-                    reclaimableBytes = totalBytes(rows),
-                )
-            }
-            // Scheduled verify parks rows in free_up_verified; start the permanent-delete finisher
-            // when the Free-up screen opens with a non-empty ready set.
-            val phase = _uiState.value.phase
-            if (
-                ready.isNotEmpty() &&
-                !finishStartedForSuccess &&
-                !stoppedLatch &&
-                phase != FreeUpSpacePhase.Checking &&
-                phase != FreeUpSpacePhase.Rechecking &&
-                phase != FreeUpSpacePhase.Freeing
-            ) {
-                finishStartedForSuccess = true
-                finishReclaim()
-            }
+            refreshFromStore(autoFinish = true)
+        }
+    }
+
+    /**
+     * Refresh candidates / ready count from the store. While Rechecking or Freeing, preserves the
+     * live grid (candidates + reclaimableBytes) and only clears loading / updates readyCount.
+     */
+    private suspend fun refreshFromStore(autoFinish: Boolean) {
+        val userId = accountManager.getPrimaryUserId().first() ?: run {
+            _uiState.update { it.copy(loading = false, candidates = emptyList()) }
+            return
+        }
+        _uiState.update { it.copy(loading = true) }
+        val rows = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
+        val ready = freeUpSpace.readyToReclaim(userId)
+        val bytes = totalBytes(rows)
+        _uiState.update {
+            val liveGrid = it.phase == FreeUpSpacePhase.Rechecking ||
+                it.phase == FreeUpSpacePhase.Freeing
+            it.copy(
+                loading = false,
+                candidates = if (liveGrid) it.candidates else rows,
+                readyCount = ready.size,
+                reclaimableBytes = if (liveGrid) it.reclaimableBytes else bytes,
+            )
+        }
+        // Scheduled verify parks rows in free_up_verified; start the permanent-delete finisher
+        // when the Free-up screen opens with a non-empty ready set.
+        val phase = _uiState.value.phase
+        if (
+            autoFinish &&
+            ready.isNotEmpty() &&
+            !finishStartedForSuccess &&
+            !stoppedLatch &&
+            phase != FreeUpSpacePhase.Checking &&
+            phase != FreeUpSpacePhase.Rechecking &&
+            phase != FreeUpSpacePhase.Freeing
+        ) {
+            finishStartedForSuccess = true
+            finishReclaim()
         }
     }
 
@@ -206,15 +219,29 @@ class FreeUpSpaceViewModel @Inject constructor(
                 // access is optional and not required for free-up.
                 val result = freeUpSpace.finishReadyForReclaim(
                     userId = userId,
-                    onRecheckProgress = { done, total ->
-                        _uiState.update {
-                            it.copy(rechecked = done, recheckTotal = total)
+                    onRecheckStarted = { ready ->
+                        _uiState.update { current ->
+                            val known = current.candidates.associate { it.localUri to it.sizeBytes }
+                            val (settled, settleBytes) = settleFreeUpCandidates(ready, known)
+                            current.copy(candidates = settled, reclaimableBytes = settleBytes)
                         }
                     },
-                    onConfirmed = { confirmed ->
-                        val (settled, bytes) = settleFreeUpCandidates(confirmed)
+                    onRecheckProgress = { done, total, newlyDropped ->
                         _uiState.update {
-                            it.copy(candidates = settled, reclaimableBytes = bytes)
+                            val stopped = it.phase == FreeUpSpacePhase.Stopped
+                            var next = it.copy(rechecked = done, recheckTotal = total)
+                            if (!stopped) {
+                                val (pruned, pruneBytes) = pruneFreeUpCandidates(
+                                    next.candidates,
+                                    next.reclaimableBytes,
+                                    newlyDropped,
+                                )
+                                next = next.copy(
+                                    candidates = pruned,
+                                    reclaimableBytes = pruneBytes,
+                                )
+                            }
+                            next
                         }
                     },
                     onReclaimProgress = { processed, removed, total, newlyCompleted ->
@@ -233,14 +260,14 @@ class FreeUpSpaceViewModel @Inject constructor(
                                 deletionTotal = total,
                             )
                             if (!stopped) {
-                                val (pruned, bytes) = pruneFreeUpCandidates(
+                                val (pruned, pruneBytes) = pruneFreeUpCandidates(
                                     next.candidates,
                                     next.reclaimableBytes,
                                     newlyCompleted,
                                 )
                                 next = next.copy(
                                     candidates = pruned,
-                                    reclaimableBytes = bytes,
+                                    reclaimableBytes = pruneBytes,
                                 )
                             }
                             next
@@ -327,17 +354,83 @@ class FreeUpSpaceViewModel @Inject constructor(
                         )
                     }
                     // Auto-start reclaim when a ready set exists (manual SUCCEEDED or scheduled
-                    // verify) and the screen is open.
+                    // verify) and the screen is open — only after the initial load has finished.
                     if (readyCount > 0 &&
                         !finishStartedForSuccess &&
                         !stoppedLatch &&
                         !foreground &&
-                        !running
+                        !running &&
+                        !current.loading
                     ) {
                         finishStartedForSuccess = true
                         finishReclaim()
                     }
                 }
+        }
+    }
+
+    /**
+     * Reconcile typed MediaStore consent outcomes when not mid Checking/Rechecking/Freeing.
+     * Grant: prune settled URIs, refresh, Done/Idle or Ready with finish latch cleared.
+     * Deny: Stopped (or Idle), clear finish latch, refresh; do not auto-relaunch consent.
+     */
+    private fun observeConsentSettlement() {
+        viewModelScope.launch {
+            pendingDeleteBridge.settled.collect { settlement ->
+                val phase = _uiState.value.phase
+                if (phase == FreeUpSpacePhase.Checking ||
+                    phase == FreeUpSpacePhase.Rechecking ||
+                    phase == FreeUpSpacePhase.Freeing
+                ) {
+                    return@collect
+                }
+                if (settlement.granted) {
+                    _uiState.update {
+                        val (pruned, pruneBytes) = pruneFreeUpCandidates(
+                            it.candidates,
+                            it.reclaimableBytes,
+                            settlement.uris.toList(),
+                        )
+                        it.copy(candidates = pruned, reclaimableBytes = pruneBytes)
+                    }
+                    // Keep finishStartedForSuccess true through refresh so load does not auto-finish
+                    // before we decide Done vs Ready.
+                    refreshFromStore(autoFinish = false)
+                    finishStartedForSuccess = false
+                    val readyCount = _uiState.value.readyCount
+                    if (readyCount == 0) {
+                        val freed = settlement.uris.size
+                        _uiState.update {
+                            it.copy(
+                                phase = if (freed > 0) {
+                                    FreeUpSpacePhase.Done
+                                } else {
+                                    FreeUpSpacePhase.Idle
+                                },
+                                message = if (freed > 0) freedMessage(freed) else null,
+                            )
+                        }
+                    } else {
+                        _uiState.update { it.copy(phase = FreeUpSpacePhase.Ready) }
+                    }
+                } else {
+                    finishStartedForSuccess = false
+                    val userId = accountManager.getPrimaryUserId().first()
+                    val readyCount = if (userId != null) {
+                        freeUpSpace.readyToReclaimCount(userId)
+                    } else {
+                        0
+                    }
+                    if (readyCount > 0) {
+                        stoppedLatch = true
+                        _uiState.update { it.copy(phase = FreeUpSpacePhase.Stopped) }
+                    } else {
+                        stoppedLatch = false
+                        _uiState.update { it.copy(phase = FreeUpSpacePhase.Idle) }
+                    }
+                    refreshFromStore(autoFinish = false)
+                }
+            }
         }
     }
 
