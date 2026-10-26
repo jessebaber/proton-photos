@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -31,6 +32,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
+import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.worker.FreeUpPipelineWorker
 import eu.akoos.photos.worker.ManualFreeUpWorker
@@ -41,7 +44,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import me.proton.core.domain.entity.UserId
 import javax.inject.Inject
 
 /**
@@ -55,7 +57,7 @@ class FreeUpSpaceViewModel @Inject constructor(
     private val freeUpSpace: FreeUpSpaceUseCase,
     private val localRepo: eu.akoos.photos.domain.repository.LocalMediaRepository,
     private val accountManager: AccountManager,
-    private val pendingDeleteBridge: FreeUpPendingDeleteBridge,
+    private val pendingDeleteBridge: FreeUpPendingDeleteQueue,
 ) : ViewModel() {
 
     data class UiState(
@@ -64,16 +66,15 @@ class FreeUpSpaceViewModel @Inject constructor(
         val phase: FreeUpSpacePhase = FreeUpSpacePhase.Idle,
         val checked: Int = 0,
         val checkTotal: Int = 0,
-        val rechecked: Int = 0,
-        val recheckTotal: Int = 0,
         val processed: Int = 0,
         val removed: Int = 0,
         val deletionTotal: Int = 0,
-        val readyCount: Int = 0,
+        /** Non-zero when WorkInfo reports awaiting_consent; drives awaiting-consent copy. */
+        val awaitingConsentCount: Int = 0,
         val message: String? = null,
         val reclaimableBytes: Long = 0L,
     ) {
-        val isEmpty: Boolean get() = !loading && candidates.isEmpty() && readyCount == 0
+        val isEmpty: Boolean get() = !loading && candidates.isEmpty()
     }
 
     private val _uiState = MutableStateFlow(UiState())
@@ -81,9 +82,6 @@ class FreeUpSpaceViewModel @Inject constructor(
 
     /** User-initiated stop; cleared by [start] / [continueWork]. Does not freeze WorkInfo counts. */
     private var stoppedLatch = false
-
-    /** Dedupes ready-set reloads against identical progress fingerprints. */
-    private var lastReadyReloadKey: String? = null
 
     /** Tracks WorkInfo id+state so Done/Error messages fire once per terminal transition. */
     private var lastTerminalWorkKey: String? = null
@@ -101,9 +99,8 @@ class FreeUpSpaceViewModel @Inject constructor(
     }
 
     /**
-     * Refresh candidates / ready count from the store. While Rechecking or Freeing, preserves the
-     * live grid (candidates + reclaimableBytes) and only clears loading / updates readyCount —
-     * coherent-grid load guard; mid-run bytes come from settle/prune, not MediaStore.
+     * Refresh candidates from the store. While Checking or Freeing, preserves the live grid
+     * (candidates + reclaimableBytes) so an empty mid-run query cannot flash "nothing to free".
      */
     private suspend fun refreshFromStore() {
         val userId = accountManager.getPrimaryUserId().first() ?: run {
@@ -112,70 +109,61 @@ class FreeUpSpaceViewModel @Inject constructor(
         }
         _uiState.update { it.copy(loading = true) }
         val rows = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
-        val ready = freeUpSpace.readyToReclaim(userId)
         val bytes = totalBytes(rows)
         _uiState.update {
-            val liveGrid = it.phase == FreeUpSpacePhase.Rechecking ||
+            val liveGrid = it.phase == FreeUpSpacePhase.Checking ||
                 it.phase == FreeUpSpacePhase.Freeing
             it.copy(
                 loading = false,
                 candidates = if (liveGrid) it.candidates else rows,
-                readyCount = ready.size,
                 reclaimableBytes = if (liveGrid) it.reclaimableBytes else bytes,
             )
         }
     }
 
     /**
-     * Enqueue the manual pipeline. No-ops while Checking/Rechecking/Freeing, or while a consent
-     * chunk is already queued (avoid a second pipeline racing the MediaStore dialog).
+     * Enqueue the manual pipeline. No-ops while Checking/Freeing, or while a **fresh** consent
+     * chunk is queued. Stale offers are cleared so Continue/Start can re-verify.
      */
     fun start() {
         if (_uiState.value.phase in setOf(
                 FreeUpSpacePhase.Checking,
-                FreeUpSpacePhase.Rechecking,
                 FreeUpSpacePhase.Freeing,
             )
         ) return
-        if (pendingDeleteBridge.uris.value.isNotEmpty()) return
+        if (hasFreshPendingConsent()) return
         stoppedLatch = false
-        lastReadyReloadKey = null
         _uiState.update {
             it.copy(
                 phase = FreeUpSpacePhase.Checking,
                 checked = 0,
                 checkTotal = 0,
-                rechecked = 0,
-                recheckTotal = 0,
                 processed = 0,
                 removed = 0,
                 deletionTotal = 0,
+                awaitingConsentCount = 0,
                 message = null,
             )
         }
         ManualFreeUpWorker.enqueue(context)
     }
 
-    /** Resume after Stopped (or Ready with residual markers and empty consent queue). */
+    /** Resume after Stopped (including awaiting-consent Continue when the queue is empty/stale). */
     fun continueWork() {
         when (_uiState.value.phase) {
-            FreeUpSpacePhase.Stopped,
-            FreeUpSpacePhase.Ready,
-            -> {
-                if (pendingDeleteBridge.uris.value.isNotEmpty()) return
+            FreeUpSpacePhase.Stopped -> {
+                if (hasFreshPendingConsent()) return
                 stoppedLatch = false
-                lastReadyReloadKey = null
                 ManualFreeUpWorker.enqueue(context)
             }
             else -> Unit
         }
     }
 
-    /** Cancel manual unique work only; remaining verified markers stay recoverable for Continue. */
+    /** Cancel manual unique work only. */
     fun stop() {
         when (_uiState.value.phase) {
             FreeUpSpacePhase.Checking,
-            FreeUpSpacePhase.Rechecking,
             FreeUpSpacePhase.Freeing,
             -> {
                 stoppedLatch = true
@@ -188,6 +176,19 @@ class FreeUpSpaceViewModel @Inject constructor(
     }
 
     fun clearMessage() = _uiState.update { it.copy(message = null) }
+
+    /**
+     * True when the consent queue holds a non-stale offer. Clears stale offers via
+     * [FreeUpPendingDeleteQueue.settleAllPending] so Start/Continue can re-run the pipeline.
+     */
+    private fun hasFreshPendingConsent(nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (pendingDeleteBridge.uris.value.isEmpty()) return false
+        if (isFreeUpPendingOfferStale(pendingDeleteBridge.offeredAtMs, nowMs)) {
+            pendingDeleteBridge.settleAllPending(granted = false)
+            return false
+        }
+        return true
+    }
 
     private fun observeWorker() {
         viewModelScope.launch {
@@ -220,13 +221,6 @@ class FreeUpSpaceViewModel @Inject constructor(
                         FreeUpPipelineWorker.KEY_NEEDS_PERMISSION_COUNT,
                     )
 
-                    val userId = accountManager.getPrimaryUserId().first()
-                    val readyCount = if (userId != null) {
-                        freeUpSpace.readyToReclaimCount(userId)
-                    } else {
-                        0
-                    }
-
                     val current = _uiState.value
                     val terminalKey = info?.let { "${it.id}:$workState" }
                     val isNewTerminal = terminalKey != null &&
@@ -236,10 +230,16 @@ class FreeUpSpaceViewModel @Inject constructor(
 
                     val awaitingConsent = workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT ||
                         needsPermission > 0
+                    val preRAllSkipped = isNewTerminal &&
+                        succeeded &&
+                        !awaitingConsent &&
+                        removed == 0 &&
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.R &&
+                        (current.checkTotal > 0 || current.candidates.isNotEmpty())
                     val shouldPublishDone = isNewTerminal &&
                         succeeded &&
                         !awaitingConsent &&
-                        removed > 0
+                        (removed > 0 || preRAllSkipped)
                     val doneMessage = shouldPublishDone ||
                         (current.message != null && current.phase == FreeUpSpacePhase.Done)
 
@@ -247,7 +247,6 @@ class FreeUpSpaceViewModel @Inject constructor(
                         workRunning = running,
                         workSucceeded = succeeded,
                         workFailed = failed,
-                        readyCount = readyCount,
                         doneMessage = doneMessage && !running,
                         workerPhase = workerPhase,
                         stopped = stoppedLatch,
@@ -257,12 +256,15 @@ class FreeUpSpaceViewModel @Inject constructor(
                     _uiState.update { state ->
                         var next = state.copy(
                             phase = phase,
-                            readyCount = readyCount,
+                            awaitingConsentCount = if (awaitingConsent) {
+                                needsPermission.coerceAtLeast(state.awaitingConsentCount)
+                            } else if (phase == FreeUpSpacePhase.Stopped && stoppedLatch) {
+                                state.awaitingConsentCount
+                            } else {
+                                0
+                            },
                         )
                         when (workerPhase) {
-                            FreeUpPipelineWorker.PHASE_RECHECKING -> {
-                                next = next.copy(rechecked = processed, recheckTotal = total)
-                            }
                             FreeUpPipelineWorker.PHASE_DELETING,
                             FreeUpPipelineWorker.PHASE_AWAITING_CONSENT,
                             -> {
@@ -282,8 +284,13 @@ class FreeUpSpaceViewModel @Inject constructor(
                         when {
                             shouldPublishDone -> next.copy(
                                 phase = FreeUpSpacePhase.Done,
-                                message = freedMessage(removed),
-                                readyCount = 0,
+                                message = when {
+                                    removed > 0 -> freedMessage(removed)
+                                    preRAllSkipped ->
+                                        context.getString(R.string.free_up_skipped_pre_r)
+                                    else -> freedMessage(removed)
+                                },
+                                awaitingConsentCount = 0,
                             )
                             isNewTerminal && failed -> next.copy(
                                 phase = FreeUpSpacePhase.Error,
@@ -292,15 +299,12 @@ class FreeUpSpaceViewModel @Inject constructor(
                                     "",
                                 ),
                             )
+                            isNewTerminal && succeeded && awaitingConsent -> next.copy(
+                                phase = FreeUpSpacePhase.Stopped,
+                                awaitingConsentCount = needsPermission.coerceAtLeast(1),
+                            )
                             else -> next
                         }
-                    }
-
-                    if (userId != null && shouldReloadReadyGrid(running, succeeded, workerPhase)) {
-                        reloadReadyCandidates(
-                            userId = userId,
-                            reloadKey = "$workerPhase|$processed|$total|$removed",
-                        )
                     }
 
                     if (shouldPublishDone) {
@@ -312,7 +316,7 @@ class FreeUpSpaceViewModel @Inject constructor(
 
     /**
      * Reconcile typed MediaStore consent outcomes when not mid pipeline run.
-     * Grant: prune settled URIs, refresh, Done/Idle or Ready.
+     * Grant: refresh store; Done when nothing left, else Stopped for further Continue.
      * Deny: Stopped (or Idle), refresh; do not auto-relaunch consent.
      */
     private fun observeConsentSettlement() {
@@ -320,23 +324,14 @@ class FreeUpSpaceViewModel @Inject constructor(
             pendingDeleteBridge.settled.collect { settlement ->
                 val phase = _uiState.value.phase
                 if (phase == FreeUpSpacePhase.Checking ||
-                    phase == FreeUpSpacePhase.Rechecking ||
                     phase == FreeUpSpacePhase.Freeing
                 ) {
                     return@collect
                 }
                 if (settlement.granted) {
-                    _uiState.update {
-                        val (pruned, pruneBytes) = pruneFreeUpCandidates(
-                            it.candidates,
-                            it.reclaimableBytes,
-                            settlement.uris.toList(),
-                        )
-                        it.copy(candidates = pruned, reclaimableBytes = pruneBytes)
-                    }
                     refreshFromStore()
-                    val readyCount = _uiState.value.readyCount
-                    if (readyCount == 0 && pendingDeleteBridge.uris.value.isEmpty()) {
+                    val remaining = _uiState.value.candidates
+                    if (remaining.isEmpty() && pendingDeleteBridge.uris.value.isEmpty()) {
                         val freed = settlement.uris.size
                         _uiState.update {
                             it.copy(
@@ -346,66 +341,35 @@ class FreeUpSpaceViewModel @Inject constructor(
                                     FreeUpSpacePhase.Idle
                                 },
                                 message = if (freed > 0) freedMessage(freed) else null,
+                                awaitingConsentCount = 0,
                             )
                         }
                     } else {
-                        _uiState.update { it.copy(phase = FreeUpSpacePhase.Ready) }
+                        // More chunks or residual candidates — Continue can re-run if queue empty.
+                        _uiState.update {
+                            it.copy(
+                                phase = FreeUpSpacePhase.Stopped,
+                                awaitingConsentCount = pendingDeleteBridge.uris.value.size,
+                            )
+                        }
                     }
                 } else {
-                    val userId = accountManager.getPrimaryUserId().first()
-                    val readyCount = if (userId != null) {
-                        freeUpSpace.readyToReclaimCount(userId)
-                    } else {
-                        0
-                    }
-                    if (readyCount > 0) {
+                    val hasCandidates = _uiState.value.candidates.isNotEmpty()
+                    if (hasCandidates) {
                         stoppedLatch = true
-                        _uiState.update { it.copy(phase = FreeUpSpacePhase.Stopped) }
+                        _uiState.update {
+                            it.copy(phase = FreeUpSpacePhase.Stopped, awaitingConsentCount = 0)
+                        }
                     } else {
                         stoppedLatch = false
-                        _uiState.update { it.copy(phase = FreeUpSpacePhase.Idle) }
+                        _uiState.update {
+                            it.copy(phase = FreeUpSpacePhase.Idle, awaitingConsentCount = 0)
+                        }
                     }
                     refreshFromStore()
                 }
             }
         }
-    }
-
-    /**
-     * Reload indexed remaining candidates from [FreeUpSpaceUseCase.readyToReclaim] and settle
-     * size-aware onto the live grid. Never calls MediaStore [totalBytes] mid-run.
-     */
-    private suspend fun reloadReadyCandidates(userId: UserId, reloadKey: String) {
-        if (reloadKey == lastReadyReloadKey) return
-        lastReadyReloadKey = reloadKey
-        val ready = freeUpSpace.readyToReclaim(userId)
-        _uiState.update { current ->
-            val known = current.candidates.associate { it.localUri to it.sizeBytes }
-            val (settled, settleBytes) = settleFreeUpCandidates(ready, known)
-            // Phase is owned by WorkInfo / stoppedLatch — only refresh the indexed grid here.
-            current.copy(
-                candidates = settled,
-                reclaimableBytes = settleBytes,
-                readyCount = ready.size,
-            )
-        }
-    }
-
-    private fun shouldReloadReadyGrid(
-        running: Boolean,
-        succeeded: Boolean,
-        workerPhase: String?,
-    ): Boolean {
-        if (workerPhase == FreeUpPipelineWorker.PHASE_RECHECKING ||
-            workerPhase == FreeUpPipelineWorker.PHASE_DELETING ||
-            workerPhase == FreeUpPipelineWorker.PHASE_VERIFYING
-        ) {
-            return running
-        }
-        if (workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT) {
-            return running || succeeded
-        }
-        return false
     }
 
     private suspend fun totalBytes(rows: List<SyncState>): Long {
