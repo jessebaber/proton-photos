@@ -35,13 +35,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.domain.usecase.DELETE_REQUEST_MAX_URIS
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * How a [MediaStoreConsentHandler] builds the system consent request. Trash and permanent delete
@@ -72,7 +74,7 @@ fun MediaStoreConsentHandler(
     val pending by pendingUris.collectAsStateWithLifecycle()
     var lastBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
     var inFlight by remember { mutableStateOf(false) }
-    var lastPromptedSize by rememberSaveable { mutableStateOf(0) }
+    var lastAttemptedBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
@@ -80,7 +82,6 @@ fun MediaStoreConsentHandler(
         inFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
             onGranted(lastBatch)
-            lastPromptedSize = 0
         } else {
             onDenied(lastBatch)
         }
@@ -89,30 +90,34 @@ fun MediaStoreConsentHandler(
     LaunchedEffect(pending.size, inFlight) {
         if (inFlight) return@LaunchedEffect
         if (pending.isEmpty()) {
-            lastPromptedSize = 0
+            lastAttemptedBatch = emptySet()
             return@LaunchedEffect
         }
-        if (pending.size <= lastPromptedSize) return@LaunchedEffect
+        val batch = pending.toList().take(DELETE_REQUEST_MAX_URIS).toSet()
+        if (batch == lastAttemptedBatch) return@LaunchedEffect
         delay(settleDelayMs)
         val snapshot = pendingUris.value
         if (snapshot.isEmpty()) return@LaunchedEffect
-        val uris: List<Uri> = snapshot.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+        val currentBatch = snapshot.toList().take(DELETE_REQUEST_MAX_URIS).toSet()
+        if (currentBatch == lastAttemptedBatch) return@LaunchedEffect
+        val uris: List<Uri> = currentBatch.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
         if (uris.isEmpty()) return@LaunchedEffect
         inFlight = true
-        lastBatch = snapshot
-        lastPromptedSize = snapshot.size
+        lastBatch = currentBatch
+        lastAttemptedBatch = currentBatch
         scope.launch {
             runCatching {
                 val resolver = context.contentResolver
-                val pi = when (mode) {
-                    MediaStoreConsentMode.Trash ->
-                        android.provider.MediaStore.createTrashRequest(resolver, uris, true)
-                    MediaStoreConsentMode.PermanentDelete ->
-                        android.provider.MediaStore.createDeleteRequest(resolver, uris)
+                val pi = withContext(Dispatchers.IO) {
+                    when (mode) {
+                        MediaStoreConsentMode.Trash ->
+                            android.provider.MediaStore.createTrashRequest(resolver, uris, true)
+                        MediaStoreConsentMode.PermanentDelete ->
+                            android.provider.MediaStore.createDeleteRequest(resolver, uris)
+                    }
                 }
                 launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
             }.onFailure { inFlight = false }
         }
     }
 }
-

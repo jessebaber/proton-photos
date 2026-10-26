@@ -344,6 +344,9 @@ fun NavGraph(
      *  call into the singleton UpdateOrchestrator + the Toast feedback so the UI layer
      *  doesn't need to hold an Activity reference. */
     onCheckForUpdates: () -> Unit = {},
+    /** Set by the ready notification; consumed after the authenticated startup route is ready. */
+    openFreeUpSpace: Boolean = false,
+    onOpenFreeUpSpaceConsumed: () -> Unit = {},
     /** Set by MainActivity when the user opens an external image/video via the system
      *  "Open with" / "Edit with" chooser. After we reach the Ready startup state, the
      *  request is captured into Nav-scope state and the editor route is pushed on top
@@ -509,6 +512,7 @@ fun NavGraph(
     var whatsNewChecked by remember { mutableStateOf(false) }
 
     val isLoggedIn = navViewModel.isLoggedIn
+    val startupRouteForExternal by navViewModel.startupRoute.collectAsStateWithLifecycle()
 
     // Combined Loading → (Login | Onboarding | Gallery) router. Waits for both the
     // session and onboarding flags to emit before navigating so we don't briefly
@@ -571,7 +575,6 @@ fun NavGraph(
     //     the photo viewer with a synthetic single-item list wrapping the foreign URI.
     //   - ACTION_EDIT ("Edit with" chooser, edit affordances in other apps) → push the
     //     editor, which handles the foreign URI and saves any edits as a new copy.
-    val startupRouteForExternal by navViewModel.startupRoute.collectAsStateWithLifecycle()
     LaunchedEffect(pendingExternalEdit, startupRouteForExternal) {
         val req = pendingExternalEdit ?: return@LaunchedEffect
         if (startupRouteForExternal != StartupRoute.Ready) return@LaunchedEffect
@@ -612,7 +615,21 @@ fun NavGraph(
         }
     }
 
+    LaunchedEffect(openFreeUpSpace, startupRouteForExternal) {
+        if (!openFreeUpSpace || startupRouteForExternal != StartupRoute.Ready) return@LaunchedEffect
+        navController.navigate(Screen.FreeUpSpace.route) {
+            launchSingleTop = true
+        }
+        onOpenFreeUpSpaceConsumed()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
+    if (startupRouteForExternal == StartupRoute.Ready) {
+        // These consent drains belong to the authenticated app shell, not Gallery. The Free up
+        // route can therefore receive and finish a permanent-delete request while it is visible.
+        PendingDeleteHandler()
+        FreeUpPermanentDeleteHandler()
+    }
     CompositionLocalProvider(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalViewerReturnKey provides viewerReturnKey,
@@ -706,13 +723,6 @@ fun NavGraph(
         }
 
         composable(Screen.Gallery.route) {
-            // Foreground drain for the upload worker's pending delete queue. Mounted
-            // here on the Gallery route so it lives for the entire authenticated
-            // session and renders nothing of its own until there is actually a queue
-            // to surface to the user.
-            PendingDeleteHandler()
-            // Permanent-delete sink for free-up reclaim — hard-separated from the trash queue above.
-            FreeUpPermanentDeleteHandler()
             // One-time post-update highlights. The startup router only lands here once the user is
             // fully Ready (logged in AND onboarded), so reaching this composable already implies
             // that gate. We read the seen-version pref once and, if this build's versionCode is

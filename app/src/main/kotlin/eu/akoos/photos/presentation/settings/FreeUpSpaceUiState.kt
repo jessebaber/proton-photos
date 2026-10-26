@@ -29,8 +29,10 @@ package eu.akoos.photos.presentation.settings
 enum class FreeUpSpacePhase {
     Idle,
     Checking,
+    Rechecking,
     Ready,
     Freeing,
+    Stopped,
     Done,
     Error,
 }
@@ -46,9 +48,13 @@ fun deriveFreeUpSpaceState(
     readyCount: Int,
     freeing: Boolean,
     doneMessage: Boolean,
+    rechecking: Boolean = false,
+    stopped: Boolean = false,
 ): FreeUpSpacePhase = when {
     workFailed -> FreeUpSpacePhase.Error
+    stopped -> FreeUpSpacePhase.Stopped
     freeing -> FreeUpSpacePhase.Freeing
+    rechecking -> FreeUpSpacePhase.Rechecking
     doneMessage -> FreeUpSpacePhase.Done
     workRunning -> FreeUpSpacePhase.Checking
     // Ready set may come from manual verify SUCCEEDED or from the scheduled worker's persisted

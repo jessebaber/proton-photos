@@ -37,7 +37,9 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,13 +63,13 @@ class PendingDeleteNotificationUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncStateRepo: SyncStateRepository,
 ) {
-    suspend operator fun invoke() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    suspend operator fun invoke() = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@withContext
         val prefs = context.settingsDataStore.data.first()
         // User opted out of the delete-after-backup reminder — don't post or prune.
-        if (prefs[SettingsKeys.NOTIFY_DELETE_REMINDER] == false) return
+        if (prefs[SettingsKeys.NOTIFY_DELETE_REMINDER] == false) return@withContext
         val pendingRaw = prefs[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
-        if (pendingRaw.isEmpty()) return
+        if (pendingRaw.isEmpty()) return@withContext
 
         // Bulk-probe which queued URIs still exist (and whether they are trashed), then let
         // [pendingDeleteEntryIsStale] rule on each. Stale entries get their SyncState collapsed to
@@ -105,20 +107,20 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             }
         }
 
-        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return@withContext
         if (alive.isEmpty()) {
             // Nothing left to ask about — dismiss any lingering notification so the
             // user doesn't see a "X photos ready to remove" badge after they already
             // got rid of everything externally.
             nm.cancel(DELETE_NOTIFICATION_ID)
-            return
+            return@withContext
         }
         // createTrashRequest shares the same 2000-URI platform ceiling as createDeleteRequest.
         val firstChunk = deleteRequestChunks(alive).firstOrNull().orEmpty()
         val uris = firstChunk.mapNotNull { parseContentUriOrNull(it) }
         if (uris.isEmpty()) {
             nm.cancel(DELETE_NOTIFICATION_ID)
-            return
+            return@withContext
         }
 
         ensureNotificationChannel(
@@ -133,7 +135,7 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             MediaStore.createTrashRequest(context.contentResolver, uris, true)
         }.getOrElse {
             Log.w(TAG, "createTrashRequest failed after prune: ${it.message}")
-            return
+            return@withContext
         }
         val notif = NotificationCompat.Builder(context, DELETE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)

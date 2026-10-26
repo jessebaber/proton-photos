@@ -30,6 +30,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -294,6 +295,47 @@ class ReconcileSyncStateUseCaseTest {
             syncStateRepo.upsertAll(
                 match { states ->
                     states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-known" }
+                },
+                userId,
+            )
+        }
+    }
+
+    @Test
+    fun `resolvable cloudFileId skips content-hash HMAC and still stamps content-certain backedUpAtMs`() = runTest {
+        // ANR hot path: when byId already matched the twin, sha1 + cloudContentHash must not run.
+        // contentCertain stays true via byId, so a null existing backedUpAtMs is stamped for free-up.
+        val local = localItem("uri://1", name = "local-name.jpg", size = 111L)
+        val cloud = cloudPhoto(
+            "link-known",
+            name = "totally-different.jpg",
+            size = 999L,
+            contentHash = "CLOUDHMAC",
+        )
+        val existing = syncState(
+            "uri://1",
+            cloudId = "link-known",
+            status = SyncStatus.SYNCED,
+            localHash = "deadbeefsha1",
+        )
+        every { localRepo.observeLocalMedia() } returns flowOf(listOf(local))
+        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(listOf(cloud))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existing))
+        coEvery { syncStateRepo.getByUri(any()) } returns existing
+
+        useCase(userId).toList()
+
+        verify(exactly = 0) { cloudRepo.cloudContentHash(any()) }
+        coVerify(exactly = 0) { localRepo.sha1(any()) }
+        coVerify {
+            syncStateRepo.upsertAll(
+                match { states ->
+                    states.any {
+                        it.localUri == "uri://1" &&
+                            it.status == SyncStatus.SYNCED &&
+                            it.cloudFileId == "link-known" &&
+                            it.backedUpAtMs != null
+                    }
                 },
                 userId,
             )

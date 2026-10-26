@@ -70,4 +70,21 @@ interface FreeUpVerifiedDao {
         """,
     )
     suspend fun readyToReclaim(userId: String, sinceMs: Long): List<SyncStateEntity>
+
+    /**
+     * Same join predicates as [readyToReclaim], returning only the row count (WorkInfo observer).
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM sync_state s
+        INNER JOIN free_up_verified v
+          ON v.localUri = s.localUri AND v.userId = s.userId
+        WHERE s.userId = :userId
+          AND s.status = 'SYNCED'
+          AND s.cloudFileId IS NOT NULL
+          AND s.cloudFileId = v.cloudFileId
+          AND v.verifiedAtMs >= :sinceMs
+        """,
+    )
+    suspend fun readyToReclaimCount(userId: String, sinceMs: Long): Int
 }

@@ -1077,22 +1077,20 @@ class SettingsViewModel @Inject constructor(
             // ("Couldn't reconcile" vs "Couldn't upload") instead of one generic "Sync failed".
             var failedPhaseRes = R.string.settings_sync_failed
             try {
-                // 0. Fresh cloud photo listing — pulls the current Photos stream and DELETES
-                //    `photo_listing` rows for items no longer on Drive. Without this step the
-                //    subsequent reconcile would see stale SYNCED entries (cloud-deleted items
-                //    still mapped from a previous refresh) and keep them green in the UI.
-                //    Best-effort: a network failure here shouldn't abort the rest of sync.
-                try {
-                    cloudRepo.refreshCloudPhotos(userId, force = true)
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    android.util.Log.w("SettingsViewModel", "syncNow: refreshCloudPhotos failed (best-effort)", e)
-                }
-                // 1. Reconcile: refresh cloud DB + mark unsynced local photos as LOCAL_ONLY,
-                //    demote SYNCED → CLOUD_ONLY for cloud-deleted items.
+                // 0–1. Fresh cloud listing + reconcile off Main so network/DB/crypto cannot ANR
+                //    settings. Listing deletes `photo_listing` rows for items no longer on Drive
+                //    so reconcile does not keep stale SYNCED greens. Refresh is best-effort.
                 failedPhaseRes = R.string.settings_sync_failed_reconcile
-                reconcile(userId).collect {}
+                withContext(Dispatchers.IO) {
+                    try {
+                        cloudRepo.refreshCloudPhotos(userId, force = true)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w("SettingsViewModel", "syncNow: refreshCloudPhotos failed (best-effort)", e)
+                    }
+                    reconcile(userId).collect {}
+                }
                 // 2. Upload: hand the LOCAL_ONLY photos to the SyncWorker rather than uploading
                 //    inline here. The worker is the sole upload owner so the in-app cancel can stop
                 //    the batch; an inline upload in this viewModelScope would be uncancellable. The

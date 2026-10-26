@@ -92,6 +92,38 @@ class FreeUpSpaceDeriveStateTest {
     }
 
     @Test
+    fun `rechecking is distinct from local deletion`() {
+        assertEquals(
+            FreeUpSpacePhase.Rechecking,
+            deriveFreeUpSpaceState(
+                workRunning = false,
+                workSucceeded = true,
+                workFailed = false,
+                readyCount = 3,
+                freeing = false,
+                doneMessage = false,
+                rechecking = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `stopped stays visible even when work info is terminal`() {
+        assertEquals(
+            FreeUpSpacePhase.Stopped,
+            deriveFreeUpSpaceState(
+                workRunning = false,
+                workSucceeded = true,
+                workFailed = false,
+                readyCount = 2,
+                freeing = false,
+                doneMessage = false,
+                stopped = true,
+            ),
+        )
+    }
+
+    @Test
     fun `done after a terminal message`() {
         assertEquals(
             FreeUpSpacePhase.Done,

@@ -1234,7 +1234,13 @@
     <string name="free_up_checking">Kontrola, čo sa dá uvoľniť…</string>
     <string name="free_up_verifying">Overovanie na Drive, že každá kópia je v bezpečí…</string>
     <string name="free_up_explainer">Každá fotka nižšie má kópiu na Drive. Maže sa len kópia v tomto zariadení.</string>
-    <string name="free_up_progress">Uvoľnených %1$d z %2$d</string>
+    <string name="free_up_progress">Spracovaných %1$d z %2$d (odstránených %3$d)</string>
+    <string name="free_up_rechecking">Opätovná kontrola na Drive pred uvoľnením miesta…</string>
+    <string name="free_up_recheck_progress">Opätovne skontrolovaných %1$d z %2$d</string>
+    <string name="free_up_stop_checking">Zastaviť kontrolu</string>
+    <string name="free_up_stop_freeing">Zastaviť uvoľňovanie</string>
+    <string name="free_up_continue">Pokračovať v uvoľňovaní</string>
+    <string name="free_up_stopped">Zastavené. Už odstránené kópie v zariadení zostanú odstránené.</string>
     <string name="free_up_verify_channel_name">Uvoľniť miesto</string>
     <string name="free_up_verify_channel_desc">Zobrazuje priebeh kontroly kópií na Drive pred uvoľnením miesta.</string>
     <string name="free_up_verify_notification_title">Kontrola kópií na Drive…</string>

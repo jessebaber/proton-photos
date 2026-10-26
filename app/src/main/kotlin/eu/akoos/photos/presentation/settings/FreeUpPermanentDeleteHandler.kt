@@ -52,9 +52,10 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
 
     fun onConsentGranted(uris: Set<String>) {
         viewModelScope.launch {
-            runCatching {
+            val updated = runCatching {
                 syncStateRepo.updateStatusAndDeleteLocal(uris.toList(), SyncStatus.CLOUD_ONLY)
-            }
+            }.isSuccess
+            if (!updated) return@launch
             val userId = accountManager.getPrimaryUserId().first()
             if (userId != null) freeUpSpace.clearVerified(userId, uris.toList())
             bridge.remove(uris)

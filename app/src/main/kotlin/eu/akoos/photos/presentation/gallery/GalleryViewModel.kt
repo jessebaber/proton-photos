@@ -998,9 +998,12 @@ class GalleryViewModel @Inject constructor(
         // otherwise it spun blue for the whole cold-listing walk while nothing was uploading.
         try {
             // Incremental cloud refresh before reconcile so deleted-cloud photos are removed
-            // from the local DB before reconcile reads cloudItems.
-            cloudRepo.refreshCloudPhotosIncremental(userId)
-            reconcile(userId).collect {}
+            // from the local DB before reconcile reads cloudItems. Off Main so network/DB/crypto
+            // cannot occupy the UI thread while the cold listing walks.
+            withContext(Dispatchers.IO) {
+                cloudRepo.refreshCloudPhotosIncremental(userId)
+                reconcile(userId).collect {}
+            }
             // If reconcile queued any LOCAL_ONLY items, enqueue a foreground OneTime worker so
             // the upload runs with a visible progress notification — even if the user backgrounds
             // the app mid-upload. The worker is the SOLE upload owner: uploading inline here (in
@@ -1258,53 +1261,57 @@ class GalleryViewModel @Inject constructor(
             // long full cloud listing this refresh kicks off.
             _uiState.update { it.copy(isRefreshing = true) }
             runCatching {
-                cloudRepo.refreshCloudPhotos(userId, force = force)
-                // Battery gate covers ONLY the whole-library walks below: they run on
-                // process-lifetime scopes, so unlike the sync workers they carry no
-                // setRequiresBatteryNotLow and would keep decrypting the whole account long after
-                // the user leaves the screen. The visible and prefetch thumbnail bands stay ungated
-                // on purpose — gating those would leave blank tiles on a screen the user is looking at.
-                if (!context.isBatteryLow()) {
-                    // Whole listing is fresh — warm the rest of the library's thumbnails in the
-                    // background (lowest priority) so a large account fills in without the user
-                    // scrolling past every photo. Idempotent + idle-only, so it never blocks scroll.
-                    cloudRepo.backfillThumbnails(userId)
-                    // Recover cloud video durations off the read path so the grid can show a duration
-                    // pill. Bounded + self-collapsing; launched detached so it never delays reconcile
-                    // or the upload kick-off below.
-                    viewModelScope.launch(Dispatchers.IO) {
-                        runCatching { cloudRepo.backfillVideoDurations(userId) }
-                    }
-                    // Read the device photos' own EXIF for the GPS the map plots and for a capture
-                    // date MediaStore holds wrong. Launched detached for the same reason: a whole
-                    // library of header reads must never hold up reconcile or the upload kick-off.
-                    viewModelScope.launch(Dispatchers.IO) {
-                        runCatching { cloudRepo.backfillLocalExif(userId) }
-                    }
-                    // Index faces for the People grouping. The scheduler no-ops when the AI features
-                    // are off, paused, or the models are absent; gate on the master and face switches
-                    // here so the common (faces-off) path never even launches a coroutine that returns
-                    // at once.
-                    val facePrefs = context.settingsDataStore.data.first()
-                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                        facePrefs[SettingsKeys.FACE_ENABLED] == true
-                    ) {
+                // Refresh + reconcile off Main so the full listing / SyncState pass cannot ANR
+                // pull-to-refresh. Detached backfills stay on their own IO launches below.
+                withContext(Dispatchers.IO) {
+                    cloudRepo.refreshCloudPhotos(userId, force = force)
+                    // Battery gate covers ONLY the whole-library walks below: they run on
+                    // process-lifetime scopes, so unlike the sync workers they carry no
+                    // setRequiresBatteryNotLow and would keep decrypting the whole account long after
+                    // the user leaves the screen. The visible and prefetch thumbnail bands stay ungated
+                    // on purpose — gating those would leave blank tiles on a screen the user is looking at.
+                    if (!context.isBatteryLow()) {
+                        // Whole listing is fresh — warm the rest of the library's thumbnails in the
+                        // background (lowest priority) so a large account fills in without the user
+                        // scrolling past every photo. Idempotent + idle-only, so it never blocks scroll.
+                        cloudRepo.backfillThumbnails(userId)
+                        // Recover cloud video durations off the read path so the grid can show a duration
+                        // pill. Bounded + self-collapsing; launched detached so it never delays reconcile
+                        // or the upload kick-off below.
                         viewModelScope.launch(Dispatchers.IO) {
-                            runCatching { cloudRepo.backfillFaces(userId) }
+                            runCatching { cloudRepo.backfillVideoDurations(userId) }
+                        }
+                        // Read the device photos' own EXIF for the GPS the map plots and for a capture
+                        // date MediaStore holds wrong. Launched detached for the same reason: a whole
+                        // library of header reads must never hold up reconcile or the upload kick-off.
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { cloudRepo.backfillLocalExif(userId) }
+                        }
+                        // Index faces for the People grouping. The scheduler no-ops when the AI features
+                        // are off, paused, or the models are absent; gate on the master and face switches
+                        // here so the common (faces-off) path never even launches a coroutine that returns
+                        // at once.
+                        val facePrefs = context.settingsDataStore.data.first()
+                        if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                            facePrefs[SettingsKeys.FACE_ENABLED] == true
+                        ) {
+                            viewModelScope.launch(Dispatchers.IO) {
+                                runCatching { cloudRepo.backfillFaces(userId) }
+                            }
+                        }
+                        // Index photos for semantic search, gated on the master and semantic switches. The
+                        // scheduler no-ops when off or the model is absent; gate here so the common path never
+                        // launches a coroutine that returns at once.
+                        if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                            facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                        ) {
+                            viewModelScope.launch(Dispatchers.IO) {
+                                runCatching { cloudRepo.backfillSemantic(userId) }
+                            }
                         }
                     }
-                    // Index photos for semantic search, gated on the master and semantic switches. The
-                    // scheduler no-ops when off or the model is absent; gate here so the common path never
-                    // launches a coroutine that returns at once.
-                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                        facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
-                    ) {
-                        viewModelScope.launch(Dispatchers.IO) {
-                            runCatching { cloudRepo.backfillSemantic(userId) }
-                        }
-                    }
+                    reconcile(userId).collect {}
                 }
-                reconcile(userId).collect {}
                 // Enqueue the upload on the worker rather than running it inline in viewModelScope:
                 // the worker is the sole upload owner so the in-app cancel can actually stop it.
                 val wifiOnly = context.settingsDataStore.data

@@ -57,10 +57,12 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.work.WorkManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.accountmanager.presentation.observe
 import me.proton.core.accountmanager.presentation.onAccountCreateAddressFailed
@@ -138,6 +140,8 @@ class MainActivity : AppCompatActivity() {
     private var lockEnabled = false
     /** Photo URI from a home-screen widget tap; NavGraph reads + clears it to route to the viewer. */
     private var widgetPhotoUri by mutableStateOf<String?>(null)
+    /** True when the ready notification asks the startup router to open Free up space. */
+    private var openFreeUpSpace by mutableStateOf(false)
     /** Request from a system "Open with" / "Edit with" intent; NavGraph routes to the editor. */
     private var externalEditRequest by mutableStateOf<ExternalEditRequest?>(null)
     /** Wall-clock of the last ON_STOP, compared against the configured timeout to decide re-lock. */
@@ -164,6 +168,7 @@ class MainActivity : AppCompatActivity() {
 
         // Widget-tap URI from the launching intent (mirrored in onNewIntent for a foregrounded re-tap).
         widgetPhotoUri = intent?.getStringExtra(EXTRA_WIDGET_PHOTO_URI)
+        openFreeUpSpace = intent?.getBooleanExtra(EXTRA_OPEN_FREE_UP, false) == true
         externalEditRequest = parseExternalEditRequest(intent)
 
         // ProtonCore account-state handler. Without it, 2FA / two-pass accounts stall after the
@@ -426,6 +431,8 @@ class MainActivity : AppCompatActivity() {
                                     onWidgetPhotoConsumed = { widgetPhotoUri = null },
                                     externalEditRequest = externalEditRequest,
                                     onExternalEditConsumed = { externalEditRequest = null },
+                                    openFreeUpSpace = openFreeUpSpace,
+                                    onOpenFreeUpSpaceConsumed = { openFreeUpSpace = false },
                                 )
                                 UpdaterHost()
                                 if (isLocked) AppLockScreen(onUnlocked = {
@@ -566,6 +573,9 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         // Foregrounded widget re-tap → grab the new URI for NavGraph's LaunchedEffect.
         intent.getStringExtra(EXTRA_WIDGET_PHOTO_URI)?.let { widgetPhotoUri = it }
+        if (intent.getBooleanExtra(EXTRA_OPEN_FREE_UP, false)) {
+            openFreeUpSpace = true
+        }
         parseExternalEditRequest(intent)?.let { externalEditRequest = it }
     }
 
@@ -635,7 +645,7 @@ class MainActivity : AppCompatActivity() {
         // case where a queued file was deleted via the file manager (the worker's content trigger
         // needs network, but resume always runs): stale URIs are dropped to CLOUD_ONLY and the
         // consent notification refreshed, avoiding a stale banner and the createDeleteRequest bug.
-        lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.IO) {
             runCatching { pendingDeleteNotif() }
         }
         // Silent auto-refresh on resume when the last sync is stale. WorkManager is throttled on
@@ -648,9 +658,12 @@ class MainActivity : AppCompatActivity() {
                 if (System.currentTimeMillis() - lastSync < resumeRefreshThresholdMs) return@launch
                 val userId = accountManager.getPrimaryUserId().first() ?: return@launch
                 val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-                // Lightweight pair: events-based Drive delta, then one SyncState pass.
-                driveRepo.refreshCloudPhotosIncremental(userId)
-                reconcile(userId).collect {}
+                // Lightweight pair: events-based Drive delta, then one SyncState pass — off Main
+                // so binder/DB/crypto cannot ANR the resume path.
+                withContext(Dispatchers.IO) {
+                    driveRepo.refreshCloudPhotosIncremental(userId)
+                    reconcile(userId).collect {}
+                }
                 // OneTime sync if backup is effectively on — picks up LOCAL_ONLY entries reconcile
                 // just flagged. Skipped when no folder is selected (nothing would upload).
                 if (syncEffectivelyEnabled(this@MainActivity)) SyncWorker.runNow(this@MainActivity, wifiOnly)
@@ -676,5 +689,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** Intent extra: MediaStore URI string from a home-screen widget tap. */
         const val EXTRA_WIDGET_PHOTO_URI = "widget_photo_uri"
+        /** Intent extra: open the authenticated Free up space route from its ready notification. */
+        const val EXTRA_OPEN_FREE_UP = "open_free_up"
     }
 }

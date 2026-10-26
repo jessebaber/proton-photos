@@ -27,9 +27,14 @@ import android.util.Log
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -40,6 +45,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import javax.inject.Inject
+import javax.inject.Singleton
 
 private const val TAG = "ReconcileUseCase"
 
@@ -49,13 +55,23 @@ private const val TAG = "ReconcileUseCase"
  *  this window — by then the listing has refreshed and a true cloud-side delete is real. */
 private const val CLOUD_ABSENCE_GRACE_MS = 15 * 60 * 1000L
 
+@Singleton
 class ReconcileSyncStateUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     @ApplicationContext private val context: Context,
 ) {
+    /** Process-wide: resume + gallery must not run overlapping reconcile passes. */
+    private val mutex = Mutex()
+
     suspend operator fun invoke(userId: UserId): Flow<SyncProgress> = flow {
+        mutex.withLock {
+            runReconcile(userId)
+        }
+    }.flowOn(Dispatchers.Default)
+
+    private suspend fun FlowCollector<SyncProgress>.runReconcile(userId: UserId) {
         emit(SyncProgress(total = 0, done = 0, running = true))
 
         // Read folder filter from settings.
@@ -203,12 +219,18 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // share a name (Drive allows duplicate names). Use the stored hash; if a reinstall wiped
             // it, recompute from the file once (persisted below) when the cloud library is fully
             // listed so there's a complete set to match against. This also pairs a renamed cloud copy.
-            val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
+            // When byId already resolved the twin, skip sha1 + HMAC entirely — contentCertain stays
+            // true via byId and the expensive crypto is pure waste on the ANR hot path.
             var recomputedHash: String? = null
-            val localHashHex: String? = storedHash
-                ?: if (initialListingComplete && cloudByHash.isNotEmpty())
-                    localRepo.sha1(local.uri).also { recomputedHash = it } else null
-            val byContentHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            val byContentHash = if (byId != null) {
+                null
+            } else {
+                val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
+                val localHashHex: String? = storedHash
+                    ?: if (initialListingComplete && cloudByHash.isNotEmpty())
+                        localRepo.sha1(local.uri).also { recomputedHash = it } else null
+                localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            }
 
             // captureTime in CloudPhoto is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L

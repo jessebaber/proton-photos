@@ -57,6 +57,25 @@ internal object DriveSignatureContexts {
 
 private const val TAG = "DriveCrypto"
 
+/** Lowercase hex digits for [encodeHexLower] — avoids per-byte `String.format` / Formatter. */
+private val HEX_LOWER = charArrayOf(
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+)
+
+/**
+ * Encodes [bytes] as lowercase hex without allocating a Formatter per byte.
+ * Used on the reconcile hot path ([DriveCryptoHelper.computeNameHash] / [DriveCryptoHelper.sha256Hex]).
+ */
+internal fun encodeHexLower(bytes: ByteArray): String {
+    val out = StringBuilder(bytes.size * 2)
+    for (b in bytes) {
+        val v = b.toInt() and 0xff
+        out.append(HEX_LOWER[v ushr 4])
+        out.append(HEX_LOWER[v and 0x0f])
+    }
+    return out.toString()
+}
+
 /**
  * Extracts (latitude, longitude) from a plaintext XAttr JSON blob produced by [DriveCryptoHelper].
  * The Location block is optional (absent when the photo had no GPS), so a missing/malformed block
@@ -719,7 +738,7 @@ class DriveCryptoHelper @Inject constructor(
     fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
     /** Hex-encoded SHA-256. */
-    fun sha256Hex(data: ByteArray): String = sha256(data).joinToString("") { "%02x".format(it) }
+    fun sha256Hex(data: ByteArray): String = encodeHexLower(sha256(data))
 
     /**
      * HMAC-SHA256 of the plaintext name with the raw NodeHashKey bytes — the Hash field in album /
@@ -729,7 +748,7 @@ class DriveCryptoHelper @Inject constructor(
         val mac = javax.crypto.Mac.getInstance("HmacSHA256")
         mac.init(javax.crypto.spec.SecretKeySpec(nodeHashKeyBytes, "HmacSHA256"))
         val hmac = mac.doFinal(plaintextName.toByteArray(Charsets.UTF_8))
-        return hmac.joinToString("") { "%02x".format(it) }
+        return encodeHexLower(hmac)
     }
 
     /**

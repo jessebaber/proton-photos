@@ -23,7 +23,9 @@
 package eu.akoos.photos.worker
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
@@ -44,6 +46,7 @@ import androidx.work.workDataOf
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.R
+import eu.akoos.photos.MainActivity
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
@@ -150,10 +153,23 @@ class ManualFreeUpWorker @AssistedInject constructor(
 
     private fun postReadyNotification(readyCount: Int) {
         ensureChannel(context)
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_OPEN_FREE_UP, true)
+        }
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            NotificationIds.MANUAL_FREE_UP_READY,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(context.getString(R.string.free_up_ready_notification_title))
             .setContentText(context.getString(R.string.free_up_ready_notification_text, readyCount))
+            .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .build()
         runCatching {
