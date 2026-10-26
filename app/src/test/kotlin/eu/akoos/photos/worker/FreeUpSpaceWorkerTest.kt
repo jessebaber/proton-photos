@@ -194,13 +194,12 @@ class FreeUpSpaceWorkerTest {
     }
 
     @Test
-    fun `automatic schedule targets the full reclaim pipeline not verify-only`() {
+    fun `automatic schedule targets the shared pipeline with protect-downloads`() {
         val data = FreeUpPipelineWorker.automaticInputData(FreeUpInterval.OneDay.ms)
         assertEquals(
             FreeUpPipelineWorker.TRIGGER_AUTOMATIC,
             data.getString(FreeUpPipelineWorker.KEY_TRIGGER),
         )
-        assertTrue(FreeUpPipelineWorker.runsFullReclaim(FreeUpPipelineWorker.TRIGGER_AUTOMATIC))
         assertTrue(
             FreeUpPipelineWorker.protectDownloadedFor(FreeUpPipelineWorker.TRIGGER_AUTOMATIC),
         )
