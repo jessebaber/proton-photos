@@ -23,7 +23,6 @@
 package eu.akoos.photos.presentation.settings
 
 import android.app.Activity
-import android.app.PendingIntent
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,9 +54,26 @@ enum class MediaStoreConsentMode {
 }
 
 /**
+ * Next URI batch for a MediaStore consent dialog, capped at [DELETE_REQUEST_MAX_URIS].
+ * Pure helper so chunk advance can be pinned without Compose.
+ */
+fun nextMediaStoreConsentBatch(
+    pending: Set<String>,
+    max: Int = DELETE_REQUEST_MAX_URIS,
+): Set<String> {
+    if (pending.isEmpty() || max <= 0) return emptySet()
+    return pending.toList().take(max).toSet()
+}
+
+/**
  * Parameterised MediaStore consent prompt: watches [pendingUris], builds a request with [mode],
  * and reports grant/deny. Callers supply their own URI source and callbacks so trash
  * (`PENDING_DELETE_URIS`) and free-up permanent delete never share a sink.
+ *
+ * This composable is the sole free-up [android.provider.MediaStore.createDeleteRequest] builder:
+ * it drains [pendingUris] in [DELETE_REQUEST_MAX_URIS] chunks. After a grant, removing the settled
+ * chunk from the sink advances to the next batch. After a deny, prompting stops until the sink is
+ * emptied (free-up clears the whole queue on deny); no immediate re-offer of remaining URIs.
  */
 @Composable
 fun MediaStoreConsentHandler(
@@ -75,6 +91,8 @@ fun MediaStoreConsentHandler(
     var lastBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
     var inFlight by remember { mutableStateOf(false) }
     var lastAttemptedBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Deny must not open the next chunk while the sink is still draining asynchronously.
+    var denyStopped by remember { mutableStateOf(false) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
@@ -83,23 +101,26 @@ fun MediaStoreConsentHandler(
         if (result.resultCode == Activity.RESULT_OK) {
             onGranted(lastBatch)
         } else {
+            denyStopped = true
             onDenied(lastBatch)
         }
     }
 
-    LaunchedEffect(pending.size, inFlight) {
+    LaunchedEffect(pending.size, inFlight, denyStopped) {
         if (inFlight) return@LaunchedEffect
         if (pending.isEmpty()) {
             lastAttemptedBatch = emptySet()
+            denyStopped = false
             return@LaunchedEffect
         }
-        val batch = pending.toList().take(DELETE_REQUEST_MAX_URIS).toSet()
-        if (batch == lastAttemptedBatch) return@LaunchedEffect
+        if (denyStopped) return@LaunchedEffect
+        val batch = nextMediaStoreConsentBatch(pending)
+        if (batch.isEmpty() || batch == lastAttemptedBatch) return@LaunchedEffect
         delay(settleDelayMs)
         val snapshot = pendingUris.value
-        if (snapshot.isEmpty()) return@LaunchedEffect
-        val currentBatch = snapshot.toList().take(DELETE_REQUEST_MAX_URIS).toSet()
-        if (currentBatch == lastAttemptedBatch) return@LaunchedEffect
+        if (snapshot.isEmpty() || denyStopped) return@LaunchedEffect
+        val currentBatch = nextMediaStoreConsentBatch(snapshot)
+        if (currentBatch.isEmpty() || currentBatch == lastAttemptedBatch) return@LaunchedEffect
         val uris: List<Uri> = currentBatch.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
         if (uris.isEmpty()) return@LaunchedEffect
         inFlight = true

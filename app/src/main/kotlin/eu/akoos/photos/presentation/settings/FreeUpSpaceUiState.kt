@@ -23,11 +23,12 @@
 package eu.akoos.photos.presentation.settings
 
 import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.worker.FreeUpPipelineWorker
 import kotlin.math.max
 
 /**
- * Pure UI phase for the Free up space screen, derived from WorkInfo + ready count so a JVM test can
- * pin checking → ready → freeing → done without Compose or WorkManager.
+ * Pure UI phase for the Free up space screen, derived from WorkInfo phase/counts + ready count so a
+ * JVM test can pin checking → rechecking → freeing → ready/done without Compose or WorkManager.
  */
 enum class FreeUpSpacePhase {
     Idle,
@@ -41,30 +42,39 @@ enum class FreeUpSpacePhase {
 }
 
 /**
- * Derives the screen phase from background-verify work state and the persisted ready set.
- * Freeing wins over Ready while the foreground finisher runs; a terminal message maps to Done.
+ * Derives the screen phase from pipeline WorkInfo and the persisted ready set.
+ *
+ * [workerPhase] is the WorkInfo progress/output [FreeUpPipelineWorker.KEY_PHASE] wire name
+ * (`verifying` / `rechecking` / `deleting` / `awaiting_consent`).
  */
 fun deriveFreeUpSpaceState(
     workRunning: Boolean,
     workSucceeded: Boolean,
     workFailed: Boolean,
     readyCount: Int,
-    freeing: Boolean,
     doneMessage: Boolean,
-    rechecking: Boolean = false,
+    workerPhase: String? = null,
     stopped: Boolean = false,
+    workCancelled: Boolean = false,
 ): FreeUpSpacePhase = when {
     workFailed -> FreeUpSpacePhase.Error
     stopped -> FreeUpSpacePhase.Stopped
-    freeing -> FreeUpSpacePhase.Freeing
-    rechecking -> FreeUpSpacePhase.Rechecking
     doneMessage -> FreeUpSpacePhase.Done
-    workRunning -> FreeUpSpacePhase.Checking
-    // Ready set may come from manual verify SUCCEEDED or from the scheduled worker's persisted
-    // chunks — do not require workSucceeded so auto free-up can finish when the screen opens.
+    workRunning -> phaseWhileRunning(workerPhase)
+    workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT -> FreeUpSpacePhase.Ready
+    // Ready set may come from manual SUCCEEDED (awaiting consent) or from the scheduled worker's
+    // persisted markers — do not require workSucceeded so auto free-up can surface Ready on open.
     readyCount > 0 -> FreeUpSpacePhase.Ready
+    workCancelled -> FreeUpSpacePhase.Stopped
     workSucceeded -> FreeUpSpacePhase.Idle
     else -> FreeUpSpacePhase.Idle
+}
+
+private fun phaseWhileRunning(workerPhase: String?): FreeUpSpacePhase = when (workerPhase) {
+    FreeUpPipelineWorker.PHASE_RECHECKING -> FreeUpSpacePhase.Rechecking
+    FreeUpPipelineWorker.PHASE_DELETING -> FreeUpSpacePhase.Freeing
+    FreeUpPipelineWorker.PHASE_AWAITING_CONSENT -> FreeUpSpacePhase.Ready
+    else -> FreeUpSpacePhase.Checking // verifying, or enqueued with no progress yet
 }
 
 /**

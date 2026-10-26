@@ -79,8 +79,8 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.formatBytes
 
 /**
- * Shows reclaimable photos, enqueues background Drive verify, and finishes permanent delete in the
- * foreground. Leaving the screen no longer stops verify — WorkManager continues the check.
+ * Shows reclaimable photos and enqueues/cancels the manual Free-up pipeline worker. Progress and
+ * reclaim run under WorkManager; consent is handled by [FreeUpPermanentDeleteHandler].
  */
 @Composable
 fun FreeUpSpaceScreen(
@@ -271,8 +271,9 @@ fun FreeUpSpaceScreen(
                                             FreeUpSpacePhase.Rechecking,
                                             FreeUpSpacePhase.Freeing,
                                             -> viewModel.stop()
-                                            FreeUpSpacePhase.Stopped -> viewModel.continueWork()
-                                            FreeUpSpacePhase.Ready -> viewModel.finishReclaim()
+                                            FreeUpSpacePhase.Stopped,
+                                            FreeUpSpacePhase.Ready,
+                                            -> viewModel.continueWork()
                                             else -> showConfirm = true
                                         }
                                     }

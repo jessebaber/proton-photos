@@ -39,6 +39,14 @@ import javax.inject.Inject
 /**
  * Permanent-delete consent for free-up reclaim via [FreeUpPendingDeleteBridge]. Hard-separated from
  * trash / [eu.akoos.photos.data.preferences.SettingsKeys.PENDING_DELETE_URIS].
+ *
+ * Grant settles only the consented chunk (status batch + clearVerified + [FreeUpPendingDeleteBridge.settle]
+ * with `granted=true`) so [MediaStoreConsentHandler] can advance to the next
+ * [eu.akoos.photos.domain.usecase.DELETE_REQUEST_MAX_URIS] batch while URIs remain.
+ *
+ * Deny settles the entire pending queue (`granted=false`) so the handler does not immediately
+ * re-offer remaining chunks; verified markers for those URIs are cleared. Process death recovers via
+ * markers + notification, not this in-memory bridge.
  */
 @HiltViewModel
 class FreeUpPermanentDeleteViewModel @Inject constructor(
@@ -64,9 +72,11 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
 
     fun onConsentDenied(uris: Set<String>) {
         viewModelScope.launch {
+            // Drain the whole queue so MediaStoreConsentHandler does not open the next chunk.
+            val toSettle = bridge.uris.value.ifEmpty { uris }
             val userId = accountManager.getPrimaryUserId().first()
-            if (userId != null) freeUpSpace.clearVerified(userId, uris.toList())
-            bridge.settle(uris, granted = false)
+            if (userId != null) freeUpSpace.clearVerified(userId, toSettle.toList())
+            bridge.settle(toSettle, granted = false)
         }
     }
 }

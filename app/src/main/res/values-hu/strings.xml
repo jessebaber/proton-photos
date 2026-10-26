@@ -1339,6 +1339,9 @@
     <string name="free_up_verify_channel_desc">A Drive-másolatok ellenőrzésének előrehaladását mutatja a helyfelszabadítás előtt.</string>
     <string name="free_up_verify_notification_title">Drive-másolatok ellenőrzése…</string>
     <string name="free_up_verify_progress">%1$d / %2$d ellenőrizve</string>
+    <string name="free_up_delete_notification_title">Hely felszabadítása…</string>
+    <string name="free_up_awaiting_consent_notification_title">Engedély szükséges a hely felszabadításához</string>
+    <string name="free_up_awaiting_consent_notification_text">Nyisd meg a Hely felszabadítását, hogy engedélyezd %1$d eszközmásolat eltávolítását.</string>
     <string name="free_up_ready_notification_title">Kész a hely felszabadítására</string>
     <string name="free_up_ready_notification_text">Nyisd meg a Hely felszabadítását, hogy befejezd %1$d eszközmásolat eltávolítását.</string>
     <plurals name="free_up_summary">
