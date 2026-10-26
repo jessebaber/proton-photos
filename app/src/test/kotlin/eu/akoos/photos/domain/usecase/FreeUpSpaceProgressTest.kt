@@ -25,8 +25,14 @@ package eu.akoos.photos.domain.usecase
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import eu.akoos.photos.data.api.dto.BatchLinkDto
+import eu.akoos.photos.data.api.dto.LinkCoreDto
+import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
+import eu.akoos.photos.data.db.entity.SyncStateEntity
+import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -55,9 +61,13 @@ import org.junit.Test
 class FreeUpSpaceProgressTest {
 
     private val userId = UserId("u1")
+    private val volumeId = "vol-1"
     private lateinit var repo: SyncStateRepository
     private lateinit var context: Context
     private lateinit var resolver: ContentResolver
+    private lateinit var cloudRepo: DrivePhotoRepository
+    private lateinit var linkDetailHelpers: LinkDetailHelpers
+    private lateinit var freeUpVerifiedDao: FreeUpVerifiedDao
     private lateinit var useCase: FreeUpSpaceUseCase
 
     /** Eligible by [FreeUpSpaceUseCase.isEligibleForReclamation]: SYNCED with a real stamp. */
@@ -73,6 +83,35 @@ class FreeUpSpaceProgressTest {
         sizeBytes = 1024L,
     )
 
+    private fun entityFor(row: SyncState) = SyncStateEntity(
+        localUri = row.localUri,
+        userId = userId.id,
+        cloudFileId = row.cloudFileId,
+        localHash = row.localHash,
+        cloudHash = null,
+        status = SyncStatus.SYNCED,
+        lastSyncAttemptMs = 0L,
+        lastSyncSuccessMs = 1L,
+        backedUpAtMs = 1L,
+        sizeBytes = row.sizeBytes,
+    )
+
+    private fun linkAt(linkId: String) =
+        BatchLinkDto(link = LinkCoreDto(linkId = linkId, type = 2, state = 1))
+
+    /** Parks [rows] as ready and stubs live re-check so [finishReadyForReclaim] reaches reclaim. */
+    private fun stubFinishPath(rows: List<SyncState>) {
+        coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } returns rows.map { entityFor(it) }
+        coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { linkAt(it) }
+        }
+    }
+
     @Before
     fun setUp() {
         mockkStatic(Uri::class)
@@ -81,14 +120,15 @@ class FreeUpSpaceProgressTest {
         context = mockk(relaxed = true)
         every { context.contentResolver } returns resolver
         repo = mockk(relaxed = true)
-        // The reclaim path exercised here never touches the cloud collaborators; the manual verify
-        // path is covered in FreeUpSpaceVerifyTest, so relaxed stand-ins are enough for construction.
+        cloudRepo = mockk(relaxed = true)
+        linkDetailHelpers = mockk(relaxed = true)
+        freeUpVerifiedDao = mockk(relaxed = true)
         useCase = FreeUpSpaceUseCase(
             context,
             repo,
-            mockk(relaxed = true),
-            mockk(relaxed = true),
-            mockk(relaxed = true),
+            cloudRepo,
+            linkDetailHelpers,
+            freeUpVerifiedDao,
         )
     }
 
@@ -149,5 +189,73 @@ class FreeUpSpaceProgressTest {
         // run reports Done with zero freed. The invariant that matters either way is that a refused
         // photo is never counted.
         if (result is FreeUpSpaceUseCase.FreeUpResult.Done) assertEquals(0, result.freed)
+    }
+
+    @Test
+    fun `finish reclaim progress deltas union to successful deletes and never overlap`() = runTest {
+        val rows = (1..45).map { eligible(it) }
+        stubFinishPath(rows)
+        every { resolver.delete(any(), any(), any()) } returns 1
+
+        val deltas = mutableListOf<List<String>>()
+        val confirmations = mutableListOf<List<SyncState>>()
+        useCase.finishReadyForReclaim(
+            userId = userId,
+            onConfirmed = { confirmations += listOf(it) },
+            onReclaimProgress = { _, _, _, newlyCompleted ->
+                if (newlyCompleted.isNotEmpty()) deltas += newlyCompleted
+            },
+        )
+
+        assertEquals(rows.map { it.localUri }, confirmations.single().map { it.localUri })
+        val union = deltas.flatten()
+        assertEquals(rows.map { it.localUri }, union)
+        assertEquals("no URI appears twice across deltas", union.size, union.toSet().size)
+        for (i in deltas.indices) {
+            for (j in i + 1 until deltas.size) {
+                assertTrue(
+                    "delta $i and $j overlap: ${deltas[i]} / ${deltas[j]}",
+                    deltas[i].toSet().intersect(deltas[j].toSet()).isEmpty(),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `finish reclaim deltas omit delete-zero URIs while counters stay monotonic`() = runTest {
+        val rows = (1..25).map { eligible(it) }
+        stubFinishPath(rows)
+        // Alternating success / refusal in reclaim order.
+        var call = 0
+        every { resolver.delete(any(), any(), any()) } answers {
+            call++
+            if (call % 2 == 1) 1 else 0
+        }
+
+        val reports = mutableListOf<Triple<Int, Int, Int>>()
+        val deltaUris = mutableListOf<String>()
+        useCase.finishReadyForReclaim(
+            userId = userId,
+            onReclaimProgress = { processed, removed, total, newlyCompleted ->
+                reports += Triple(processed, removed, total)
+                deltaUris += newlyCompleted
+            },
+        )
+
+        val expectedSuccess = rows.filterIndexed { index, _ -> index % 2 == 0 }.map { it.localUri }
+        val expectedFail = rows.filterIndexed { index, _ -> index % 2 == 1 }.map { it.localUri }
+        assertEquals(expectedSuccess, deltaUris)
+        assertTrue(expectedFail.none { it in deltaUris })
+        assertEquals(0 to rows.size, reports.first().first to reports.first().third)
+        assertEquals(rows.size, reports.last().first)
+        assertTrue(
+            "processed must not go backwards: $reports",
+            reports.zipWithNext().all { (a, b) -> b.first >= a.first },
+        )
+        assertTrue(
+            "removed must not go backwards: $reports",
+            reports.zipWithNext().all { (a, b) -> b.second >= a.second },
+        )
+        assertEquals(expectedSuccess.size, reports.last().second)
     }
 }

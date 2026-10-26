@@ -39,6 +39,9 @@ import eu.akoos.photos.util.isOfflineError
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -63,18 +66,27 @@ class FreeUpSpaceUseCase @Inject constructor(
     private val mutex = Mutex()
 
     sealed class FreeUpResult {
-        data class Done(val freed: Int) : FreeUpResult()
+        data class Done(
+            val freed: Int,
+            val remainingUris: List<String> = emptyList(),
+            val completedUris: List<String> = emptyList(),
+        ) : FreeUpResult()
         /** Android 11+: system delete dialog must be shown for these URIs. */
         data class NeedsPermission(
             val pendingIntent: PendingIntent,
             val localUris: List<String>,
+            val completedUris: List<String> = emptyList(),
         ) : FreeUpResult()
         /**
          * Consent-request construction failed after [freed] direct deletes already landed. Surfaced
          * instead of silently reporting [Done] with a leftover NeedsPermission intent the user never
          * sees.
          */
-        data class Failed(val message: String, val freed: Int = 0) : FreeUpResult()
+        data class Failed(
+            val message: String,
+            val freed: Int = 0,
+            val completedUris: List<String> = emptyList(),
+        ) : FreeUpResult()
     }
 
     /**
@@ -146,6 +158,7 @@ class FreeUpSpaceUseCase @Inject constructor(
 
         val volumeId = cloudRepo.getVolumeId(userId)
         for (chunk in pending.chunked(VERIFY_CHUNK_SIZE)) {
+            currentCoroutineContext().ensureActive()
             val linkIds = chunk.mapNotNull { it.cloudFileId }.distinct()
             val details = retryWithBackoff(
                 shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
@@ -179,6 +192,12 @@ class FreeUpSpaceUseCase @Inject constructor(
         freeUpVerifiedDao.readyToReclaim(userId.id, sinceMs).map { it.toDomain() }
     }
 
+    /** Count of [readyToReclaim] rows without loading the full list (WorkInfo observer). */
+    suspend fun readyToReclaimCount(userId: UserId): Int = withContext(Dispatchers.IO) {
+        val sinceMs = System.currentTimeMillis() - VERIFY_FRESHNESS_MS
+        freeUpVerifiedDao.readyToReclaimCount(userId.id, sinceMs)
+    }
+
     /** Clears verified markers for [userId] (manual cancel of a verify run). */
     suspend fun clearVerified(userId: UserId) = withContext(Dispatchers.IO) {
         freeUpVerifiedDao.deleteAllForUser(userId.id)
@@ -197,22 +216,76 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [verifiedAtMs] alone — a park without this step recreates the trash-after-verify hole.
      * Drops verified markers for links that are no longer active.
      */
-    suspend fun confirmReadyForReclaim(userId: UserId): List<SyncState> = withContext(Dispatchers.IO) {
+    suspend fun confirmReadyForReclaim(
+        userId: UserId,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): List<SyncState> = mutex.withLock {
+        confirmReadyForReclaimLocked(userId, onProgress)
+    }
+
+    /**
+     * Runs the mandatory live re-check and the local reclaim while holding the same mutex used by
+     * background verification. A scheduled verify therefore cannot race the foreground finisher
+     * between its safety check and its first device deletion.
+     *
+     * [onConfirmed] receives the live-confirmed set once before any delete so the UI can settle the
+     * grid onto that set. [onReclaimProgress]'s [newlyCompleted] lists are **successful deletes only**
+     * (deltas since the previous report); the same [PROGRESS_STEP] throttle still avoids per-photo
+     * UI churn. Public [reclaimCandidates] keeps its `(done, total)` progress shape unchanged.
+     */
+    suspend fun finishReadyForReclaim(
+        userId: UserId,
+        onRecheckProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        onConfirmed: (List<SyncState>) -> Unit = {},
+        onReclaimProgress: (
+            processed: Int,
+            removed: Int,
+            total: Int,
+            newlyCompleted: List<String>,
+        ) -> Unit = { _, _, _, _ -> },
+    ): FreeUpResult = mutex.withLock {
+        val confirmed = confirmReadyForReclaimLocked(userId, onRecheckProgress)
+        if (confirmed.isEmpty()) {
+            FreeUpResult.Done(freed = 0)
+        } else {
+            onConfirmed(confirmed)
+            reclaimCandidatesLocked(confirmed, onReclaimProgress)
+        }
+    }
+
+    private suspend fun confirmReadyForReclaimLocked(
+        userId: UserId,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): List<SyncState> = withContext(Dispatchers.IO) {
         val ready = readyToReclaim(userId)
-        if (ready.isEmpty()) return@withContext emptyList()
+        if (ready.isEmpty()) {
+            onProgress(0, 0)
+            return@withContext emptyList()
+        }
+        val total = ready.size
+        var done = 0
+        val stillActive = mutableListOf<SyncState>()
+        onProgress(done, total)
         val volumeId = cloudRepo.getVolumeId(userId)
-        val linkIds = ready.mapNotNull { it.cloudFileId }.distinct()
-        val details = retryWithBackoff(
-            shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
-        ) {
-            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
+        for (chunk in ready.chunked(VERIFY_CHUNK_SIZE)) {
+            currentCoroutineContext().ensureActive()
+            val linkIds = chunk.mapNotNull { it.cloudFileId }.distinct()
+            val details = retryWithBackoff(
+                shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
+            ) {
+                linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
+            }
+            currentCoroutineContext().ensureActive()
+            val activeChunk = chunk.filter { row ->
+                val linkId = row.cloudFileId ?: return@filter false
+                details[linkId]?.link?.state == ACTIVE_LINK_STATE
+            }
+            stillActive += activeChunk
+            val dropped = chunk.map { it.localUri }.toSet() - activeChunk.map { it.localUri }.toSet()
+            if (dropped.isNotEmpty()) clearVerified(userId, dropped.toList())
+            done += chunk.size
+            onProgress(done, total)
         }
-        val stillActive = ready.filter { row ->
-            val linkId = row.cloudFileId ?: return@filter false
-            details[linkId]?.link?.state == ACTIVE_LINK_STATE
-        }
-        val dropped = ready.map { it.localUri }.toSet() - stillActive.map { it.localUri }.toSet()
-        if (dropped.isNotEmpty()) clearVerified(userId, dropped.toList())
         stillActive
     }
 
@@ -257,33 +330,61 @@ class FreeUpSpaceUseCase @Inject constructor(
     suspend fun reclaimCandidates(
         candidates: List<SyncState>,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): FreeUpResult = mutex.withLock {
+        reclaimCandidatesLocked(candidates) { processed, _, total, _ ->
+            onProgress(processed, total)
+        }
+    }
+
+    private suspend fun reclaimCandidatesLocked(
+        candidates: List<SyncState>,
+        onProgress: (processed: Int, removed: Int, total: Int, newlyCompleted: List<String>) -> Unit,
     ): FreeUpResult = withContext(Dispatchers.IO) {
         var freed = 0
         val needsDialog = mutableListOf<Pair<String, Uri>>()  // localUri → contentUri
+        val completedUris = mutableListOf<String>()
+        val pendingDelta = mutableListOf<String>()
         val total = candidates.size
-        onProgress(0, total)
+        onProgress(0, 0, total, emptyList())
 
         for ((index, state) in candidates.withIndex()) {
             val contentUri = Uri.parse(state.localUri)
-            try {
-                val deleted = context.contentResolver.delete(contentUri, null, null)
+            // A cancellation is acted on only between items. Once the provider call starts, finish
+            // the provider call and its matching sync-state update so a deleted device copy cannot
+            // remain marked SYNCED when the user taps Stop.
+            currentCoroutineContext().ensureActive()
+            val removed = withContext(NonCancellable) {
+                val deleted = try {
+                    context.contentResolver.delete(contentUri, null, null)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    0
+                }
                 if (deleted > 0) {
                     syncStateRepo.updateStatusAndDeleteLocal(state.localUri, SyncStatus.CLOUD_ONLY)
-                    freed++
+                    true
                 } else {
-                    // delete() returned 0, likely needs permission on API 30+
-                    needsDialog += state.localUri to contentUri
+                    false
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // SecurityException / RecoverableSecurityException on Android 11+
+            }
+            if (removed) {
+                freed++
+                completedUris += state.localUri
+                pendingDelta += state.localUri
+            } else {
+                // delete() returned 0, likely needs permission on API 30+.
                 needsDialog += state.localUri to contentUri
             }
             // Each photo is committed on its own, so a run the user walks away from keeps everything
             // it already reclaimed; the next open lists what is left and picks up from there.
-            val done = index + 1
-            if (done % PROGRESS_STEP == 0 || done == total) onProgress(done, total)
+            val processed = index + 1
+            if (processed % PROGRESS_STEP == 0 || processed == total) {
+                // Deltas are successful deletes only since the previous report; throttle still
+                // avoids per-photo UI churn.
+                onProgress(processed, freed, total, pendingDelta.toList())
+                pendingDelta.clear()
+            }
         }
 
         if (needsDialog.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -292,22 +393,36 @@ class FreeUpSpaceUseCase @Inject constructor(
             val candidateUris = needsDialog.map { it.first }
             val existingIds = queryExistingMediaStoreRows(context.contentResolver, candidateUris).keys
             val aliveUris = urisPresentInMediaStore(candidateUris, existingIds)
-            if (aliveUris.isEmpty()) return@withContext FreeUpResult.Done(freed)
+            if (aliveUris.isEmpty()) {
+                return@withContext FreeUpResult.Done(
+                    freed = freed,
+                    completedUris = completedUris + candidateUris,
+                )
+            }
             val uriByString = needsDialog.associate { it.first to it.second }
             val firstChunk = deleteRequestChunks(aliveUris).first()
             val chunkContentUris = firstChunk.mapNotNull { uriByString[it] }
+            currentCoroutineContext().ensureActive()
             val built = runCatching {
                 MediaStore.createDeleteRequest(context.contentResolver, chunkContentUris)
             }
             val pi = built.getOrNull()
             if (pi != null) {
-                return@withContext FreeUpResult.NeedsPermission(pi, firstChunk)
+                return@withContext FreeUpResult.NeedsPermission(
+                    pendingIntent = pi,
+                    localUris = firstChunk,
+                    completedUris = completedUris,
+                )
             }
             val cause = built.exceptionOrNull()?.message ?: "createDeleteRequest failed"
-            return@withContext FreeUpResult.Failed(cause, freed)
+            return@withContext FreeUpResult.Failed(cause, freed, completedUris)
         }
 
-        FreeUpResult.Done(freed)
+        FreeUpResult.Done(
+            freed = freed,
+            remainingUris = needsDialog.map { it.first },
+            completedUris = completedUris,
+        )
     }
 
     companion object {
