@@ -29,6 +29,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -1346,37 +1347,15 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrate_v41_to_v42_createsFreeUpVerifiedTable() {
+    fun migrate_v41_to_v42_isNoOp() {
+        // Single-pass free-up dropped the draft free_up_verified table; v41→v42 stays a version
+        // bump only so local DBs already at 42 need no downgrade.
         Migrations.MIGRATION_41_42.migrate(db)
 
-        db.execSQL(
-            "INSERT INTO free_up_verified (userId, localUri, cloudFileId, verifiedAtMs) " +
-                "VALUES ('u1', 'content://media/1', 'cloud-1', 1000)",
-        )
         db.query(
-            "SELECT userId, localUri, cloudFileId, verifiedAtMs FROM free_up_verified " +
-                "WHERE userId = 'u1' AND localUri = 'content://media/1'",
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'free_up_verified'",
         ).use { cur ->
-            assertTrue("expected the inserted verified row to be readable", cur.moveToFirst())
-            assertEquals("u1", cur.getString(0))
-            assertEquals("content://media/1", cur.getString(1))
-            assertEquals("cloud-1", cur.getString(2))
-            assertEquals(1000L, cur.getLong(3))
-        }
-
-        // Composite PK (userId, localUri): a second write for the same pair replaces.
-        db.execSQL(
-            "INSERT OR REPLACE INTO free_up_verified (userId, localUri, cloudFileId, verifiedAtMs) " +
-                "VALUES ('u1', 'content://media/1', 'cloud-2', 2000)",
-        )
-        db.query(
-            "SELECT COUNT(*), MAX(cloudFileId), MAX(verifiedAtMs) FROM free_up_verified " +
-                "WHERE userId = 'u1' AND localUri = 'content://media/1'",
-        ).use { cur ->
-            assertTrue(cur.moveToFirst())
-            assertEquals(1, cur.getInt(0))
-            assertEquals("cloud-2", cur.getString(1))
-            assertEquals(2000L, cur.getLong(2))
+            assertFalse("noop migration must not create free_up_verified", cur.moveToFirst())
         }
     }
 

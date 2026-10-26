@@ -20,25 +20,17 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.data.db.entity
-
-import androidx.room.Entity
-import androidx.room.Index
+package eu.akoos.photos.domain.repository
 
 /**
- * One Drive-verified free-up candidate. Separate from `sync_state` so upserts of the sync row cannot
- * wipe the verify stamp. Joined back on [localUri] + matching [cloudFileId] for the same [userId].
+ * Outcome of attempting to delete device MediaStore rows for a batch of local URI strings.
  *
- * Stub entity for Phase 6 contract tests; registered on AppDatabase in Phase 7.
+ * - [deleted]: [ContentResolver.delete] returned > 0
+ * - [missing]: delete returned 0 and the row is gone from MediaStore (already reclaimed / gone)
+ * - [needsPermission]: delete returned 0 but the MediaStore row still exists (API 30+ consent)
  */
-@Entity(
-    tableName = "free_up_verified",
-    primaryKeys = ["userId", "localUri"],
-    indices = [Index("userId"), Index("localUri")],
-)
-data class FreeUpVerifiedEntity(
-    val userId: String,
-    val localUri: String,
-    val cloudFileId: String,
-    val verifiedAtMs: Long,
+data class LocalMediaDeleteResult(
+    val deleted: List<String>,
+    val missing: List<String>,
+    val needsPermission: List<String>,
 )

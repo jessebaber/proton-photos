@@ -20,14 +20,20 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.settings
+package eu.akoos.photos.data.freeup
 
+import eu.akoos.photos.domain.repository.FREE_UP_PENDING_OFFER_STALE_MS
+import eu.akoos.photos.domain.repository.FreeUpConsentSettlement
+import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -37,6 +43,7 @@ class FreeUpPendingDeleteBridgeTest {
     fun settle_granted_removes_uris_and_emits_matching_settlement() = runTest {
         val bridge = FreeUpPendingDeleteBridge()
         bridge.offer(listOf("content://a", "content://b"))
+        assertNotNull(bridge.offeredAtMs)
 
         // UNDISPATCHED so collect is subscribed before settle's tryEmit.
         val settlement = async(start = CoroutineStart.UNDISPATCHED) { bridge.settled.first() }
@@ -47,6 +54,7 @@ class FreeUpPendingDeleteBridgeTest {
             settlement.await(),
         )
         assertEquals(setOf("content://b"), bridge.uris.value)
+        assertNotNull(bridge.offeredAtMs)
     }
 
     @Test
@@ -62,6 +70,7 @@ class FreeUpPendingDeleteBridgeTest {
             settlement.await(),
         )
         assertTrue(bridge.uris.value.isEmpty())
+        assertNull(bridge.offeredAtMs)
     }
 
     @Test
@@ -97,6 +106,7 @@ class FreeUpPendingDeleteBridgeTest {
             settlement.await(),
         )
         assertTrue(bridge.uris.value.isEmpty())
+        assertNull(bridge.offeredAtMs)
     }
 
     @Test
@@ -112,5 +122,77 @@ class FreeUpPendingDeleteBridgeTest {
             settlement.await(),
         )
         assertEquals(setOf("content://c"), bridge.uris.value)
+    }
+
+    @Test
+    fun offer_sets_offeredAtMs_once_until_queue_empties() {
+        val bridge = FreeUpPendingDeleteBridge()
+        assertNull(bridge.offeredAtMs)
+
+        bridge.offer(listOf("content://a"))
+        val first = bridge.offeredAtMs
+        assertNotNull(first)
+
+        bridge.offer(listOf("content://b"))
+        assertEquals(first, bridge.offeredAtMs)
+
+        bridge.settle(setOf("content://a", "content://b"), granted = true)
+        assertNull(bridge.offeredAtMs)
+    }
+
+    @Test
+    fun isFreeUpPendingOfferStale_null_offer_is_never_stale() {
+        assertFalse(isFreeUpPendingOfferStale(offeredAtMs = null, nowMs = 1_000L))
+    }
+
+    @Test
+    fun isFreeUpPendingOfferStale_fresh_offer_within_15_min() {
+        val offered = 1_000L
+        assertFalse(
+            isFreeUpPendingOfferStale(
+                offeredAtMs = offered,
+                nowMs = offered + FREE_UP_PENDING_OFFER_STALE_MS - 1L,
+            ),
+        )
+    }
+
+    @Test
+    fun isFreeUpPendingOfferStale_at_or_past_15_min() {
+        val offered = 1_000L
+        assertTrue(
+            isFreeUpPendingOfferStale(
+                offeredAtMs = offered,
+                nowMs = offered + FREE_UP_PENDING_OFFER_STALE_MS,
+            ),
+        )
+        assertTrue(
+            isFreeUpPendingOfferStale(
+                offeredAtMs = offered,
+                nowMs = offered + FREE_UP_PENDING_OFFER_STALE_MS + 60_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun settleAllPending_clears_offeredAtMs_so_offer_is_no_longer_stale() {
+        val bridge = FreeUpPendingDeleteBridge()
+        bridge.offer(listOf("content://old"))
+        val offered = bridge.offeredAtMs!!
+        assertTrue(
+            isFreeUpPendingOfferStale(
+                offeredAtMs = offered,
+                nowMs = offered + FREE_UP_PENDING_OFFER_STALE_MS,
+            ),
+        )
+
+        bridge.settleAllPending(granted = false)
+        assertTrue(bridge.uris.value.isEmpty())
+        assertNull(bridge.offeredAtMs)
+        assertFalse(
+            isFreeUpPendingOfferStale(
+                offeredAtMs = bridge.offeredAtMs,
+                nowMs = offered + FREE_UP_PENDING_OFFER_STALE_MS,
+            ),
+        )
     }
 }

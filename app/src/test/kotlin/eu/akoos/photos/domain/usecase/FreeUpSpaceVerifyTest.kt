@@ -22,24 +22,18 @@
 
 package eu.akoos.photos.domain.usecase
 
-import android.content.ContentResolver
-import android.content.Context
-import android.net.Uri
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
-import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
-import eu.akoos.photos.data.db.entity.FreeUpVerifiedEntity
-import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaDeleteResult
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
-import io.mockk.mockkStatic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
@@ -48,24 +42,27 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.net.UnknownHostException
 
 /**
- * Pins chunked [FreeUpSpaceUseCase.verifyForReclaim] / [FreeUpSpaceUseCase.readyToReclaim]:
- * successful chunks persist and appear in the ready set; resume skips fresh verified rows; a failed
- * or offline chunk never marks those URIs ready.
+ * Pins chunked single-pass [FreeUpSpaceUseCase.runPipeline]: inactive links are never deleted;
+ * a failed Drive fetch deletes nothing in that chunk; cancel between chunks keeps finished work;
+ * API &lt; R never returns [NeedsPermission].
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class FreeUpSpaceVerifyTest {
 
     private val userId = UserId("u1")
     private val volumeId = "vol-1"
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var linkDetailHelpers: LinkDetailHelpers
-    private lateinit var freeUpVerifiedDao: FreeUpVerifiedDao
     private lateinit var syncStateRepo: SyncStateRepository
+    private lateinit var localMediaRepo: LocalMediaRepository
     private lateinit var useCase: FreeUpSpaceUseCase
-
-    private val persisted = mutableListOf<FreeUpVerifiedEntity>()
 
     private fun candidate(linkId: String?, localHash: String = "hash-${linkId ?: "none"}") = SyncState(
         localUri = "content://media/external/images/media/${linkId ?: "none"}",
@@ -82,232 +79,81 @@ class FreeUpSpaceVerifyTest {
     private fun linkAt(linkId: String, state: Int) =
         BatchLinkDto(link = LinkCoreDto(linkId = linkId, type = 2, state = state))
 
-    private fun entityFor(row: FreeUpVerifiedEntity) = SyncStateEntity(
-        localUri = row.localUri,
-        userId = row.userId,
-        cloudFileId = row.cloudFileId,
-        localHash = "hash",
-        cloudHash = null,
-        status = SyncStatus.SYNCED,
-        lastSyncAttemptMs = 0L,
-        lastSyncSuccessMs = 1L,
-        backedUpAtMs = 1L,
-        sizeBytes = 1024L,
+    private fun deletedAll(uris: List<String>) = LocalMediaDeleteResult(
+        deleted = uris,
+        missing = emptyList(),
+        needsPermission = emptyList(),
     )
 
     @Before
     fun setUp() {
-        persisted.clear()
-        mockkStatic(Uri::class)
-        every { Uri.parse(any()) } returns mockk(relaxed = true)
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
-        freeUpVerifiedDao = mockk(relaxed = true)
         syncStateRepo = mockk(relaxed = true)
-        val resolver = mockk<ContentResolver>(relaxed = true)
-        every { resolver.delete(any(), any(), any()) } returns 1
-        val context = mockk<Context>(relaxed = true)
-        every { context.contentResolver } returns resolver
+        localMediaRepo = mockk(relaxed = true)
         useCase = FreeUpSpaceUseCase(
-            context,
             syncStateRepo,
             cloudRepo,
             linkDetailHelpers,
-            freeUpVerifiedDao,
+            localMediaRepo,
         )
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
-        coEvery { freeUpVerifiedDao.upsert(any<FreeUpVerifiedEntity>()) } coAnswers {
-            persisted += firstArg<FreeUpVerifiedEntity>()
-        }
-        coEvery { freeUpVerifiedDao.upsert(any<List<FreeUpVerifiedEntity>>()) } coAnswers {
-            persisted += firstArg<List<FreeUpVerifiedEntity>>()
-        }
-        coEvery { freeUpVerifiedDao.freshLocalUris(any(), any()) } answers {
-            val since = secondArg<Long>()
-            persisted.filter { it.userId == userId.id && it.verifiedAtMs >= since }.map { it.localUri }
-        }
-        coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } answers {
-            val since = secondArg<Long>()
-            persisted
-                .filter { it.userId == userId.id && it.verifiedAtMs >= since }
-                .map { entityFor(it) }
+        coEvery { localMediaRepo.deleteDeviceCopies(any()) } coAnswers {
+            deletedAll(firstArg())
         }
     }
 
     @Test
-    fun `after a successful chunk those URIs appear in readyToReclaim`() = runTest {
+    fun `inactive link is never deleted`() = runTest {
         val row = candidate("cloud-1")
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns listOf(row)
         coEvery {
             linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
-        } returns mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        } returns mapOf("cloud-1" to linkAt("cloud-1", state = 2))
 
-        useCase.verifyForReclaim(userId, listOf(row))
-        val ready = useCase.readyToReclaim(userId)
+        val result = useCase.runPipeline(userId, Long.MAX_VALUE)
 
-        assertEquals(listOf(row.localUri), ready.map { it.localUri })
-        assertTrue("successful chunk must persist a verified row", persisted.isNotEmpty())
+        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        coVerify(exactly = 0) { localMediaRepo.deleteDeviceCopies(any()) }
+        coVerify(exactly = 0) { syncStateRepo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
     }
 
     @Test
-    fun `resume skips candidates already freshly verified`() = runTest {
-        val row = candidate("cloud-1")
-        persisted += FreeUpVerifiedEntity(
-            userId = userId.id,
-            localUri = row.localUri,
-            cloudFileId = "cloud-1",
-            verifiedAtMs = System.currentTimeMillis(),
-        )
-
-        useCase.verifyForReclaim(userId, listOf(row))
-
-        coVerify(exactly = 0) {
-            linkDetailHelpers.batchFetchLinkDetailsStrict(any(), any(), any())
-        }
-    }
-
-    @Test
-    fun `a failed chunk never marks those URIs ready`() = runTest {
+    fun `a failed chunk deletes nothing`() = runTest {
         val rows = listOf(candidate("a"), candidate("b"))
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns rows
         coEvery {
             linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
         } throws RuntimeException("chunk failed")
 
-        runCatching { useCase.verifyForReclaim(userId, rows) }
-        val ready = useCase.readyToReclaim(userId)
+        runCatching { useCase.runPipeline(userId, Long.MAX_VALUE) }
 
-        assertTrue("failed chunk must not persist ready rows", ready.isEmpty())
-        assertTrue(persisted.isEmpty())
+        coVerify(exactly = 0) { localMediaRepo.deleteDeviceCopies(any()) }
+        coVerify(exactly = 0) { syncStateRepo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
     }
 
     @Test
     fun `offline lookup throws so the worker can retry`() = runTest {
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns listOf(candidate("cloud-1"))
         coEvery {
             linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
         } throws UnknownHostException("no route")
 
         val propagated: Throwable? = try {
-            useCase.verifyForReclaim(userId, listOf(candidate("cloud-1")))
+            useCase.runPipeline(userId, Long.MAX_VALUE)
             null
         } catch (e: UnknownHostException) {
             e
         }
 
         assertNotNull("offline must propagate for WorkManager retry", propagated)
-        assertTrue(persisted.isEmpty())
+        coVerify(exactly = 0) { localMediaRepo.deleteDeviceCopies(any()) }
     }
 
     @Test
-    fun `trashed links are not persisted as ready`() = runTest {
-        coEvery {
-            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
-        } returns mapOf("cloud-1" to linkAt("cloud-1", state = 2))
-
-        useCase.verifyForReclaim(userId, listOf(candidate("cloud-1")))
-        val ready = useCase.readyToReclaim(userId)
-
-        assertTrue(ready.isEmpty())
-        assertTrue(persisted.isEmpty())
-    }
-
-    @Test
-    fun `final recheck reports each fifty-link batch and drops inactive links`() = runTest {
+    fun `cancel between chunks keeps finished deletes and skips the rest`() = runTest {
         val rows = (1..51).map { candidate("cloud-$it") }
-        persisted += rows.map {
-            FreeUpVerifiedEntity(
-                userId = userId.id,
-                localUri = it.localUri,
-                cloudFileId = it.cloudFileId!!,
-                verifiedAtMs = System.currentTimeMillis(),
-            )
-        }
-        coEvery {
-            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
-        } answers {
-            @Suppress("UNCHECKED_CAST")
-            val ids = args[2] as List<String>
-            ids.associateWith { id ->
-                linkAt(id, state = if (id == "cloud-51") 2 else 1)
-            }
-        }
-
-        val reports = mutableListOf<Pair<Int, Int>>()
-        val confirmed = useCase.confirmReadyForReclaim(userId) { done, total ->
-            reports += done to total
-        }
-
-        assertEquals(listOf(0 to 51, 50 to 51, 51 to 51), reports)
-        assertEquals(50, confirmed.size)
-        assertTrue(confirmed.none { it.cloudFileId == "cloud-51" })
-        coVerify(exactly = 2) {
-            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
-        }
-        coVerify {
-            freeUpVerifiedDao.deleteForUris(
-                userId.id,
-                match { "content://media/external/images/media/cloud-51" in it },
-            )
-        }
-    }
-
-    @Test
-    fun `finish recheck started equals ready and drops are inactive-only non-overlapping`() = runTest {
-        val rows = (1..51).map { candidate("cloud-$it") }
-        persisted += rows.map {
-            FreeUpVerifiedEntity(
-                userId = userId.id,
-                localUri = it.localUri,
-                cloudFileId = it.cloudFileId!!,
-                verifiedAtMs = System.currentTimeMillis(),
-            )
-        }
-        coEvery {
-            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
-        } answers {
-            @Suppress("UNCHECKED_CAST")
-            val ids = args[2] as List<String>
-            // All inactive → confirmed empty, so reclaim is skipped (no ContentResolver needed).
-            ids.associateWith { id -> linkAt(id, state = 2) }
-        }
-
-        val started = mutableListOf<SyncState>()
-        val dropDeltas = mutableListOf<List<String>>()
-        val result = useCase.finishReadyForReclaim(
-            userId = userId,
-            onRecheckStarted = { started += it },
-            onRecheckProgress = { _, _, newlyDropped ->
-                if (newlyDropped.isNotEmpty()) dropDeltas += newlyDropped
-            },
-        )
-
-        assertEquals(rows.map { it.localUri }, started.map { it.localUri })
-        val dropped = dropDeltas.flatten()
-        assertEquals(rows.map { it.localUri }.toSet(), dropped.toSet())
-        assertEquals("no URI appears twice across drop deltas", dropped.size, dropped.toSet().size)
-        for (i in dropDeltas.indices) {
-            for (j in i + 1 until dropDeltas.size) {
-                assertTrue(
-                    "drop delta $i and $j overlap",
-                    dropDeltas[i].toSet().intersect(dropDeltas[j].toSet()).isEmpty(),
-                )
-            }
-        }
-        assertEquals(
-            "settle + all drops == started ready (survivors empty)",
-            started.map { it.localUri }.toSet(),
-            dropped.toSet(),
-        )
-        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
-        coVerify {
-            freeUpVerifiedDao.deleteForUris(
-                userId.id,
-                match { it.containsAll(rows.take(50).map { r -> r.localUri }) },
-            )
-        }
-    }
-
-    @Test
-    fun `cancel between verify chunks keeps the first chunk and skips the rest`() = runTest {
-        val rows = (1..51).map { candidate("cloud-$it") }
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns rows
         var fetches = 0
         coEvery {
             linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
@@ -319,9 +165,11 @@ class FreeUpSpaceVerifyTest {
         }
 
         try {
-            useCase.verifyForReclaim(userId, rows) { done, _ ->
-                if (done >= FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE) {
-                    throw CancellationException("cancel after first verify chunk")
+            useCase.runPipeline(userId, Long.MAX_VALUE) { progress ->
+                if (progress.processed >= FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE &&
+                    progress.phase == FreeUpSpaceUseCase.PipelinePhase.Deleting
+                ) {
+                    throw CancellationException("cancel after first verify+delete chunk")
                 }
             }
         } catch (_: CancellationException) {
@@ -329,12 +177,47 @@ class FreeUpSpaceVerifyTest {
         }
 
         assertEquals(1, fetches)
-        assertEquals(FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE, persisted.size)
-        assertTrue(persisted.none { it.cloudFileId == "cloud-51" })
+        coVerify(exactly = 1) {
+            localMediaRepo.deleteDeviceCopies(
+                match<List<String>> { it.size == FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE },
+            )
+        }
+        coVerify {
+            syncStateRepo.updateStatusAndDeleteLocal(
+                match<List<String>> { it.size == FreeUpSpaceUseCase.VERIFY_CHUNK_SIZE },
+                SyncStatus.CLOUD_ONLY,
+            )
+        }
     }
 
     @Test
-    fun `runPipeline reports verifying then rechecking then deleting phases`() = runTest {
+    @Config(sdk = [29])
+    fun `API below R never returns NeedsPermission and counts survivors as skipped`() = runTest {
+        val rows = listOf(candidate("cloud-1"), candidate("cloud-2"))
+        coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns rows
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { linkAt(it, state = 1) }
+        }
+        coEvery { localMediaRepo.deleteDeviceCopies(any()) } returns LocalMediaDeleteResult(
+            deleted = emptyList(),
+            missing = emptyList(),
+            needsPermission = rows.map { it.localUri },
+        )
+
+        val result = useCase.runPipeline(userId, Long.MAX_VALUE)
+
+        assertTrue(result is FreeUpSpaceUseCase.FreeUpResult.Done)
+        val done = result as FreeUpSpaceUseCase.FreeUpResult.Done
+        assertEquals(0, done.freed)
+        assertEquals(2, done.skipped)
+    }
+
+    @Test
+    fun `runPipeline reports verifying then deleting phases`() = runTest {
         val rows = (1..3).map { candidate("cloud-$it") }
         coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns rows
         coEvery {
@@ -353,7 +236,6 @@ class FreeUpSpaceVerifyTest {
         assertEquals(
             listOf(
                 FreeUpSpaceUseCase.PipelinePhase.Verifying,
-                FreeUpSpaceUseCase.PipelinePhase.Rechecking,
                 FreeUpSpaceUseCase.PipelinePhase.Deleting,
             ),
             phases,
@@ -362,7 +244,7 @@ class FreeUpSpaceVerifyTest {
     }
 
     @Test
-    fun `runPipeline automatic eligibility excludes empty-hash downloads from verify`() = runTest {
+    fun `runPipeline automatic eligibility excludes empty-hash downloads`() = runTest {
         val uploaded = candidate("cloud-1", localHash = "hash-1")
         val downloaded = candidate("cloud-2", localHash = "")
         coEvery { syncStateRepo.getSyncedBefore(userId, any()) } returns listOf(uploaded, downloaded)
@@ -376,16 +258,16 @@ class FreeUpSpaceVerifyTest {
 
         useCase.runPipeline(userId, Long.MAX_VALUE, protectDownloaded = true)
 
-        assertEquals(listOf(uploaded.localUri), persisted.map { it.localUri })
+        coVerify {
+            localMediaRepo.deleteDeviceCopies(listOf(uploaded.localUri))
+        }
         coVerify {
             syncStateRepo.updateStatusAndDeleteLocal(listOf(uploaded.localUri), SyncStatus.CLOUD_ONLY)
         }
         coVerify(exactly = 0) {
-            syncStateRepo.updateStatusAndDeleteLocal(
+            localMediaRepo.deleteDeviceCopies(
                 match<List<String>> { downloaded.localUri in it },
-                any(),
             )
         }
     }
 }
-
