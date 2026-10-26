@@ -624,12 +624,6 @@ fun NavGraph(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-    if (startupRouteForExternal == StartupRoute.Ready) {
-        // These consent drains belong to the authenticated app shell, not Gallery. The Free up
-        // route can therefore receive and finish a permanent-delete request while it is visible.
-        PendingDeleteHandler()
-        FreeUpPermanentDeleteHandler()
-    }
     CompositionLocalProvider(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalViewerReturnKey provides viewerReturnKey,
@@ -723,6 +717,9 @@ fun NavGraph(
         }
 
         composable(Screen.Gallery.route) {
+            // Trash consent for delete-after-backup: Gallery only (upstream parity) so the OS
+            // dialog does not appear over editor/viewer. Free-up permanent delete mounts on Free up.
+            PendingDeleteHandler()
             // One-time post-update highlights. The startup router only lands here once the user is
             // fully Ready (logged in AND onboarded), so reaching this composable already implies
             // that gate. We read the seen-version pref once and, if this build's versionCode is
@@ -1538,6 +1535,8 @@ fun NavGraph(
         }
 
         composable(Screen.FreeUpSpace.route) {
+            // Permanent-delete consent only while Free up is visible (staleness cleared on mount).
+            FreeUpPermanentDeleteHandler()
             eu.akoos.photos.presentation.settings.FreeUpSpaceScreen(
                 onBack = { navController.popBackStack() },
             )

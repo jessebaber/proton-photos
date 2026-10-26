@@ -32,8 +32,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins FreeUpPipelineWorker companion contracts: unique-name isolation, progress keys, and that
- * automatic work requests full reclaim (not verify-only).
+ * Pins FreeUpPipelineWorker companion contracts: unique-name isolation, progress keys,
+ * [FreeUpPipelineWorker.mapPipelineOutcome], and retry / consent-skip predicates.
  */
 class FreeUpPipelineWorkerTest {
 
@@ -69,7 +69,6 @@ class FreeUpPipelineWorkerTest {
         assertEquals("removed", FreeUpPipelineWorker.KEY_REMOVED)
         assertEquals("needs_permission_count", FreeUpPipelineWorker.KEY_NEEDS_PERMISSION_COUNT)
         assertEquals("verifying", FreeUpPipelineWorker.PHASE_VERIFYING)
-        assertEquals("rechecking", FreeUpPipelineWorker.PHASE_RECHECKING)
         assertEquals("deleting", FreeUpPipelineWorker.PHASE_DELETING)
         assertEquals("awaiting_consent", FreeUpPipelineWorker.PHASE_AWAITING_CONSENT)
     }
@@ -93,15 +92,11 @@ class FreeUpPipelineWorkerTest {
     }
 
     @Test
-    fun `automatic trigger requests full reclaim not verify-only`() {
+    fun `automatic trigger protects downloads and ages by interval`() {
         val data = FreeUpPipelineWorker.automaticInputData(86_400_000L)
         assertEquals(
             FreeUpPipelineWorker.TRIGGER_AUTOMATIC,
             data.getString(FreeUpPipelineWorker.KEY_TRIGGER),
-        )
-        assertTrue(
-            "automatic free-up must run verify+recheck+reclaim",
-            FreeUpPipelineWorker.runsFullReclaim(FreeUpPipelineWorker.TRIGGER_AUTOMATIC),
         )
         assertTrue(FreeUpPipelineWorker.protectDownloadedFor(FreeUpPipelineWorker.TRIGGER_AUTOMATIC))
         assertFalse(FreeUpPipelineWorker.protectDownloadedFor(FreeUpPipelineWorker.TRIGGER_MANUAL))
@@ -122,7 +117,6 @@ class FreeUpPipelineWorkerTest {
                 86_400_000L,
             ),
         )
-        assertTrue(FreeUpPipelineWorker.runsFullReclaim(FreeUpPipelineWorker.TRIGGER_MANUAL))
     }
 
     @Test
@@ -132,19 +126,84 @@ class FreeUpPipelineWorkerTest {
             FreeUpPipelineWorker.phaseWireName(FreeUpSpaceUseCase.PipelinePhase.Verifying),
         )
         assertEquals(
-            FreeUpPipelineWorker.PHASE_RECHECKING,
-            FreeUpPipelineWorker.phaseWireName(FreeUpSpaceUseCase.PipelinePhase.Rechecking),
-        )
-        assertEquals(
             FreeUpPipelineWorker.PHASE_DELETING,
             FreeUpPipelineWorker.phaseWireName(FreeUpSpaceUseCase.PipelinePhase.Deleting),
         )
     }
 
     @Test
-    fun `bridge offer is gated on process UI presence`() {
-        assertTrue(FreeUpPipelineWorker.shouldOfferBridge(processUiPresent = true))
-        assertFalse(FreeUpPipelineWorker.shouldOfferBridge(processUiPresent = false))
+    fun `mapPipelineOutcome always offers and notifies on NeedsPermission`() {
+        val mapped = FreeUpPipelineWorker.mapPipelineOutcome(
+            FreeUpSpaceUseCase.FreeUpResult.NeedsPermission(
+                localUris = listOf("content://a", "content://b"),
+                completedUris = listOf("content://done"),
+            ),
+        )
+        assertEquals(FreeUpPipelineWorker.PHASE_AWAITING_CONSENT, mapped.phase)
+        assertEquals(3, mapped.processed)
+        assertEquals(3, mapped.total)
+        assertEquals(1, mapped.removed)
+        assertEquals(2, mapped.needsPermissionCount)
+        assertEquals(listOf("content://a", "content://b"), mapped.offerUris)
+        assertTrue(mapped.postConsentNotification)
+    }
+
+    @Test
+    fun `mapPipelineOutcome Done does not offer or notify`() {
+        val mapped = FreeUpPipelineWorker.mapPipelineOutcome(
+            FreeUpSpaceUseCase.FreeUpResult.Done(
+                freed = 4,
+                skipped = 1,
+                completedUris = listOf("content://1", "content://2", "content://3", "content://4"),
+            ),
+        )
+        assertEquals(FreeUpPipelineWorker.PHASE_DELETING, mapped.phase)
+        assertEquals(4, mapped.processed)
+        assertEquals(4, mapped.total)
+        assertEquals(4, mapped.removed)
+        assertEquals(0, mapped.needsPermissionCount)
+        assertTrue(mapped.offerUris.isEmpty())
+        assertFalse(mapped.postConsentNotification)
+    }
+
+    @Test
+    fun `automatic skip when consent queue is non-empty`() {
+        assertTrue(FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(true))
+        assertFalse(FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(false))
+    }
+
+    @Test
+    fun `retry requires attempt room and transient or offline`() {
+        assertTrue(
+            FreeUpPipelineWorker.shouldRetry(
+                runAttemptCount = 0,
+                transient = true,
+                offline = false,
+            ),
+        )
+        assertTrue(
+            FreeUpPipelineWorker.shouldRetry(
+                runAttemptCount = 2,
+                transient = false,
+                offline = true,
+            ),
+        )
+        assertFalse(
+            "permanent errors must not retry even under the attempt cap",
+            FreeUpPipelineWorker.shouldRetry(
+                runAttemptCount = 0,
+                transient = false,
+                offline = false,
+            ),
+        )
+        assertFalse(
+            "transient past the attempt cap must not retry forever",
+            FreeUpPipelineWorker.shouldRetry(
+                runAttemptCount = FreeUpPipelineWorker.MAX_ATTEMPTS,
+                transient = true,
+                offline = true,
+            ),
+        )
     }
 
     @Test
