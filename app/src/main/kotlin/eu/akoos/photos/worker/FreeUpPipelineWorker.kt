@@ -32,8 +32,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.work.HiltWorker
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -56,8 +54,8 @@ import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
-import eu.akoos.photos.presentation.settings.FreeUpPendingDeleteBridge
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.isOfflineError
 import eu.akoos.photos.util.isTransientApiError
@@ -67,10 +65,27 @@ import me.proton.core.accountmanager.domain.AccountManager
 import java.util.concurrent.TimeUnit
 
 /**
- * Single dataSync FGS pipeline for Free up space: verify → live recheck → direct reclaim.
+ * Pure mapping of a [FreeUpSpaceUseCase.FreeUpResult] to WorkManager output, consent offer, and
+ * shade notification decisions. Kept free of Android / WorkManager types so JVM tests can pin it.
+ */
+data class MappedPipelineOutcome(
+    val phase: String,
+    val processed: Int,
+    val total: Int,
+    val removed: Int,
+    val needsPermissionCount: Int,
+    /** URIs to [FreeUpPendingDeleteQueue.offer]; empty means do not offer. */
+    val offerUris: List<String>,
+    /** When true, post the fixed awaiting-consent notification for [needsPermissionCount]. */
+    val postConsentNotification: Boolean,
+)
+
+/**
+ * Shared free-up pipeline: chunked Drive verify + delete in one pass.
  *
  * Manual and automatic triggers share this worker class but use distinct unique work names,
  * constraints, and cancel entry points so stopping one mode never cancels the other.
+ * Manual runs as expedited FGS; automatic never takes a foreground service.
  */
 @HiltWorker
 class FreeUpPipelineWorker @AssistedInject constructor(
@@ -79,13 +94,12 @@ class FreeUpPipelineWorker @AssistedInject constructor(
     private val freeUpSpace: FreeUpSpaceUseCase,
     private val accountManager: AccountManager,
     private val deviceHealth: DeviceHealthPolicy,
-    private val pendingDeleteBridge: FreeUpPendingDeleteBridge,
+    private val pendingDeleteBridge: FreeUpPendingDeleteQueue,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
         val trigger = inputData.getString(KEY_TRIGGER) ?: TRIGGER_MANUAL
         val isManual = trigger == TRIGGER_MANUAL
-        val foregroundId = foregroundNotificationId(isManual)
         val intervalMs = inputData.getLong(KEY_INTERVAL_MS, FreeUpSpaceWorker.NO_INTERVAL_MS)
 
         val userId = accountManager.getPrimaryUserId().first()
@@ -109,34 +123,40 @@ class FreeUpPipelineWorker @AssistedInject constructor(
                 Log.w(TAG, "Skipping automatic pipeline: cloud state stale ($verifiedAtMs)")
                 return Result.success()
             }
+            if (shouldSkipAutomaticForPendingConsent(pendingDeleteBridge.uris.value.isNotEmpty())) {
+                Log.d(TAG, "Skipping automatic pipeline: consent queue non-empty")
+                return Result.success()
+            }
         }
 
         val olderThanMs = olderThanMsFor(trigger, System.currentTimeMillis(), intervalMs)
         val protectDownloaded = protectDownloadedFor(trigger)
 
-        runCatching {
-            setForeground(
-                buildForegroundInfo(
-                    notificationId = foregroundId,
-                    phase = PHASE_VERIFYING,
-                    processed = 0,
-                    total = 0,
-                    removed = 0,
-                    needsPermissionCount = 0,
-                ),
-            )
-        }.onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
+        if (isManual) {
+            runCatching {
+                setForeground(
+                    buildForegroundInfo(
+                        notificationId = NotificationIds.MANUAL_FREE_UP,
+                        phase = PHASE_VERIFYING,
+                        processed = 0,
+                        total = 0,
+                        removed = 0,
+                        needsPermissionCount = 0,
+                    ),
+                )
+            }.onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
+        }
 
         return try {
             val onProgress: (FreeUpSpaceUseCase.PipelineProgress) -> Unit = { progress ->
                 val phase = phaseWireName(progress.phase)
                 publishProgress(
+                    isManual = isManual,
                     phase = phase,
                     processed = progress.processed,
                     total = progress.total,
                     removed = progress.removed,
                     needsPermissionCount = 0,
-                    foregroundId = foregroundId,
                 )
             }
 
@@ -156,56 +176,33 @@ class FreeUpPipelineWorker @AssistedInject constructor(
                 skipped
             }
 
-            when (result) {
-                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                    publishProgress(
-                        phase = PHASE_AWAITING_CONSENT,
-                        processed = result.completedUris.size + result.localUris.size,
-                        total = result.completedUris.size + result.localUris.size,
-                        removed = result.completedUris.size,
-                        needsPermissionCount = result.localUris.size,
-                        foregroundId = foregroundId,
-                    )
-                    if (shouldOfferBridge(isProcessUiPresent())) {
-                        pendingDeleteBridge.offer(result.localUris)
-                    }
-                    postAwaitingConsentNotification(result.localUris.size)
-                    Result.success(
-                        outputData(
-                            phase = PHASE_AWAITING_CONSENT,
-                            processed = result.completedUris.size + result.localUris.size,
-                            total = result.completedUris.size + result.localUris.size,
-                            removed = result.completedUris.size,
-                            needsPermissionCount = result.localUris.size,
-                        ),
-                    )
-                }
-                is FreeUpSpaceUseCase.FreeUpResult.Done -> {
-                    Result.success(
-                        outputData(
-                            phase = PHASE_DELETING,
-                            processed = result.freed,
-                            total = result.freed,
-                            removed = result.freed,
-                            needsPermissionCount = 0,
-                        ),
-                    )
-                }
-                is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
-                    Log.w(TAG, "free-up pipeline failed: ${result.message}")
-                    Result.failure(
-                        outputData(
-                            phase = PHASE_DELETING,
-                            processed = result.freed,
-                            total = result.freed,
-                            removed = result.freed,
-                            needsPermissionCount = 0,
-                        ),
-                    )
-                }
+            val mapped = mapPipelineOutcome(result)
+            if (mapped.phase == PHASE_AWAITING_CONSENT) {
+                publishProgress(
+                    isManual = isManual,
+                    phase = mapped.phase,
+                    processed = mapped.processed,
+                    total = mapped.total,
+                    removed = mapped.removed,
+                    needsPermissionCount = mapped.needsPermissionCount,
+                )
             }
+            if (mapped.offerUris.isNotEmpty()) {
+                pendingDeleteBridge.offer(mapped.offerUris)
+            }
+            if (mapped.postConsentNotification) {
+                postAwaitingConsentNotification(mapped.needsPermissionCount)
+            }
+            Result.success(
+                outputData(
+                    phase = mapped.phase,
+                    processed = mapped.processed,
+                    total = mapped.total,
+                    removed = mapped.removed,
+                    needsPermissionCount = mapped.needsPermissionCount,
+                ),
+            )
         } catch (e: CancellationException) {
-            // Cancel unique work only — do not clearVerified (would wipe the other mode's markers).
             Log.d(TAG, "free-up pipeline cancelled (trigger=$trigger)")
             throw e
         } catch (e: Exception) {
@@ -213,21 +210,28 @@ class FreeUpPipelineWorker @AssistedInject constructor(
             if (!isManual && FreeUpSpaceWorker.isPermanentSweepFailure(e)) {
                 return Result.failure()
             }
-            if (isTransientApiError(e) || isOfflineError(e) || runAttemptCount < MAX_ATTEMPTS) {
+            if (shouldRetry(
+                    runAttemptCount = runAttemptCount,
+                    transient = isTransientApiError(e),
+                    offline = isOfflineError(e),
+                )
+            ) {
                 Result.retry()
             } else {
                 Result.failure()
             }
         } finally {
-            runCatching { NotificationManagerCompat.from(context).cancel(foregroundId) }
+            if (isManual) {
+                runCatching {
+                    NotificationManagerCompat.from(context).cancel(NotificationIds.MANUAL_FREE_UP)
+                }
+            }
         }
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo =
         buildForegroundInfo(
-            notificationId = foregroundNotificationId(
-                (inputData.getString(KEY_TRIGGER) ?: TRIGGER_MANUAL) == TRIGGER_MANUAL,
-            ),
+            notificationId = NotificationIds.MANUAL_FREE_UP,
             phase = PHASE_VERIFYING,
             processed = 0,
             total = 0,
@@ -236,22 +240,23 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         )
 
     private fun publishProgress(
+        isManual: Boolean,
         phase: String,
         processed: Int,
         total: Int,
         removed: Int,
         needsPermissionCount: Int,
-        foregroundId: Int,
     ) {
         runCatching {
             setProgressAsync(
                 progressData(phase, processed, total, removed, needsPermissionCount),
             )
         }
+        if (!isManual) return
         runCatching {
             setForegroundAsync(
                 buildForegroundInfo(
-                    foregroundId,
+                    NotificationIds.MANUAL_FREE_UP,
                     phase,
                     processed,
                     total,
@@ -273,27 +278,25 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         ensureChannel(context)
         val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(id)
         val title = when (phase) {
-            PHASE_RECHECKING -> context.getString(R.string.free_up_rechecking)
             PHASE_DELETING -> context.getString(R.string.free_up_delete_notification_title)
             PHASE_AWAITING_CONSENT ->
                 context.getString(R.string.free_up_awaiting_consent_notification_title)
             else -> context.getString(R.string.free_up_verify_notification_title)
         }
         val content = when {
-            phase == PHASE_AWAITING_CONSENT -> context.getString(
-                R.string.free_up_awaiting_consent_notification_text,
-                needsPermissionCount.coerceAtLeast(1),
-            )
+            phase == PHASE_AWAITING_CONSENT -> {
+                val count = needsPermissionCount.coerceAtLeast(1)
+                context.resources.getQuantityString(
+                    R.plurals.free_up_awaiting_consent_notification_text,
+                    count,
+                    count,
+                )
+            }
             phase == PHASE_DELETING && total > 0 -> context.getString(
                 R.string.free_up_progress,
                 processed,
                 total,
                 removed,
-            )
-            phase == PHASE_RECHECKING && total > 0 -> context.getString(
-                R.string.free_up_recheck_progress,
-                processed,
-                total,
             )
             total > 0 -> context.getString(R.string.free_up_verify_progress, processed, total)
             else -> context.getString(R.string.free_up_verifying)
@@ -344,9 +347,14 @@ class FreeUpPipelineWorker @AssistedInject constructor(
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(context.getString(R.string.free_up_awaiting_consent_notification_title))
             .setContentText(
-                context.getString(R.string.free_up_awaiting_consent_notification_text, uriCount),
+                context.resources.getQuantityString(
+                    R.plurals.free_up_awaiting_consent_notification_text,
+                    uriCount,
+                    uriCount,
+                ),
             )
             .setContentIntent(contentIntent)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .build()
         runCatching {
@@ -354,9 +362,6 @@ class FreeUpPipelineWorker @AssistedInject constructor(
                 .notify(NotificationIds.MANUAL_FREE_UP_READY, notification)
         }
     }
-
-    private fun isProcessUiPresent(): Boolean =
-        ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     companion object {
         const val TAG = "free_up_pipeline_worker"
@@ -378,11 +383,12 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         const val TRIGGER_AUTOMATIC = "automatic"
 
         const val PHASE_VERIFYING = "verifying"
+        /** Retained for ViewModel wire compat until free-up-ui drops Rechecking; never published. */
         const val PHASE_RECHECKING = "rechecking"
         const val PHASE_DELETING = "deleting"
         const val PHASE_AWAITING_CONSENT = "awaiting_consent"
 
-        private const val MAX_ATTEMPTS = 3
+        const val MAX_ATTEMPTS = 3
 
         fun ensureChannel(context: Context) {
             ensureNotificationChannel(
@@ -395,10 +401,6 @@ class FreeUpPipelineWorker @AssistedInject constructor(
             )
         }
 
-        /** Whether [trigger] runs verify+recheck+reclaim (not verify-only). */
-        fun runsFullReclaim(trigger: String): Boolean =
-            trigger == TRIGGER_MANUAL || trigger == TRIGGER_AUTOMATIC
-
         fun protectDownloadedFor(trigger: String): Boolean = trigger == TRIGGER_AUTOMATIC
 
         fun olderThanMsFor(trigger: String, nowMs: Long, intervalMs: Long): Long =
@@ -406,11 +408,55 @@ class FreeUpPipelineWorker @AssistedInject constructor(
 
         fun phaseWireName(phase: FreeUpSpaceUseCase.PipelinePhase): String = when (phase) {
             FreeUpSpaceUseCase.PipelinePhase.Verifying -> PHASE_VERIFYING
-            FreeUpSpaceUseCase.PipelinePhase.Rechecking -> PHASE_RECHECKING
             FreeUpSpaceUseCase.PipelinePhase.Deleting -> PHASE_DELETING
         }
 
-        fun shouldOfferBridge(processUiPresent: Boolean): Boolean = processUiPresent
+        /**
+         * Automatic sweeps must not run while a prior NeedsPermission offer is still pending —
+         * otherwise hourly work would keep succeeding against a stuck consent queue.
+         */
+        fun shouldSkipAutomaticForPendingConsent(consentQueueNonEmpty: Boolean): Boolean =
+            consentQueueNonEmpty
+
+        /**
+         * Retry only while under the attempt cap **and** the failure is transient or offline.
+         * Caps WorkManager retries so a permanent error cannot spin forever.
+         */
+        fun shouldRetry(
+            runAttemptCount: Int,
+            transient: Boolean,
+            offline: Boolean,
+            maxAttempts: Int = MAX_ATTEMPTS,
+        ): Boolean = runAttemptCount < maxAttempts && (transient || offline)
+
+        /**
+         * Maps a pipeline result to progress keys, consent offer, and notification decisions.
+         * Always offers on [FreeUpSpaceUseCase.FreeUpResult.NeedsPermission] (no process-UI gate).
+         */
+        fun mapPipelineOutcome(result: FreeUpSpaceUseCase.FreeUpResult): MappedPipelineOutcome =
+            when (result) {
+                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+                    val processed = result.completedUris.size + result.localUris.size
+                    MappedPipelineOutcome(
+                        phase = PHASE_AWAITING_CONSENT,
+                        processed = processed,
+                        total = processed,
+                        removed = result.completedUris.size,
+                        needsPermissionCount = result.localUris.size,
+                        offerUris = result.localUris,
+                        postConsentNotification = true,
+                    )
+                }
+                is FreeUpSpaceUseCase.FreeUpResult.Done -> MappedPipelineOutcome(
+                    phase = PHASE_DELETING,
+                    processed = result.freed,
+                    total = result.freed,
+                    removed = result.freed,
+                    needsPermissionCount = 0,
+                    offerUris = emptyList(),
+                    postConsentNotification = false,
+                )
+            }
 
         fun foregroundNotificationId(isManual: Boolean): Int =
             if (isManual) NotificationIds.MANUAL_FREE_UP else NotificationIds.AUTO_FREE_UP

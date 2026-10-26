@@ -23,59 +23,59 @@
 package eu.akoos.photos.presentation.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import eu.akoos.photos.domain.repository.SyncStateRepository
-import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
 /**
- * Permanent-delete consent for free-up reclaim via [FreeUpPendingDeleteBridge]. Hard-separated from
+ * Permanent-delete consent for free-up reclaim via [FreeUpPendingDeleteQueue]. Hard-separated from
  * trash / [eu.akoos.photos.data.preferences.SettingsKeys.PENDING_DELETE_URIS].
  *
- * Grant settles only the consented chunk (status batch + clearVerified + [FreeUpPendingDeleteBridge.settle]
- * with `granted=true`) so [MediaStoreConsentHandler] can advance to the next
- * [eu.akoos.photos.domain.usecase.DELETE_REQUEST_MAX_URIS] batch while URIs remain.
+ * Mounted only on the Free up route so [android.provider.MediaStore.createDeleteRequest] never
+ * appears over the editor, viewer, or other screens. On entry, offers older than
+ * [eu.akoos.photos.domain.repository.FREE_UP_PENDING_OFFER_STALE_MS] are cleared so Continue can
+ * re-verify Drive before another delete dialog.
  *
- * Deny settles the entire pending queue (`granted=false`) so the handler does not immediately
- * re-offer remaining chunks; verified markers for those URIs are cleared. Process death recovers via
- * markers + notification, not this in-memory bridge.
+ * Grant settles the consented chunk even when the status update fails (files are already gone).
+ * Deny settles the entire pending queue so remaining chunks are not re-offered.
  */
 @HiltViewModel
 class FreeUpPermanentDeleteViewModel @Inject constructor(
-    private val bridge: FreeUpPendingDeleteBridge,
+    private val bridge: FreeUpPendingDeleteQueue,
     private val syncStateRepo: SyncStateRepository,
-    private val freeUpSpace: FreeUpSpaceUseCase,
-    private val accountManager: AccountManager,
 ) : ViewModel() {
 
     val pendingUris: StateFlow<Set<String>> = bridge.uris
+
+    /** Clears a stale in-memory offer so Free up can Continue with a fresh pipeline run. */
+    fun clearStaleOfferIfNeeded(nowMs: Long = System.currentTimeMillis()) {
+        if (!isFreeUpPendingOfferStale(bridge.offeredAtMs, nowMs)) return
+        bridge.settleAllPending(granted = false)
+    }
 
     fun onConsentGranted(uris: Set<String>) {
         viewModelScope.launch {
             runCatching {
                 syncStateRepo.updateStatusAndDeleteLocal(uris.toList(), SyncStatus.CLOUD_ONLY)
             }
-            val userId = accountManager.getPrimaryUserId().first()
-            if (userId != null) freeUpSpace.clearVerified(userId, uris.toList())
+            // Always settle: RESULT_OK means MediaStore already deleted; a failed status write
+            // must not leave the queue blocking Free up.
             bridge.settle(uris, granted = true)
         }
     }
 
-    fun onConsentDenied(uris: Set<String>) {
+    fun onConsentDenied(@Suppress("UNUSED_PARAMETER") uris: Set<String>) {
         viewModelScope.launch {
-            // Drain the whole queue so MediaStoreConsentHandler does not open the next chunk.
-            val toSettle = bridge.uris.value.ifEmpty { uris }
-            val userId = accountManager.getPrimaryUserId().first()
-            if (userId != null) freeUpSpace.clearVerified(userId, toSettle.toList())
-            bridge.settle(toSettle, granted = false)
+            bridge.settleAllPending(granted = false)
         }
     }
 }
@@ -84,6 +84,9 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
 fun FreeUpPermanentDeleteHandler(
     viewModel: FreeUpPermanentDeleteViewModel = hiltViewModel(),
 ) {
+    LaunchedEffect(Unit) {
+        viewModel.clearStaleOfferIfNeeded()
+    }
     MediaStoreConsentHandler(
         pendingUris = viewModel.pendingUris,
         mode = MediaStoreConsentMode.PermanentDelete,

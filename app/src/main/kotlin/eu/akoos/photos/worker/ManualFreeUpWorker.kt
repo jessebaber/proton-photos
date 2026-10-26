@@ -27,9 +27,9 @@ import androidx.work.Constraints
 
 /**
  * Manual Free-up entry points: enqueue/cancel the shared [FreeUpPipelineWorker] under a distinct
- * unique name (expedited, network-only — no AUTO_FREE_UP / thermal gates).
+ * unique name (expedited FGS, network-only — no AUTO_FREE_UP / thermal gates).
  *
- * Stop cancels [UNIQUE_NAME] only and does not clear the automatic mode's verified markers.
+ * Stop cancels [UNIQUE_NAME] only and does not cancel automatic unique work.
  */
 object ManualFreeUpWorker {
     const val TAG = "manual_free_up_worker"
@@ -40,9 +40,6 @@ object ManualFreeUpWorker {
 
     /** @see FreeUpPipelineWorker.KEY_TOTAL */
     const val KEY_TOTAL = FreeUpPipelineWorker.KEY_TOTAL
-
-    /** @see FreeUpPipelineWorker.KEY_PROCESSED */
-    const val KEY_READY = "ready"
 
     /** Constraints for the manual pipeline: network required; no AUTO_FREE_UP / thermal. */
     fun verifyConstraints(): Constraints = FreeUpPipelineWorker.manualConstraints()

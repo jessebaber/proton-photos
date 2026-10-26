@@ -237,11 +237,14 @@ class MainActivity : AppCompatActivity() {
             if (syncEffectivelyEnabled(this@MainActivity)) {
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
             }
-            // Reclaim eligible device copies on launch too, not just on the hourly worker an OEM
-            // doze can delay for hours. Same age gate; a sweep with no eligible photo is cheap.
+            // Re-bind the periodic unique work (UPDATE replaces a stale/broken class after upgrade),
+            // then reclaim eligible device copies on launch too — the hourly worker an OEM doze can
+            // delay for hours. Same age gate; a sweep with no eligible photo is cheap.
             if (prefs[SettingsKeys.AUTO_FREE_UP] == true) {
                 val freeUpInterval = FreeUpInterval.fromKey(prefs[SettingsKeys.FREE_UP_INTERVAL])
-                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainActivity), freeUpInterval.ms)
+                val freeUpWm = WorkManager.getInstance(this@MainActivity)
+                FreeUpSpaceWorker.schedule(freeUpWm, freeUpInterval.ms)
+                FreeUpSpaceWorker.runNow(freeUpWm, freeUpInterval.ms)
             }
         }
 

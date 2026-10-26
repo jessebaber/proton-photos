@@ -31,9 +31,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,14 +68,36 @@ fun nextMediaStoreConsentBatch(
 }
 
 /**
+ * Whether [MediaStoreConsentHandler] should open a new system consent dialog.
+ *
+ * - [MediaStoreConsentMode.Trash]: growth-based re-prompt — only when [pendingSize] exceeds
+ *   [lastPromptedSize]. Deny does **not** permanently stop trash; a later size increase re-prompts.
+ * - [MediaStoreConsentMode.PermanentDelete]: prompt while the queue is non-empty unless the user
+ *   already denied ([denyStopped]) or a dialog is [inFlight].
+ */
+fun shouldPromptMediaStoreConsent(
+    mode: MediaStoreConsentMode,
+    pendingSize: Int,
+    lastPromptedSize: Int,
+    inFlight: Boolean,
+    denyStopped: Boolean,
+): Boolean {
+    if (inFlight) return false
+    if (pendingSize <= 0) return false
+    return when (mode) {
+        MediaStoreConsentMode.Trash -> pendingSize > lastPromptedSize
+        MediaStoreConsentMode.PermanentDelete -> !denyStopped
+    }
+}
+
+/**
  * Parameterised MediaStore consent prompt: watches [pendingUris], builds a request with [mode],
  * and reports grant/deny. Callers supply their own URI source and callbacks so trash
  * (`PENDING_DELETE_URIS`) and free-up permanent delete never share a sink.
  *
- * This composable is the sole free-up [android.provider.MediaStore.createDeleteRequest] builder:
- * it drains [pendingUris] in [DELETE_REQUEST_MAX_URIS] chunks. After a grant, removing the settled
- * chunk from the sink advances to the next batch. After a deny, prompting stops until the sink is
- * emptied (free-up clears the whole queue on deny); no immediate re-offer of remaining URIs.
+ * Trash restores upstream growth re-prompt via a [rememberSaveable] int high-water mark only —
+ * never saveable URI sets (TransactionTooLarge risk). Permanent delete drains
+ * [DELETE_REQUEST_MAX_URIS] chunks; deny stops further chunks until the sink is emptied.
  */
 @Composable
 fun MediaStoreConsentHandler(
@@ -90,42 +114,80 @@ fun MediaStoreConsentHandler(
     val pending by pendingUris.collectAsStateWithLifecycle()
     var lastBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
     var inFlight by remember { mutableStateOf(false) }
+    // Not saveable: URI sets must not ride in the Bundle across rotation.
     var lastAttemptedBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
-    // Deny must not open the next chunk while the sink is still draining asynchronously.
+    // PermanentDelete only: deny stops chunk advance until the sink drains.
     var denyStopped by remember { mutableStateOf(false) }
+    // Trash only: int high-water for growth re-prompt; survives config change.
+    var lastPromptedSize by rememberSaveable { mutableIntStateOf(0) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
         inFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
+            if (mode == MediaStoreConsentMode.Trash) {
+                // Batch settled — allow remaining / next growth to prompt again.
+                lastPromptedSize = 0
+            }
             onGranted(lastBatch)
         } else {
-            denyStopped = true
+            if (mode == MediaStoreConsentMode.PermanentDelete) {
+                denyStopped = true
+            }
+            // Trash: leave lastPromptedSize so only a later size increase re-prompts.
             onDenied(lastBatch)
         }
     }
 
-    LaunchedEffect(pending.size, inFlight, denyStopped) {
-        if (inFlight) return@LaunchedEffect
+    LaunchedEffect(pending.size, inFlight, denyStopped, lastPromptedSize, mode) {
         if (pending.isEmpty()) {
             lastAttemptedBatch = emptySet()
             denyStopped = false
+            lastPromptedSize = 0
             return@LaunchedEffect
         }
-        if (denyStopped) return@LaunchedEffect
+        if (!shouldPromptMediaStoreConsent(
+                mode = mode,
+                pendingSize = pending.size,
+                lastPromptedSize = lastPromptedSize,
+                inFlight = inFlight,
+                denyStopped = denyStopped,
+            )
+        ) {
+            return@LaunchedEffect
+        }
         val batch = nextMediaStoreConsentBatch(pending)
-        if (batch.isEmpty() || batch == lastAttemptedBatch) return@LaunchedEffect
+        if (batch.isEmpty()) return@LaunchedEffect
+        if (mode == MediaStoreConsentMode.PermanentDelete && batch == lastAttemptedBatch) {
+            return@LaunchedEffect
+        }
         delay(settleDelayMs)
         val snapshot = pendingUris.value
-        if (snapshot.isEmpty() || denyStopped) return@LaunchedEffect
+        if (snapshot.isEmpty()) return@LaunchedEffect
+        if (!shouldPromptMediaStoreConsent(
+                mode = mode,
+                pendingSize = snapshot.size,
+                lastPromptedSize = lastPromptedSize,
+                inFlight = false,
+                denyStopped = denyStopped,
+            )
+        ) {
+            return@LaunchedEffect
+        }
         val currentBatch = nextMediaStoreConsentBatch(snapshot)
-        if (currentBatch.isEmpty() || currentBatch == lastAttemptedBatch) return@LaunchedEffect
+        if (currentBatch.isEmpty()) return@LaunchedEffect
+        if (mode == MediaStoreConsentMode.PermanentDelete && currentBatch == lastAttemptedBatch) {
+            return@LaunchedEffect
+        }
         val uris: List<Uri> = currentBatch.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
         if (uris.isEmpty()) return@LaunchedEffect
         inFlight = true
         lastBatch = currentBatch
         lastAttemptedBatch = currentBatch
+        if (mode == MediaStoreConsentMode.Trash) {
+            lastPromptedSize = snapshot.size
+        }
         scope.launch {
             runCatching {
                 val resolver = context.contentResolver

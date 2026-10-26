@@ -29,7 +29,8 @@ import kotlinx.coroutines.CancellationException
 
 /**
  * Automatic Free-up scheduling: age / AUTO_FREE_UP / thermal / battery / network gates, then the
- * shared [FreeUpPipelineWorker] for full verify → recheck → reclaim under distinct unique names.
+ * shared [FreeUpPipelineWorker] for a single-pass verify+delete under distinct unique names
+ * (no foreground service).
  *
  * Cancel targets only the automatic unique names and does not touch the manual pipeline.
  */

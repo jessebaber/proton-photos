@@ -25,6 +25,7 @@ package eu.akoos.photos.worker
 import androidx.work.NetworkType
 import eu.akoos.photos.data.notification.NotificationIds
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,9 +64,11 @@ class ManualFreeUpWorkerTest {
 
     @Test
     fun `manual enqueue targets the shared pipeline with a distinct unique name`() {
-        assertTrue(
-            FreeUpPipelineWorker.runsFullReclaim(FreeUpPipelineWorker.TRIGGER_MANUAL),
+        assertEquals(
+            FreeUpPipelineWorker.TRIGGER_MANUAL,
+            FreeUpPipelineWorker.manualInputData().getString(FreeUpPipelineWorker.KEY_TRIGGER),
         )
+        assertFalse(FreeUpPipelineWorker.protectDownloadedFor(FreeUpPipelineWorker.TRIGGER_MANUAL))
         assertNotEquals(ManualFreeUpWorker.UNIQUE_NAME, FreeUpSpaceWorker.TAG)
     }
 }
