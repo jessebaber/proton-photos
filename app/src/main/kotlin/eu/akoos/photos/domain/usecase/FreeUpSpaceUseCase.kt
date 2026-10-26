@@ -227,16 +227,28 @@ class FreeUpSpaceUseCase @Inject constructor(
      * Runs the mandatory live re-check and the local reclaim while holding the same mutex used by
      * background verification. A scheduled verify therefore cannot race the foreground finisher
      * between its safety check and its first device deletion.
+     *
+     * [onConfirmed] receives the live-confirmed set once before any delete so the UI can settle the
+     * grid onto that set. [onReclaimProgress]'s [newlyCompleted] lists are **successful deletes only**
+     * (deltas since the previous report); the same [PROGRESS_STEP] throttle still avoids per-photo
+     * UI churn. Public [reclaimCandidates] keeps its `(done, total)` progress shape unchanged.
      */
     suspend fun finishReadyForReclaim(
         userId: UserId,
         onRecheckProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-        onReclaimProgress: (processed: Int, removed: Int, total: Int) -> Unit = { _, _, _ -> },
+        onConfirmed: (List<SyncState>) -> Unit = {},
+        onReclaimProgress: (
+            processed: Int,
+            removed: Int,
+            total: Int,
+            newlyCompleted: List<String>,
+        ) -> Unit = { _, _, _, _ -> },
     ): FreeUpResult = mutex.withLock {
         val confirmed = confirmReadyForReclaimLocked(userId, onRecheckProgress)
         if (confirmed.isEmpty()) {
             FreeUpResult.Done(freed = 0)
         } else {
+            onConfirmed(confirmed)
             reclaimCandidatesLocked(confirmed, onReclaimProgress)
         }
     }
@@ -319,20 +331,21 @@ class FreeUpSpaceUseCase @Inject constructor(
         candidates: List<SyncState>,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): FreeUpResult = mutex.withLock {
-        reclaimCandidatesLocked(candidates) { processed, _, total ->
+        reclaimCandidatesLocked(candidates) { processed, _, total, _ ->
             onProgress(processed, total)
         }
     }
 
     private suspend fun reclaimCandidatesLocked(
         candidates: List<SyncState>,
-        onProgress: (processed: Int, removed: Int, total: Int) -> Unit,
+        onProgress: (processed: Int, removed: Int, total: Int, newlyCompleted: List<String>) -> Unit,
     ): FreeUpResult = withContext(Dispatchers.IO) {
         var freed = 0
         val needsDialog = mutableListOf<Pair<String, Uri>>()  // localUri → contentUri
         val completedUris = mutableListOf<String>()
+        val pendingDelta = mutableListOf<String>()
         val total = candidates.size
-        onProgress(0, 0, total)
+        onProgress(0, 0, total, emptyList())
 
         for ((index, state) in candidates.withIndex()) {
             val contentUri = Uri.parse(state.localUri)
@@ -358,6 +371,7 @@ class FreeUpSpaceUseCase @Inject constructor(
             if (removed) {
                 freed++
                 completedUris += state.localUri
+                pendingDelta += state.localUri
             } else {
                 // delete() returned 0, likely needs permission on API 30+.
                 needsDialog += state.localUri to contentUri
@@ -366,7 +380,10 @@ class FreeUpSpaceUseCase @Inject constructor(
             // it already reclaimed; the next open lists what is left and picks up from there.
             val processed = index + 1
             if (processed % PROGRESS_STEP == 0 || processed == total) {
-                onProgress(processed, freed, total)
+                // Deltas are successful deletes only since the previous report; throttle still
+                // avoids per-photo UI churn.
+                onProgress(processed, freed, total, pendingDelta.toList())
+                pendingDelta.clear()
             }
         }
 

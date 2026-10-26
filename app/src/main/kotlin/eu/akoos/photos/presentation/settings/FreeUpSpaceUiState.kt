@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.settings
 
+import eu.akoos.photos.domain.entity.SyncState
+import kotlin.math.max
+
 /**
  * Pure UI phase for the Free up space screen, derived from WorkInfo + ready count so a JVM test can
  * pin checking → ready → freeing → done without Compose or WorkManager.
@@ -62,4 +65,34 @@ fun deriveFreeUpSpaceState(
     readyCount > 0 -> FreeUpSpacePhase.Ready
     workSucceeded -> FreeUpSpacePhase.Idle
     else -> FreeUpSpacePhase.Idle
+}
+
+/**
+ * Settle the Free-up grid onto the live re-check-confirmed set. Bytes come from row [SyncState.sizeBytes]
+ * only — never a mid-run MediaStore refresh.
+ */
+fun settleFreeUpCandidates(confirmed: List<SyncState>): Pair<List<SyncState>, Long> =
+    confirmed to confirmed.sumOf { it.sizeBytes.coerceAtLeast(0L) }
+
+/**
+ * Drop successfully deleted URIs from the Free-up grid and subtract their [SyncState.sizeBytes]
+ * from the summary (floored at 0). An empty [completedUris] is a no-op.
+ */
+fun pruneFreeUpCandidates(
+    candidates: List<SyncState>,
+    reclaimableBytes: Long,
+    completedUris: List<String>,
+): Pair<List<SyncState>, Long> {
+    if (completedUris.isEmpty()) return candidates to reclaimableBytes
+    val completed = completedUris.toHashSet()
+    var removedBytes = 0L
+    val remaining = ArrayList<SyncState>(candidates.size)
+    for (row in candidates) {
+        if (row.localUri in completed) {
+            removedBytes += row.sizeBytes.coerceAtLeast(0L)
+        } else {
+            remaining += row
+        }
+    }
+    return remaining to max(0L, reclaimableBytes - removedBytes)
 }

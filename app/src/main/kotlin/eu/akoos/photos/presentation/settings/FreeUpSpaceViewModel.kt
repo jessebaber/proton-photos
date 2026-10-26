@@ -211,10 +211,19 @@ class FreeUpSpaceViewModel @Inject constructor(
                             it.copy(rechecked = done, recheckTotal = total)
                         }
                     },
-                    onReclaimProgress = { processed, removed, total ->
+                    onConfirmed = { confirmed ->
+                        val (settled, bytes) = settleFreeUpCandidates(confirmed)
                         _uiState.update {
-                            it.copy(
-                                phase = if (it.phase == FreeUpSpacePhase.Stopped) {
+                            it.copy(candidates = settled, reclaimableBytes = bytes)
+                        }
+                    },
+                    onReclaimProgress = { processed, removed, total, newlyCompleted ->
+                        // Prune in the same update that sets Freeing (unless already Stopped).
+                        // Do not call load()/totalBytes() mid-run.
+                        _uiState.update {
+                            val stopped = it.phase == FreeUpSpacePhase.Stopped
+                            var next = it.copy(
+                                phase = if (stopped) {
                                     FreeUpSpacePhase.Stopped
                                 } else {
                                     FreeUpSpacePhase.Freeing
@@ -223,6 +232,18 @@ class FreeUpSpaceViewModel @Inject constructor(
                                 removed = removed,
                                 deletionTotal = total,
                             )
+                            if (!stopped) {
+                                val (pruned, bytes) = pruneFreeUpCandidates(
+                                    next.candidates,
+                                    next.reclaimableBytes,
+                                    newlyCompleted,
+                                )
+                                next = next.copy(
+                                    candidates = pruned,
+                                    reclaimableBytes = bytes,
+                                )
+                            }
+                            next
                         }
                     },
                 )
