@@ -54,9 +54,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.entity.LocalTagEntity
+import eu.akoos.photos.data.mediastore.queryExistingMediaStoreRows
+import eu.akoos.photos.data.mediastore.urisPresentInMediaStore
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.repository.LocalMediaDeleteResult
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.HiddenCaptureTime
@@ -91,6 +94,50 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun notifyMediaChanged() {
         refreshTrigger.tryEmit(Unit)
     }
+
+    override suspend fun deleteDeviceCopies(uris: List<String>): LocalMediaDeleteResult =
+        withContext(Dispatchers.IO) {
+            if (uris.isEmpty()) {
+                return@withContext LocalMediaDeleteResult(
+                    deleted = emptyList(),
+                    missing = emptyList(),
+                    needsPermission = emptyList(),
+                )
+            }
+            val deleted = mutableListOf<String>()
+            val unresolved = mutableListOf<String>()
+            for (uriString in uris) {
+                val contentUri = Uri.parse(uriString)
+                val removed = try {
+                    context.contentResolver.delete(contentUri, null, null)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    0
+                }
+                if (removed > 0) {
+                    deleted += uriString
+                } else {
+                    unresolved += uriString
+                }
+            }
+            if (unresolved.isEmpty()) {
+                return@withContext LocalMediaDeleteResult(
+                    deleted = deleted,
+                    missing = emptyList(),
+                    needsPermission = emptyList(),
+                )
+            }
+            val existingIds = queryExistingMediaStoreRows(context.contentResolver, unresolved).keys
+            val alive = urisPresentInMediaStore(unresolved, existingIds)
+            val aliveSet = alive.toHashSet()
+            val missing = unresolved.filter { it !in aliveSet }
+            LocalMediaDeleteResult(
+                deleted = deleted,
+                missing = missing,
+                needsPermission = alive,
+            )
+        }
 
     /**
      * Settle-and-kick scheduler for the auto-sync trigger. OneDrive-style: when a new photo

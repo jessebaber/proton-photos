@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 42,
-    "identityHash": "c7dedeaafdc701d41058e7a2b1913133",
+    "identityHash": "25d79ec6f8f8845d9c4e5ee4d46988ec",
     "entities": [
       {
         "tableName": "sync_state",
@@ -1477,63 +1477,6 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_image_embedding_userId` ON `${TABLE_NAME}` (`userId`)"
-          }
-        ]
-      },
-      {
-        "tableName": "free_up_verified",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`userId` TEXT NOT NULL, `localUri` TEXT NOT NULL, `cloudFileId` TEXT NOT NULL, `verifiedAtMs` INTEGER NOT NULL, PRIMARY KEY(`userId`, `localUri`))",
-        "fields": [
-          {
-            "fieldPath": "userId",
-            "columnName": "userId",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "localUri",
-            "columnName": "localUri",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "cloudFileId",
-            "columnName": "cloudFileId",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "verifiedAtMs",
-            "columnName": "verifiedAtMs",
-            "affinity": "INTEGER",
-            "notNull": true
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "userId",
-            "localUri"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_free_up_verified_userId",
-            "unique": false,
-            "columnNames": [
-              "userId"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_free_up_verified_userId` ON `${TABLE_NAME}` (`userId`)"
-          },
-          {
-            "name": "index_free_up_verified_localUri",
-            "unique": false,
-            "columnNames": [
-              "localUri"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_free_up_verified_localUri` ON `${TABLE_NAME}` (`localUri`)"
           }
         ]
       },
