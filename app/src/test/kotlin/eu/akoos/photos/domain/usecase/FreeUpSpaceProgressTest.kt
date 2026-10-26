@@ -198,16 +198,16 @@ class FreeUpSpaceProgressTest {
         every { resolver.delete(any(), any(), any()) } returns 1
 
         val deltas = mutableListOf<List<String>>()
-        val confirmations = mutableListOf<List<SyncState>>()
+        val started = mutableListOf<List<SyncState>>()
         useCase.finishReadyForReclaim(
             userId = userId,
-            onConfirmed = { confirmations += listOf(it) },
+            onRecheckStarted = { started += listOf(it) },
             onReclaimProgress = { _, _, _, newlyCompleted ->
                 if (newlyCompleted.isNotEmpty()) deltas += newlyCompleted
             },
         )
 
-        assertEquals(rows.map { it.localUri }, confirmations.single().map { it.localUri })
+        assertEquals(rows.map { it.localUri }, started.single().map { it.localUri })
         val union = deltas.flatten()
         assertEquals(rows.map { it.localUri }, union)
         assertEquals("no URI appears twice across deltas", union.size, union.toSet().size)
@@ -219,6 +219,65 @@ class FreeUpSpaceProgressTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun `recheck started equals ready and drop deltas plus survivors equal that set`() = runTest {
+        val rows = (1..5).map { eligible(it) }
+        coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } returns rows.map { entityFor(it) }
+        coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
+        // Odd indices stay active; even indices are inactive (trashed).
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { id ->
+                val n = id.removePrefix("cloud-").toInt()
+                linkAt(id).let { dto ->
+                    if (n % 2 == 0) {
+                        BatchLinkDto(link = LinkCoreDto(linkId = id, type = 2, state = 2))
+                    } else {
+                        dto
+                    }
+                }
+            }
+        }
+        every { resolver.delete(any(), any(), any()) } returns 1
+
+        val started = mutableListOf<SyncState>()
+        val dropDeltas = mutableListOf<List<String>>()
+        var recheckReports = 0
+        useCase.finishReadyForReclaim(
+            userId = userId,
+            onRecheckStarted = { started += it },
+            onRecheckProgress = { _, _, newlyDropped ->
+                recheckReports++
+                if (newlyDropped.isNotEmpty()) dropDeltas += newlyDropped
+            },
+        )
+
+        assertEquals(rows.map { it.localUri }, started.map { it.localUri })
+        assertTrue("progress(0,total,empty) then per-chunk", recheckReports >= 2)
+        val dropped = dropDeltas.flatten()
+        assertEquals("no URI appears twice across drop deltas", dropped.size, dropped.toSet().size)
+        for (i in dropDeltas.indices) {
+            for (j in i + 1 until dropDeltas.size) {
+                assertTrue(
+                    "drop delta $i and $j overlap",
+                    dropDeltas[i].toSet().intersect(dropDeltas[j].toSet()).isEmpty(),
+                )
+            }
+        }
+        val expectedDropped = rows.filterIndexed { index, _ -> (index + 1) % 2 == 0 }.map { it.localUri }
+        val expectedSurvivors = rows.filterIndexed { index, _ -> (index + 1) % 2 == 1 }.map { it.localUri }
+        assertEquals(expectedDropped.toSet(), dropped.toSet())
+        assertTrue("drops are only inactive URIs", dropped.none { it in expectedSurvivors })
+        assertEquals(
+            "settle + all drops == started ready set",
+            started.map { it.localUri }.toSet(),
+            (expectedSurvivors + dropped).toSet(),
+        )
     }
 
     @Test

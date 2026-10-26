@@ -62,11 +62,20 @@ fun deriveFreeUpSpaceState(
 }
 
 /**
- * Settle the Free-up grid onto the live re-check-confirmed set. Bytes come from row [SyncState.sizeBytes]
- * only — never a mid-run MediaStore refresh.
+ * Settle the Free-up grid onto the live re-check-confirmed set. Per-URI bytes use
+ * `max(row.sizeBytes, knownBytesByUri[uri])` so a zero [SyncState.sizeBytes] does not collapse the
+ * header when the grid already knew a size — never a mid-run MediaStore refresh.
  */
-fun settleFreeUpCandidates(confirmed: List<SyncState>): Pair<List<SyncState>, Long> =
-    confirmed to confirmed.sumOf { it.sizeBytes.coerceAtLeast(0L) }
+fun settleFreeUpCandidates(
+    confirmed: List<SyncState>,
+    knownBytesByUri: Map<String, Long> = emptyMap(),
+): Pair<List<SyncState>, Long> {
+    val settled = confirmed.map { row ->
+        val size = max(row.sizeBytes.coerceAtLeast(0L), knownBytesByUri[row.localUri] ?: 0L)
+        if (size == row.sizeBytes) row else row.copy(sizeBytes = size)
+    }
+    return settled to settled.sumOf { it.sizeBytes.coerceAtLeast(0L) }
+}
 
 /**
  * Drop successfully deleted URIs from the Free-up grid and subtract their [SyncState.sizeBytes]

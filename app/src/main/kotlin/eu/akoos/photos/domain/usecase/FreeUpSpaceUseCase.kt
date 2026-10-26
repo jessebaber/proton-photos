@@ -215,12 +215,18 @@ class FreeUpSpaceUseCase @Inject constructor(
      * Live Drive re-check of the persisted ready set before any delete. Never reclaims on
      * [verifiedAtMs] alone — a park without this step recreates the trash-after-verify hole.
      * Drops verified markers for links that are no longer active.
+     *
+     * Public progress stays `(done, total)`; richer start/drop deltas live on [finishReadyForReclaim].
      */
     suspend fun confirmReadyForReclaim(
         userId: UserId,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): List<SyncState> = mutex.withLock {
-        confirmReadyForReclaimLocked(userId, onProgress)
+        confirmReadyForReclaimLocked(
+            userId = userId,
+            onRecheckStarted = {},
+            onRecheckProgress = { done, total, _ -> onProgress(done, total) },
+        )
     }
 
     /**
@@ -228,15 +234,20 @@ class FreeUpSpaceUseCase @Inject constructor(
      * background verification. A scheduled verify therefore cannot race the foreground finisher
      * between its safety check and its first device deletion.
      *
-     * [onConfirmed] receives the live-confirmed set once before any delete so the UI can settle the
-     * grid onto that set. [onReclaimProgress]'s [newlyCompleted] lists are **successful deletes only**
-     * (deltas since the previous report); the same [PROGRESS_STEP] throttle still avoids per-photo
-     * UI churn. Public [reclaimCandidates] keeps its `(done, total)` progress shape unchanged.
+     * [onRecheckStarted] receives the ready set once so the UI can **settle** the grid before chunked
+     * re-check begins. [onRecheckProgress]'s [newlyDropped] lists are **inactive URIs only** (deltas
+     * since the previous report) so the UI can **prune** without an end-of-recheck settle.
+     * [onReclaimProgress]'s [newlyCompleted] lists are **successful deletes only** (deltas since the
+     * previous report); the same [PROGRESS_STEP] throttle still avoids per-photo UI churn.
+     *
+     * These callbacks are the interim UI path until WorkManager owns reclaim progress. Public
+     * [confirmReadyForReclaim] / [reclaimCandidates] keep their `(done, total)` progress shapes.
      */
     suspend fun finishReadyForReclaim(
         userId: UserId,
-        onRecheckProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-        onConfirmed: (List<SyncState>) -> Unit = {},
+        onRecheckStarted: (List<SyncState>) -> Unit = {},
+        onRecheckProgress: (done: Int, total: Int, newlyDropped: List<String>) -> Unit =
+            { _, _, _ -> },
         onReclaimProgress: (
             processed: Int,
             removed: Int,
@@ -244,28 +255,29 @@ class FreeUpSpaceUseCase @Inject constructor(
             newlyCompleted: List<String>,
         ) -> Unit = { _, _, _, _ -> },
     ): FreeUpResult = mutex.withLock {
-        val confirmed = confirmReadyForReclaimLocked(userId, onRecheckProgress)
+        val confirmed = confirmReadyForReclaimLocked(userId, onRecheckStarted, onRecheckProgress)
         if (confirmed.isEmpty()) {
             FreeUpResult.Done(freed = 0)
         } else {
-            onConfirmed(confirmed)
             reclaimCandidatesLocked(confirmed, onReclaimProgress)
         }
     }
 
     private suspend fun confirmReadyForReclaimLocked(
         userId: UserId,
-        onProgress: (done: Int, total: Int) -> Unit,
+        onRecheckStarted: (List<SyncState>) -> Unit,
+        onRecheckProgress: (done: Int, total: Int, newlyDropped: List<String>) -> Unit,
     ): List<SyncState> = withContext(Dispatchers.IO) {
         val ready = readyToReclaim(userId)
+        onRecheckStarted(ready)
         if (ready.isEmpty()) {
-            onProgress(0, 0)
+            onRecheckProgress(0, 0, emptyList())
             return@withContext emptyList()
         }
         val total = ready.size
         var done = 0
         val stillActive = mutableListOf<SyncState>()
-        onProgress(done, total)
+        onRecheckProgress(done, total, emptyList())
         val volumeId = cloudRepo.getVolumeId(userId)
         for (chunk in ready.chunked(VERIFY_CHUNK_SIZE)) {
             currentCoroutineContext().ensureActive()
@@ -281,10 +293,11 @@ class FreeUpSpaceUseCase @Inject constructor(
                 details[linkId]?.link?.state == ACTIVE_LINK_STATE
             }
             stillActive += activeChunk
-            val dropped = chunk.map { it.localUri }.toSet() - activeChunk.map { it.localUri }.toSet()
-            if (dropped.isNotEmpty()) clearVerified(userId, dropped.toList())
+            val activeUris = activeChunk.map { it.localUri }.toSet()
+            val newlyDropped = chunk.map { it.localUri }.filter { it !in activeUris }
+            if (newlyDropped.isNotEmpty()) clearVerified(userId, newlyDropped)
             done += chunk.size
-            onProgress(done, total)
+            onRecheckProgress(done, total, newlyDropped)
         }
         stillActive
     }

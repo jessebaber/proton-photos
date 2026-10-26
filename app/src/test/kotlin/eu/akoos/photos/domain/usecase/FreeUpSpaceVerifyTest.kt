@@ -197,4 +197,100 @@ class FreeUpSpaceVerifyTest {
         assertTrue(ready.isEmpty())
         assertTrue(persisted.isEmpty())
     }
+
+    @Test
+    fun `final recheck reports each fifty-link batch and drops inactive links`() = runTest {
+        val rows = (1..51).map { candidate("cloud-$it") }
+        persisted += rows.map {
+            FreeUpVerifiedEntity(
+                userId = userId.id,
+                localUri = it.localUri,
+                cloudFileId = it.cloudFileId!!,
+                verifiedAtMs = System.currentTimeMillis(),
+            )
+        }
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            ids.associateWith { id ->
+                linkAt(id, state = if (id == "cloud-51") 2 else 1)
+            }
+        }
+
+        val reports = mutableListOf<Pair<Int, Int>>()
+        val confirmed = useCase.confirmReadyForReclaim(userId) { done, total ->
+            reports += done to total
+        }
+
+        assertEquals(listOf(0 to 51, 50 to 51, 51 to 51), reports)
+        assertEquals(50, confirmed.size)
+        assertTrue(confirmed.none { it.cloudFileId == "cloud-51" })
+        coVerify(exactly = 2) {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        }
+        coVerify {
+            freeUpVerifiedDao.deleteForUris(
+                userId.id,
+                match { "content://media/external/images/media/cloud-51" in it },
+            )
+        }
+    }
+
+    @Test
+    fun `finish recheck started equals ready and drops are inactive-only non-overlapping`() = runTest {
+        val rows = (1..51).map { candidate("cloud-$it") }
+        persisted += rows.map {
+            FreeUpVerifiedEntity(
+                userId = userId.id,
+                localUri = it.localUri,
+                cloudFileId = it.cloudFileId!!,
+                verifiedAtMs = System.currentTimeMillis(),
+            )
+        }
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } answers {
+            @Suppress("UNCHECKED_CAST")
+            val ids = args[2] as List<String>
+            // All inactive → confirmed empty, so reclaim is skipped (no ContentResolver needed).
+            ids.associateWith { id -> linkAt(id, state = 2) }
+        }
+
+        val started = mutableListOf<SyncState>()
+        val dropDeltas = mutableListOf<List<String>>()
+        val result = useCase.finishReadyForReclaim(
+            userId = userId,
+            onRecheckStarted = { started += it },
+            onRecheckProgress = { _, _, newlyDropped ->
+                if (newlyDropped.isNotEmpty()) dropDeltas += newlyDropped
+            },
+        )
+
+        assertEquals(rows.map { it.localUri }, started.map { it.localUri })
+        val dropped = dropDeltas.flatten()
+        assertEquals(rows.map { it.localUri }.toSet(), dropped.toSet())
+        assertEquals("no URI appears twice across drop deltas", dropped.size, dropped.toSet().size)
+        for (i in dropDeltas.indices) {
+            for (j in i + 1 until dropDeltas.size) {
+                assertTrue(
+                    "drop delta $i and $j overlap",
+                    dropDeltas[i].toSet().intersect(dropDeltas[j].toSet()).isEmpty(),
+                )
+            }
+        }
+        assertEquals(
+            "settle + all drops == started ready (survivors empty)",
+            started.map { it.localUri }.toSet(),
+            dropped.toSet(),
+        )
+        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        coVerify {
+            freeUpVerifiedDao.deleteForUris(
+                userId.id,
+                match { it.containsAll(rows.take(50).map { r -> r.localUri }) },
+            )
+        }
+    }
 }
