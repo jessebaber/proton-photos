@@ -22,13 +22,15 @@
 
 package eu.akoos.photos.presentation.settings
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Pure decision coverage for [shouldPromptMediaStoreConsent]: trash growth re-prompt,
- * permanent-delete deny stop, and in-flight gating.
+ * permanent-delete deny stop, and in-flight gating; plus
+ * [mediaStoreConsentLaunchFailureAction] bounded PermanentDelete launch retry.
  */
 class MediaStoreConsentPromptTest {
 
@@ -147,6 +149,46 @@ class MediaStoreConsentPromptTest {
                 lastPromptedSize = 0,
                 inFlight = false,
                 denyStopped = false,
+            ),
+        )
+    }
+
+    @Test
+    fun launchFailure_trash_is_none() {
+        assertEquals(
+            MediaStoreConsentLaunchFailureAction.None,
+            mediaStoreConsentLaunchFailureAction(
+                mode = MediaStoreConsentMode.Trash,
+                failuresSoFar = 1,
+            ),
+        )
+        assertEquals(
+            MediaStoreConsentLaunchFailureAction.None,
+            mediaStoreConsentLaunchFailureAction(
+                mode = MediaStoreConsentMode.Trash,
+                failuresSoFar = 99,
+            ),
+        )
+    }
+
+    @Test
+    fun launchFailure_permanentDelete_first_clears_attempted_batch() {
+        assertEquals(
+            MediaStoreConsentLaunchFailureAction.RetryClearAttemptedBatch,
+            mediaStoreConsentLaunchFailureAction(
+                mode = MediaStoreConsentMode.PermanentDelete,
+                failuresSoFar = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun launchFailure_permanentDelete_second_stops_without_settling() {
+        assertEquals(
+            MediaStoreConsentLaunchFailureAction.StopPrompting,
+            mediaStoreConsentLaunchFailureAction(
+                mode = MediaStoreConsentMode.PermanentDelete,
+                failuresSoFar = 2,
             ),
         )
     }
