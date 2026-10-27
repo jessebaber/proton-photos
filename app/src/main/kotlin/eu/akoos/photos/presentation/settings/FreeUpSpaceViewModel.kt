@@ -49,8 +49,8 @@ import javax.inject.Inject
 
 /**
  * Free up space screen: lists reclaimable candidates, enqueues/cancels [ManualFreeUpWorker]
- * (shared [FreeUpPipelineWorker]), and observes WorkInfo phase/counts. Reclaim runs in the worker
- * — this ViewModel does not own a foreground finish loop.
+ * (shared [FreeUpPipelineWorker]), and observes WorkInfo phase/counts. The worker owns verification,
+ * reclaim, and consent handoff; this ViewModel renders its state.
  */
 @HiltViewModel
 class FreeUpSpaceViewModel @Inject constructor(

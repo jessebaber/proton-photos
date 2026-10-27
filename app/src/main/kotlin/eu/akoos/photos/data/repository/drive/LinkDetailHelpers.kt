@@ -84,9 +84,9 @@ class LinkDetailHelpers @Inject constructor(
     }
 
     /**
-     * Per-chunk link fetch that throws every error, including offline / UnknownHost, so free-up
-     * verify can retry via WorkManager. Stub body until Phase 8; [batchFetchLinkDetails] keeps its
-     * swallow behaviour by catching non-transient failures above.
+     * Per-chunk link fetch that propagates every failure, including offline / UnknownHost, so
+     * callers can retry instead of treating a partial map as success. [batchFetchLinkDetails]
+     * keeps its tolerant API by catching non-transient failures above.
      */
     suspend fun batchFetchLinkDetailsStrict(
         userId: UserId,
