@@ -83,7 +83,7 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         val presenceById = when (probe) {
             MediaStoreRowsProbe.Inconclusive -> {
                 Log.w(TAG, "MediaStore probe inconclusive — leaving delete queue untouched")
-                return@withContext
+                return
             }
             is MediaStoreRowsProbe.Complete -> probe.byId
         }
