@@ -78,5 +78,10 @@ interface FreeUpPendingDeleteQueue {
      */
     fun settleAllPending(granted: Boolean)
 
+    /**
+     * Silently drops [uris] from the queue without emitting a [FreeUpConsentSettlement].
+     * Reserved for just-in-time verifier rejection before a permanent-delete consent dialog —
+     * unsafe / inactive Drive links must leave the queue without pretending the user answered.
+     */
     fun remove(uris: Set<String>)
 }

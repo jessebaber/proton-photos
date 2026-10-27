@@ -24,10 +24,13 @@ package eu.akoos.photos.presentation.settings
 
 import eu.akoos.photos.worker.FreeUpPipelineWorker
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins Free-up screen phase transitions for the observe-only WorkInfo pipeline flow.
+ * Pins Free-up screen phase transitions and WorkInfo selection for the observe-only pipeline flow.
  */
 class FreeUpSpaceDeriveStateTest {
 
@@ -101,20 +104,6 @@ class FreeUpSpaceDeriveStateTest {
     }
 
     @Test
-    fun `unused rechecking wire name still maps to checking while running`() {
-        assertEquals(
-            FreeUpSpacePhase.Checking,
-            deriveFreeUpSpaceState(
-                workRunning = true,
-                workSucceeded = false,
-                workFailed = false,
-                doneMessage = false,
-                workerPhase = FreeUpPipelineWorker.PHASE_RECHECKING,
-            ),
-        )
-    }
-
-    @Test
     fun `stopped stays visible even when work info is terminal`() {
         assertEquals(
             FreeUpSpacePhase.Stopped,
@@ -166,5 +155,45 @@ class FreeUpSpaceDeriveStateTest {
                 workCancelled = true,
             ),
         )
+    }
+
+    @Test
+    fun `prefer active WorkInfo over older terminal`() {
+        assertEquals(
+            1,
+            selectPreferredFreeUpWorkInfoIndex(
+                listOf(
+                    FreeUpWorkInfoKind.Terminal,
+                    FreeUpWorkInfoKind.Active,
+                    FreeUpWorkInfoKind.Terminal,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `newest terminal wins when nothing is active`() {
+        assertEquals(
+            2,
+            selectPreferredFreeUpWorkInfoIndex(
+                listOf(
+                    FreeUpWorkInfoKind.Terminal,
+                    FreeUpWorkInfoKind.Other,
+                    FreeUpWorkInfoKind.Terminal,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `empty work infos yield no selection`() {
+        assertNull(selectPreferredFreeUpWorkInfoIndex(emptyList()))
+    }
+
+    @Test
+    fun `terminal Done publishes only for work observed active this lifetime`() {
+        assertTrue(shouldPublishFreeUpTerminal("run-a", setOf("run-a", "run-b")))
+        assertFalse(shouldPublishFreeUpTerminal("run-old", setOf("run-a")))
+        assertFalse(shouldPublishFreeUpTerminal(null, setOf("run-a")))
     }
 }

@@ -54,8 +54,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.entity.LocalTagEntity
+import eu.akoos.photos.data.mediastore.classifyUnresolvedAfterProbe
 import eu.akoos.photos.data.mediastore.queryExistingMediaStoreRows
-import eu.akoos.photos.data.mediastore.urisPresentInMediaStore
+import java.io.IOException
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -128,14 +129,25 @@ class LocalMediaRepositoryImpl @Inject constructor(
                     needsPermission = emptyList(),
                 )
             }
-            val existingIds = queryExistingMediaStoreRows(context.contentResolver, unresolved).keys
-            val alive = urisPresentInMediaStore(unresolved, existingIds)
-            val aliveSet = alive.toHashSet()
-            val missing = unresolved.filter { it !in aliveSet }
+            val probe = queryExistingMediaStoreRows(context.contentResolver, unresolved)
+            val classified = classifyUnresolvedAfterProbe(unresolved, probe)
+            if (classified == null) {
+                // Provider gave no trustworthy answer. Known deletions still count; unresolved
+                // must not become missing/CLOUD_ONLY. With nothing deleted yet, propagate so the
+                // free-up pipeline / WorkManager can retry.
+                if (deleted.isEmpty()) {
+                    throw IOException("MediaStore presence probe inconclusive")
+                }
+                return@withContext LocalMediaDeleteResult(
+                    deleted = deleted,
+                    missing = emptyList(),
+                    needsPermission = emptyList(),
+                )
+            }
             LocalMediaDeleteResult(
                 deleted = deleted,
-                missing = missing,
-                needsPermission = alive,
+                missing = classified.missing,
+                needsPermission = classified.needsPermission,
             )
         }
 

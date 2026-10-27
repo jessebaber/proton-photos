@@ -74,19 +74,21 @@ class FreeUpSpaceUseCase @Inject constructor(
 
     sealed class FreeUpResult {
         data class Done(
+            val checked: Int,
             val freed: Int,
             /** Device copies that could not be deleted on API &lt; R (no consent dialog path). */
             val skipped: Int = 0,
-            val completedUris: List<String> = emptyList(),
         ) : FreeUpResult()
+
         /**
          * Android 11+: surviving local URIs still need a system delete dialog. The use case returns
          * **all** surviving URI strings; [MediaStore.createDeleteRequest] is owned by the consent
          * handler, not this domain API.
          */
         data class NeedsPermission(
+            val checked: Int,
+            val freed: Int,
             val localUris: List<String>,
-            val completedUris: List<String> = emptyList(),
         ) : FreeUpResult()
     }
 
@@ -120,7 +122,7 @@ class FreeUpSpaceUseCase @Inject constructor(
         userId: UserId,
         olderThanMs: Long,
         protectDownloaded: Boolean = false,
-        onProgress: (PipelineProgress) -> Unit = {},
+        onProgress: suspend (PipelineProgress) -> Unit = {},
     ): FreeUpResult = mutex.withLock {
         runPipelineLocked(userId, olderThanMs, protectDownloaded, onProgress)
     }
@@ -133,7 +135,7 @@ class FreeUpSpaceUseCase @Inject constructor(
         userId: UserId,
         olderThanMs: Long,
         protectDownloaded: Boolean = true,
-        onProgress: (PipelineProgress) -> Unit = {},
+        onProgress: suspend (PipelineProgress) -> Unit = {},
     ): FreeUpResult? {
         if (!mutex.tryLock()) return null
         try {
@@ -143,22 +145,54 @@ class FreeUpSpaceUseCase @Inject constructor(
         }
     }
 
+    /**
+     * Revalidates a pending permanent-delete batch immediately before the system consent request.
+     *
+     * The account-scoped sync-state lookup supplies each URI's current cloud link. Only URIs whose
+     * current link is returned as active by the strict Drive endpoint survive, in input order.
+     * Missing rows, missing links, and inactive links are rejected. Lookup failures propagate so
+     * the caller launches no delete request from an uncertain answer.
+     */
+    suspend fun verifyPendingConsentBatch(
+        userId: UserId,
+        localUris: Set<String>,
+    ): Set<String> = withContext(Dispatchers.IO) {
+        if (localUris.isEmpty()) return@withContext emptySet()
+
+        val requested = localUris.toList()
+        val linkIdByUri = syncStateRepo.cloudPairedLinkIds(userId, requested)
+        val linkIds = requested.mapNotNull { uri ->
+            linkIdByUri[uri]?.takeIf { it.isNotBlank() }
+        }.distinct()
+        if (linkIds.isEmpty()) return@withContext emptySet()
+
+        val volumeId = cloudRepo.getVolumeId(userId)
+        val details = retryWithBackoff(
+            shouldRetry = { isTransientApiError(it) || isOfflineError(it) },
+        ) {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, linkIds)
+        }
+        requested.filterTo(linkedSetOf()) { uri ->
+            val linkId = linkIdByUri[uri] ?: return@filterTo false
+            details[linkId]?.link?.state == ACTIVE_LINK_STATE
+        }
+    }
+
     private suspend fun runPipelineLocked(
         userId: UserId,
         olderThanMs: Long,
         protectDownloaded: Boolean,
-        onProgress: (PipelineProgress) -> Unit,
+        onProgress: suspend (PipelineProgress) -> Unit,
     ): FreeUpResult = withContext(Dispatchers.IO) {
         val eligible = candidates(userId, olderThanMs, protectDownloaded)
         val total = eligible.size
         if (total == 0) {
             onProgress(PipelineProgress(PipelinePhase.Verifying, 0, 0))
-            return@withContext FreeUpResult.Done(freed = 0)
+            return@withContext FreeUpResult.Done(checked = 0, freed = 0)
         }
 
         var freed = 0
         var skipped = 0
-        val completedUris = mutableListOf<String>()
         val needsPermission = mutableListOf<String>()
         var processed = 0
         onProgress(PipelineProgress(PipelinePhase.Verifying, 0, total))
@@ -202,7 +236,6 @@ class FreeUpSpaceUseCase @Inject constructor(
                         syncStateRepo.updateStatusAndDeleteLocal(toCloudOnly, SyncStatus.CLOUD_ONLY)
                     }
                     freed += toCloudOnly.size
-                    completedUris += toCloudOnly
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     needsPermission += deleteResult.needsPermission
@@ -223,14 +256,15 @@ class FreeUpSpaceUseCase @Inject constructor(
 
         if (needsPermission.isNotEmpty()) {
             return@withContext FreeUpResult.NeedsPermission(
+                checked = total,
+                freed = freed,
                 localUris = needsPermission,
-                completedUris = completedUris,
             )
         }
         FreeUpResult.Done(
+            checked = total,
             freed = freed,
             skipped = skipped,
-            completedUris = completedUris,
         )
     }
 

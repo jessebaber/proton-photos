@@ -75,7 +75,7 @@ class FreeUpPipelineWorkerTest {
     }
 
     @Test
-    fun `progress data never embeds URI lists`() {
+    fun `progress data never embeds URI lists or done alias`() {
         val data = FreeUpPipelineWorker.progressData(
             phase = FreeUpPipelineWorker.PHASE_DELETING,
             processed = 3,
@@ -88,7 +88,7 @@ class FreeUpPipelineWorkerTest {
         assertEquals(10, data.getInt(FreeUpPipelineWorker.KEY_TOTAL, -1))
         assertEquals(2, data.getInt(FreeUpPipelineWorker.KEY_REMOVED, -1))
         assertEquals(1, data.getInt(FreeUpPipelineWorker.KEY_NEEDS_PERMISSION_COUNT, -1))
-        assertEquals(3, data.getInt(FreeUpPipelineWorker.KEY_DONE, -1))
+        assertFalse(data.keyValueMap.containsKey("done"))
         assertFalse(data.keyValueMap.keys.any { it.contains("uri", ignoreCase = true) })
     }
 
@@ -136,8 +136,9 @@ class FreeUpPipelineWorkerTest {
     fun `mapPipelineOutcome always offers and notifies on NeedsPermission`() {
         val mapped = FreeUpPipelineWorker.mapPipelineOutcome(
             FreeUpSpaceUseCase.FreeUpResult.NeedsPermission(
+                checked = 3,
+                freed = 1,
                 localUris = listOf("content://a", "content://b"),
-                completedUris = listOf("content://done"),
             ),
         )
         assertEquals(FreeUpPipelineWorker.PHASE_AWAITING_CONSENT, mapped.phase)
@@ -153,14 +154,14 @@ class FreeUpPipelineWorkerTest {
     fun `mapPipelineOutcome Done does not offer or notify`() {
         val mapped = FreeUpPipelineWorker.mapPipelineOutcome(
             FreeUpSpaceUseCase.FreeUpResult.Done(
+                checked = 5,
                 freed = 4,
                 skipped = 1,
-                completedUris = listOf("content://1", "content://2", "content://3", "content://4"),
             ),
         )
         assertEquals(FreeUpPipelineWorker.PHASE_DELETING, mapped.phase)
-        assertEquals(4, mapped.processed)
-        assertEquals(4, mapped.total)
+        assertEquals(5, mapped.processed)
+        assertEquals(5, mapped.total)
         assertEquals(4, mapped.removed)
         assertEquals(0, mapped.needsPermissionCount)
         assertTrue(mapped.offerUris.isEmpty())
@@ -239,16 +240,9 @@ class FreeUpPipelineWorkerTest {
     }
 
     @Test
-    fun `manual and auto foreground notification ids stay distinct`() {
-        assertEquals(
-            NotificationIds.MANUAL_FREE_UP,
-            FreeUpPipelineWorker.foregroundNotificationId(isManual = true),
-        )
-        assertEquals(
-            NotificationIds.AUTO_FREE_UP,
-            FreeUpPipelineWorker.foregroundNotificationId(isManual = false),
-        )
-        assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.AUTO_FREE_UP)
-        assertTrue(NotificationIds.AUTO_FREE_UP !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
+    fun `manual foreground and shared action notification ids stay distinct`() {
+        assertTrue(NotificationIds.MANUAL_FREE_UP !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
+        assertTrue(NotificationIds.FREE_UP_ACTION_REQUIRED !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
+        assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.FREE_UP_ACTION_REQUIRED)
     }
 }

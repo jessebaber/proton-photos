@@ -38,6 +38,39 @@ enum class FreeUpSpacePhase {
 }
 
 /**
+ * Coarse WorkInfo activity for selecting among retained unique-work entries without constructing
+ * Android [androidx.work.WorkInfo] objects in JVM tests.
+ */
+enum class FreeUpWorkInfoKind {
+    /** RUNNING / ENQUEUED / BLOCKED */
+    Active,
+    /** SUCCEEDED / FAILED / CANCELLED */
+    Terminal,
+    /** Unexpected / unused wire states */
+    Other,
+}
+
+/**
+ * Prefer the first active entry; otherwise the newest terminal (last terminal in [kinds]).
+ * Returns the index into [kinds], or null when nothing usable is present.
+ */
+fun selectPreferredFreeUpWorkInfoIndex(kinds: List<FreeUpWorkInfoKind>): Int? {
+    val active = kinds.indexOfFirst { it == FreeUpWorkInfoKind.Active }
+    if (active >= 0) return active
+    val terminal = kinds.indexOfLast { it == FreeUpWorkInfoKind.Terminal }
+    return terminal.takeIf { it >= 0 }
+}
+
+/**
+ * Terminal Done/Error must only publish for work observed active during this ViewModel lifetime —
+ * retained unique-work terminals from a prior process must not replay on route reopen.
+ */
+fun shouldPublishFreeUpTerminal(
+    workId: String?,
+    observedActiveIds: Set<String>,
+): Boolean = workId != null && workId in observedActiveIds
+
+/**
  * Derives the screen phase from pipeline WorkInfo.
  *
  * [workerPhase] is the WorkInfo progress/output [FreeUpPipelineWorker.KEY_PHASE] wire name

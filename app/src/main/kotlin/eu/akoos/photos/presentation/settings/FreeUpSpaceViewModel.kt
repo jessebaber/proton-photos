@@ -31,6 +31,7 @@ import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.freeup.cancelFreeUpActionRequiredNotification
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
@@ -86,6 +87,18 @@ class FreeUpSpaceViewModel @Inject constructor(
     /** Tracks WorkInfo id+state so Done/Error messages fire once per terminal transition. */
     private var lastTerminalWorkKey: String? = null
 
+    /**
+     * Work ids observed while active during this ViewModel lifetime. Terminal Done/Error publishes
+     * only for these — retained unique-work history must not replay on route reopen.
+     */
+    private val observedActiveWorkIds = mutableSetOf<String>()
+
+    /**
+     * Cumulative frees for the current Start→Done session: direct worker removals plus every
+     * granted consent chunk.
+     */
+    private var sessionFreed = 0
+
     init {
         load()
         observeWorker()
@@ -133,6 +146,7 @@ class FreeUpSpaceViewModel @Inject constructor(
         ) return
         if (hasFreshPendingConsent()) return
         stoppedLatch = false
+        sessionFreed = 0
         _uiState.update {
             it.copy(
                 phase = FreeUpSpacePhase.Checking,
@@ -185,6 +199,7 @@ class FreeUpSpaceViewModel @Inject constructor(
         if (pendingDeleteBridge.uris.value.isEmpty()) return false
         if (isFreeUpPendingOfferStale(pendingDeleteBridge.offeredAtMs, nowMs)) {
             pendingDeleteBridge.settleAllPending(granted = false)
+            cancelFreeUpActionRequiredNotification(context)
             return false
         }
         return true
@@ -195,7 +210,20 @@ class FreeUpSpaceViewModel @Inject constructor(
             WorkManager.getInstance(context)
                 .getWorkInfosForUniqueWorkFlow(ManualFreeUpWorker.UNIQUE_NAME)
                 .collect { infos ->
-                    val info = infos.firstOrNull()
+                    val kinds = infos.map { info ->
+                        when (info.state) {
+                            WorkInfo.State.RUNNING,
+                            WorkInfo.State.ENQUEUED,
+                            WorkInfo.State.BLOCKED,
+                            -> FreeUpWorkInfoKind.Active
+                            WorkInfo.State.SUCCEEDED,
+                            WorkInfo.State.FAILED,
+                            WorkInfo.State.CANCELLED,
+                            -> FreeUpWorkInfoKind.Terminal
+                        }
+                    }
+                    val preferredIndex = selectPreferredFreeUpWorkInfoIndex(kinds)
+                    val info = preferredIndex?.let { infos.getOrNull(it) }
                     val workState = info?.state
                     val running = workState == WorkInfo.State.RUNNING ||
                         workState == WorkInfo.State.ENQUEUED ||
@@ -204,15 +232,15 @@ class FreeUpSpaceViewModel @Inject constructor(
                     val failed = workState == WorkInfo.State.FAILED
                     val cancelled = workState == WorkInfo.State.CANCELLED
 
+                    val workId = info?.id?.toString()
+                    if (running && workId != null) {
+                        observedActiveWorkIds.add(workId)
+                    }
+
                     val progress = info?.progress
                     val output = info?.outputData
                     val workerPhase = workString(progress, output, FreeUpPipelineWorker.KEY_PHASE)
-                    val processed = workInt(
-                        progress,
-                        output,
-                        FreeUpPipelineWorker.KEY_PROCESSED,
-                        fallbackKey = FreeUpPipelineWorker.KEY_DONE,
-                    )
+                    val processed = workInt(progress, output, FreeUpPipelineWorker.KEY_PROCESSED)
                     val total = workInt(progress, output, FreeUpPipelineWorker.KEY_TOTAL)
                     val removed = workInt(progress, output, FreeUpPipelineWorker.KEY_REMOVED)
                     val needsPermission = workInt(
@@ -223,9 +251,11 @@ class FreeUpSpaceViewModel @Inject constructor(
 
                     val current = _uiState.value
                     val terminalKey = info?.let { "${it.id}:$workState" }
+                    val observedActive = shouldPublishFreeUpTerminal(workId, observedActiveWorkIds)
                     val isNewTerminal = terminalKey != null &&
                         terminalKey != lastTerminalWorkKey &&
-                        (succeeded || failed)
+                        (succeeded || failed) &&
+                        observedActive
                     if (isNewTerminal) lastTerminalWorkKey = terminalKey
 
                     val awaitingConsent = workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT ||
@@ -236,10 +266,11 @@ class FreeUpSpaceViewModel @Inject constructor(
                         removed == 0 &&
                         Build.VERSION.SDK_INT < Build.VERSION_CODES.R &&
                         (current.checkTotal > 0 || current.candidates.isNotEmpty())
+                    // Publish Done for every successful terminal observed this lifetime, including
+                    // successful zero-removal (refresh + "nothing removed" copy).
                     val shouldPublishDone = isNewTerminal &&
                         succeeded &&
-                        !awaitingConsent &&
-                        (removed > 0 || preRAllSkipped)
+                        !awaitingConsent
                     val doneMessage = shouldPublishDone ||
                         (current.message != null && current.phase == FreeUpSpacePhase.Done)
 
@@ -282,16 +313,18 @@ class FreeUpSpaceViewModel @Inject constructor(
                             }
                         }
                         when {
-                            shouldPublishDone -> next.copy(
-                                phase = FreeUpSpacePhase.Done,
-                                message = when {
-                                    removed > 0 -> freedMessage(removed)
-                                    preRAllSkipped ->
-                                        context.getString(R.string.free_up_skipped_pre_r)
-                                    else -> freedMessage(removed)
-                                },
-                                awaitingConsentCount = 0,
-                            )
+                            shouldPublishDone -> {
+                                sessionFreed = sessionFreed.coerceAtLeast(removed)
+                                next.copy(
+                                    phase = FreeUpSpacePhase.Done,
+                                    message = when {
+                                        preRAllSkipped ->
+                                            context.getString(R.string.free_up_skipped_pre_r)
+                                        else -> freedMessage(sessionFreed)
+                                    },
+                                    awaitingConsentCount = 0,
+                                )
+                            }
                             isNewTerminal && failed -> next.copy(
                                 phase = FreeUpSpacePhase.Error,
                                 message = context.getString(
@@ -299,10 +332,14 @@ class FreeUpSpaceViewModel @Inject constructor(
                                     "",
                                 ),
                             )
-                            isNewTerminal && succeeded && awaitingConsent -> next.copy(
-                                phase = FreeUpSpacePhase.Stopped,
-                                awaitingConsentCount = needsPermission.coerceAtLeast(1),
-                            )
+                            isNewTerminal && succeeded && awaitingConsent -> {
+                                // Seed session with direct removals before consent chunks accumulate.
+                                sessionFreed = removed
+                                next.copy(
+                                    phase = FreeUpSpacePhase.Stopped,
+                                    awaitingConsentCount = needsPermission.coerceAtLeast(1),
+                                )
+                            }
                             else -> next
                         }
                     }
@@ -317,11 +354,14 @@ class FreeUpSpaceViewModel @Inject constructor(
     /**
      * Reconcile typed MediaStore consent outcomes when not mid pipeline run.
      * Grant: refresh store; Done when nothing left, else Stopped for further Continue.
-     * Deny: Stopped (or Idle), refresh; do not auto-relaunch consent.
+     * Deny / technical clear: Stopped (or Idle), refresh; do not auto-relaunch consent.
      */
     private fun observeConsentSettlement() {
         viewModelScope.launch {
             pendingDeleteBridge.settled.collect { settlement ->
+                if (pendingDeleteBridge.uris.value.isEmpty()) {
+                    cancelFreeUpActionRequiredNotification(context)
+                }
                 val phase = _uiState.value.phase
                 if (phase == FreeUpSpacePhase.Checking ||
                     phase == FreeUpSpacePhase.Freeing
@@ -329,18 +369,18 @@ class FreeUpSpaceViewModel @Inject constructor(
                     return@collect
                 }
                 if (settlement.granted) {
+                    sessionFreed += settlement.uris.size
                     refreshFromStore()
                     val remaining = _uiState.value.candidates
                     if (remaining.isEmpty() && pendingDeleteBridge.uris.value.isEmpty()) {
-                        val freed = settlement.uris.size
                         _uiState.update {
                             it.copy(
-                                phase = if (freed > 0) {
+                                phase = if (sessionFreed > 0) {
                                     FreeUpSpacePhase.Done
                                 } else {
                                     FreeUpSpacePhase.Idle
                                 },
-                                message = if (freed > 0) freedMessage(freed) else null,
+                                message = if (sessionFreed > 0) freedMessage(sessionFreed) else null,
                                 awaitingConsentCount = 0,
                             )
                         }
@@ -403,15 +443,10 @@ class FreeUpSpaceViewModel @Inject constructor(
         progress: androidx.work.Data?,
         output: androidx.work.Data?,
         key: String,
-        fallbackKey: String? = null,
         default: Int = 0,
     ): Int = when {
         progress?.keyValueMap?.containsKey(key) == true -> progress.getInt(key, default)
         output?.keyValueMap?.containsKey(key) == true -> output.getInt(key, default)
-        fallbackKey != null && progress?.keyValueMap?.containsKey(fallbackKey) == true ->
-            progress.getInt(fallbackKey, default)
-        fallbackKey != null && output?.keyValueMap?.containsKey(fallbackKey) == true ->
-            output.getInt(fallbackKey, default)
         else -> default
     }
 }

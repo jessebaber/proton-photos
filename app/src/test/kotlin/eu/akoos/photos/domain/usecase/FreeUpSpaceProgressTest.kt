@@ -119,7 +119,9 @@ class FreeUpSpaceProgressTest {
         val result = useCase.runPipeline(userId, Long.MAX_VALUE)
 
         assertEquals(rows.map { it.localUri }, listed.map { it.localUri })
-        assertEquals(rows.size, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        val done = result as FreeUpSpaceUseCase.FreeUpResult.Done
+        assertEquals(rows.size, done.checked)
+        assertEquals(rows.size, done.freed)
         val batchSlot = slot<List<String>>()
         coVerify(exactly = 1) {
             repo.updateStatusAndDeleteLocal(capture(batchSlot), SyncStatus.CLOUD_ONLY)
@@ -180,8 +182,9 @@ class FreeUpSpaceProgressTest {
                 result is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission,
             )
             val needs = result as FreeUpSpaceUseCase.FreeUpResult.NeedsPermission
+            assertEquals(rows.size, needs.checked)
+            assertEquals(0, needs.freed)
             assertEquals(rows.map { it.localUri }, needs.localUris)
-            assertTrue(needs.completedUris.isEmpty())
             coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
             coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any<String>(), any()) }
         }
@@ -198,8 +201,9 @@ class FreeUpSpaceProgressTest {
 
         val result = useCase.runPipeline(userId, Long.MAX_VALUE)
 
-        assertEquals(3, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
-        assertEquals(rows.map { it.localUri }, result.completedUris)
+        val done = result as FreeUpSpaceUseCase.FreeUpResult.Done
+        assertEquals(3, done.checked)
+        assertEquals(3, done.freed)
         coVerify(exactly = 1) {
             repo.updateStatusAndDeleteLocal(rows.map { it.localUri }, SyncStatus.CLOUD_ONLY)
         }
@@ -304,10 +308,14 @@ class FreeUpSpaceProgressTest {
         }
 
         val reports = mutableListOf<Triple<Int, Int, Int>>()
-        useCase.runPipeline(userId, Long.MAX_VALUE) { progress ->
+        val result = useCase.runPipeline(userId, Long.MAX_VALUE) { progress ->
             reports += Triple(progress.processed, progress.removed, progress.total)
         }
 
+        val needs = result as FreeUpSpaceUseCase.FreeUpResult.NeedsPermission
+        assertEquals(rows.size, needs.checked)
+        assertEquals(success.size, needs.freed)
+        assertEquals(fail.map { it.localUri }, needs.localUris)
         assertEquals(0 to rows.size, reports.first().first to reports.first().third)
         assertEquals(rows.size, reports.last().first)
         assertTrue(
