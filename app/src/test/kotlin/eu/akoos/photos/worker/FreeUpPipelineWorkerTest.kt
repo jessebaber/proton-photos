@@ -24,6 +24,7 @@ package eu.akoos.photos.worker
 
 import androidx.work.NetworkType
 import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.domain.repository.FREE_UP_PENDING_OFFER_STALE_MS
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -167,9 +168,40 @@ class FreeUpPipelineWorkerTest {
     }
 
     @Test
-    fun `automatic skip when consent queue is non-empty`() {
-        assertTrue(FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(true))
-        assertFalse(FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(false))
+    fun `automatic skip only for fresh non-empty consent offers`() {
+        val now = 1_750_000_000_000L
+        assertFalse(
+            "empty queue must not skip",
+            FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(
+                queueNonEmpty = false,
+                offeredAtMs = null,
+                nowMs = now,
+            ),
+        )
+        assertTrue(
+            "fresh non-empty offer must skip",
+            FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(
+                queueNonEmpty = true,
+                offeredAtMs = now - 1L,
+                nowMs = now,
+            ),
+        )
+        assertFalse(
+            "offer at 15m must not skip",
+            FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(
+                queueNonEmpty = true,
+                offeredAtMs = now - FREE_UP_PENDING_OFFER_STALE_MS,
+                nowMs = now,
+            ),
+        )
+        assertFalse(
+            "offer past 15m must not skip",
+            FreeUpPipelineWorker.shouldSkipAutomaticForPendingConsent(
+                queueNonEmpty = true,
+                offeredAtMs = now - FREE_UP_PENDING_OFFER_STALE_MS - 60_000L,
+                nowMs = now,
+            ),
+        )
     }
 
     @Test

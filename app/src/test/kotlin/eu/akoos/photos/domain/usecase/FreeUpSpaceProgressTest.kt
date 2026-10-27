@@ -128,6 +128,18 @@ class FreeUpSpaceProgressTest {
     }
 
     @Test
+    fun `SYNCED rows with blank or null cloudFileId are absent from candidates`() = runTest {
+        val withId = eligible(1)
+        val nullId = eligible(2).copy(cloudFileId = null)
+        val blankId = eligible(3).copy(cloudFileId = "   ")
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(withId, nullId, blankId)
+
+        val listed = useCase.candidates(userId, Long.MAX_VALUE)
+
+        assertEquals(listOf(withId.localUri), listed.map { it.localUri })
+    }
+
+    @Test
     fun `progress starts at zero, never goes backwards, and ends on the total`() = runTest {
         val rows = (1..45).map { eligible(it) }
         coEvery { repo.getSyncedBefore(userId, any()) } returns rows

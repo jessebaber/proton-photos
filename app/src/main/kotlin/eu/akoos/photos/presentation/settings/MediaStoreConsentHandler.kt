@@ -91,6 +91,42 @@ fun shouldPromptMediaStoreConsent(
 }
 
 /**
+ * How [MediaStoreConsentHandler] reacts when `createTrashRequest` / `createDeleteRequest`
+ * or `launcher.launch` fails (distinct from the user denying the system dialog).
+ *
+ * Launch failure stops PermanentDelete prompting after one retry without settling the queue —
+ * it must **not** call [MediaStoreConsentHandler]'s `onDenied`.
+ */
+enum class MediaStoreConsentLaunchFailureAction {
+    /** PermanentDelete first failure: clear `lastAttemptedBatch` so one re-entry is allowed. */
+    RetryClearAttemptedBatch,
+    /** PermanentDelete exhausted retries: stop prompting; leave the queue unsettled. */
+    StopPrompting,
+    /** Trash (or no further action beyond clearing `inFlight`). */
+    None,
+}
+
+/**
+ * @param failuresSoFar count of PermanentDelete launch failures for the current batch
+ *   **after** recording this failure (1 on first failure).
+ * @param maxRetries how many failures may clear the attempted batch before stopping (default 1).
+ */
+fun mediaStoreConsentLaunchFailureAction(
+    mode: MediaStoreConsentMode,
+    failuresSoFar: Int,
+    maxRetries: Int = 1,
+): MediaStoreConsentLaunchFailureAction {
+    if (mode != MediaStoreConsentMode.PermanentDelete) {
+        return MediaStoreConsentLaunchFailureAction.None
+    }
+    return if (failuresSoFar <= maxRetries) {
+        MediaStoreConsentLaunchFailureAction.RetryClearAttemptedBatch
+    } else {
+        MediaStoreConsentLaunchFailureAction.StopPrompting
+    }
+}
+
+/**
  * Parameterised MediaStore consent prompt: watches [pendingUris], builds a request with [mode],
  * and reports grant/deny. Callers supply their own URI source and callbacks so trash
  * (`PENDING_DELETE_URIS`) and free-up permanent delete never share a sink.
@@ -118,6 +154,8 @@ fun MediaStoreConsentHandler(
     var lastAttemptedBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
     // PermanentDelete only: deny stops chunk advance until the sink drains.
     var denyStopped by remember { mutableStateOf(false) }
+    // PermanentDelete only: launch failures for the current attempted batch (one retry).
+    var launchFailCount by remember { mutableIntStateOf(0) }
     // Trash only: int high-water for growth re-prompt; survives config change.
     var lastPromptedSize by rememberSaveable { mutableIntStateOf(0) }
 
@@ -126,6 +164,7 @@ fun MediaStoreConsentHandler(
     ) { result ->
         inFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
+            launchFailCount = 0
             if (mode == MediaStoreConsentMode.Trash) {
                 // Batch settled — allow remaining / next growth to prompt again.
                 lastPromptedSize = 0
@@ -144,6 +183,7 @@ fun MediaStoreConsentHandler(
         if (pending.isEmpty()) {
             lastAttemptedBatch = emptySet()
             denyStopped = false
+            launchFailCount = 0
             lastPromptedSize = 0
             return@LaunchedEffect
         }
@@ -184,6 +224,10 @@ fun MediaStoreConsentHandler(
         if (uris.isEmpty()) return@LaunchedEffect
         inFlight = true
         lastBatch = currentBatch
+        // New attempted batch — reset per-batch launch failure budget.
+        if (currentBatch != lastAttemptedBatch) {
+            launchFailCount = 0
+        }
         lastAttemptedBatch = currentBatch
         if (mode == MediaStoreConsentMode.Trash) {
             lastPromptedSize = snapshot.size
@@ -200,7 +244,26 @@ fun MediaStoreConsentHandler(
                     }
                 }
                 launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-            }.onFailure { inFlight = false }
+            }.onFailure {
+                inFlight = false
+                when (
+                    mediaStoreConsentLaunchFailureAction(
+                        mode = mode,
+                        failuresSoFar = launchFailCount + 1,
+                    )
+                ) {
+                    MediaStoreConsentLaunchFailureAction.RetryClearAttemptedBatch -> {
+                        launchFailCount += 1
+                        lastAttemptedBatch = emptySet()
+                    }
+                    MediaStoreConsentLaunchFailureAction.StopPrompting -> {
+                        launchFailCount += 1
+                        denyStopped = true
+                        // Do not clear lastAttemptedBatch; do not call onDenied.
+                    }
+                    MediaStoreConsentLaunchFailureAction.None -> Unit
+                }
+            }
         }
     }
 }

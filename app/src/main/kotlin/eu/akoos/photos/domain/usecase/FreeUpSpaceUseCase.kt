@@ -97,8 +97,9 @@ class FreeUpSpaceUseCase @Inject constructor(
      * one the sweep takes, and the screen would be a promise about a different set than the one
      * that runs.
      *
-     * Every row is `SYNCED`, so every photo in it has a Drive copy. That is what makes the backed-up
-     * badge on each cell a check the user can make rather than a decoration.
+     * Every row is `SYNCED` with a non-blank `cloudFileId`, so every photo in it has a Drive copy
+     * the pipeline can verify. That is what makes the backed-up badge on each cell a check the
+     * user can make rather than a decoration.
      */
     suspend fun candidates(
         userId: UserId,
@@ -107,6 +108,7 @@ class FreeUpSpaceUseCase @Inject constructor(
     ): List<SyncState> = withContext(Dispatchers.IO) {
         syncStateRepo.getSyncedBefore(userId, olderThanMs)
             .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) }
+            .filter { !it.cloudFileId.isNullOrBlank() }
     }
 
     /**
@@ -148,7 +150,6 @@ class FreeUpSpaceUseCase @Inject constructor(
         onProgress: (PipelineProgress) -> Unit,
     ): FreeUpResult = withContext(Dispatchers.IO) {
         val eligible = candidates(userId, olderThanMs, protectDownloaded)
-            .filter { !it.cloudFileId.isNullOrBlank() }
         val total = eligible.size
         if (total == 0) {
             onProgress(PipelineProgress(PipelinePhase.Verifying, 0, 0))

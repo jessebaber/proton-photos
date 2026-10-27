@@ -55,6 +55,7 @@ import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
+import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.isOfflineError
@@ -123,9 +124,19 @@ class FreeUpPipelineWorker @AssistedInject constructor(
                 Log.w(TAG, "Skipping automatic pipeline: cloud state stale ($verifiedAtMs)")
                 return Result.success()
             }
-            if (shouldSkipAutomaticForPendingConsent(pendingDeleteBridge.uris.value.isNotEmpty())) {
+            val queueNonEmpty = pendingDeleteBridge.uris.value.isNotEmpty()
+            if (shouldSkipAutomaticForPendingConsent(
+                    queueNonEmpty,
+                    pendingDeleteBridge.offeredAtMs,
+                    nowMs,
+                )
+            ) {
                 Log.d(TAG, "Skipping automatic pipeline: consent queue non-empty")
                 return Result.success()
+            }
+            if (queueNonEmpty) {
+                // Stale in-memory offer — clear so automatic can re-verify Drive.
+                pendingDeleteBridge.settleAllPending(false)
             }
         }
 
@@ -412,11 +423,16 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         }
 
         /**
-         * Automatic sweeps must not run while a prior NeedsPermission offer is still pending —
+         * Automatic sweeps must not run while a prior NeedsPermission offer is still fresh —
          * otherwise hourly work would keep succeeding against a stuck consent queue.
+         * Stale offers (see [isFreeUpPendingOfferStale]) are not skipped; callers clear them
+         * via [FreeUpPendingDeleteQueue.settleAllPending] and proceed.
          */
-        fun shouldSkipAutomaticForPendingConsent(consentQueueNonEmpty: Boolean): Boolean =
-            consentQueueNonEmpty
+        fun shouldSkipAutomaticForPendingConsent(
+            queueNonEmpty: Boolean,
+            offeredAtMs: Long?,
+            nowMs: Long,
+        ): Boolean = queueNonEmpty && !isFreeUpPendingOfferStale(offeredAtMs, nowMs)
 
         /**
          * Retry only while under the attempt cap **and** the failure is transient or offline.
