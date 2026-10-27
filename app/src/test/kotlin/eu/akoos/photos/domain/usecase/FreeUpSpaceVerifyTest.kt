@@ -113,9 +113,56 @@ class FreeUpSpaceVerifyTest {
 
         val result = useCase.runPipeline(userId, Long.MAX_VALUE)
 
-        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        val done = result as FreeUpSpaceUseCase.FreeUpResult.Done
+        assertEquals(1, done.checked)
+        assertEquals(0, done.freed)
         coVerify(exactly = 0) { localMediaRepo.deleteDeviceCopies(any()) }
         coVerify(exactly = 0) { syncStateRepo.updateStatusAndDeleteLocal(any<List<String>>(), any()) }
+    }
+
+    @Test
+    fun `pending consent verifier keeps only URIs whose current Drive link is active`() = runTest {
+        val activeUri = "content://media/external/images/media/1"
+        val inactiveUri = "content://media/external/images/media/2"
+        val missingUri = "content://media/external/images/media/3"
+        val requested = linkedSetOf(activeUri, inactiveUri, missingUri)
+        coEvery {
+            syncStateRepo.cloudPairedLinkIds(userId, requested.toList())
+        } returns mapOf(
+            activeUri to "cloud-active",
+            inactiveUri to "cloud-inactive",
+        )
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(
+                userId,
+                volumeId,
+                listOf("cloud-active", "cloud-inactive"),
+            )
+        } returns mapOf(
+            "cloud-active" to linkAt("cloud-active", state = 1),
+            "cloud-inactive" to linkAt("cloud-inactive", state = 2),
+        )
+
+        val verified = useCase.verifyPendingConsentBatch(userId, requested)
+
+        assertEquals(linkedSetOf(activeUri), verified)
+    }
+
+    @Test
+    fun `pending consent verifier propagates an uncertain Drive lookup`() = runTest {
+        val uri = "content://media/external/images/media/1"
+        coEvery {
+            syncStateRepo.cloudPairedLinkIds(userId, listOf(uri))
+        } returns mapOf(uri to "cloud-1")
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, listOf("cloud-1"))
+        } throws RuntimeException("lookup failed")
+
+        val failure = runCatching {
+            useCase.verifyPendingConsentBatch(userId, linkedSetOf(uri))
+        }.exceptionOrNull()
+
+        assertTrue(failure is RuntimeException)
     }
 
     @Test
@@ -212,6 +259,7 @@ class FreeUpSpaceVerifyTest {
 
         assertTrue(result is FreeUpSpaceUseCase.FreeUpResult.Done)
         val done = result as FreeUpSpaceUseCase.FreeUpResult.Done
+        assertEquals(2, done.checked)
         assertEquals(0, done.freed)
         assertEquals(2, done.skipped)
     }
@@ -240,7 +288,9 @@ class FreeUpSpaceVerifyTest {
             ),
             phases,
         )
-        assertEquals(3, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        val done = result as FreeUpSpaceUseCase.FreeUpResult.Done
+        assertEquals(3, done.checked)
+        assertEquals(3, done.freed)
     }
 
     @Test

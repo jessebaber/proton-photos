@@ -1236,8 +1236,6 @@
     <string name="free_up_verifying">Preverjanje na Drive, ali je vsaka kopija na varnem…</string>
     <string name="free_up_explainer">Vsaka fotografija spodaj ima kopijo na Drive. Izbriše se le kopija v tej napravi.</string>
     <string name="free_up_progress">Obdelanih %1$d od %2$d (odstranjenih %3$d)</string>
-    <string name="free_up_rechecking">Ponovno preverjanje na Drive pred sprostitvijo prostora…</string>
-    <string name="free_up_recheck_progress">Ponovno preverjenih %1$d od %2$d</string>
     <string name="free_up_stop_checking">Ustavi preverjanje</string>
     <string name="free_up_stop_freeing">Ustavi sproščanje</string>
     <string name="free_up_continue">Nadaljuj sproščanje</string>
@@ -1253,13 +1251,6 @@
         <item quantity="two">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopij v napravi.</item>
         <item quantity="few">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopij v napravi.</item>
         <item quantity="other">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopij v napravi.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Pripravljeno za sprostitev prostora</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Odprite Sprosti prostor, da dokončate odstranitev %1$d kopije v napravi.</item>
-        <item quantity="two">Odprite Sprosti prostor, da dokončate odstranitev %1$d kopij v napravi.</item>
-        <item quantity="few">Odprite Sprosti prostor, da dokončate odstranitev %1$d kopij v napravi.</item>
-        <item quantity="other">Odprite Sprosti prostor, da dokončate odstranitev %1$d kopij v napravi.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d fotografija, %2$s za sprostitev</item>

@@ -1323,8 +1323,6 @@
     <string name="free_up_verifying">Comprobando con Drive que cada copia está a salvo…</string>
     <string name="free_up_explainer">Cada foto de abajo tiene una copia en Drive. Solo se elimina la copia de este dispositivo.</string>
     <string name="free_up_progress">Procesadas %1$d de %2$d (%3$d eliminadas)</string>
-    <string name="free_up_rechecking">Volviendo a comprobar con Drive antes de liberar espacio…</string>
-    <string name="free_up_recheck_progress">Comprobadas de nuevo %1$d de %2$d</string>
     <string name="free_up_stop_checking">Detener comprobación</string>
     <string name="free_up_stop_freeing">Detener liberación</string>
     <string name="free_up_continue">Continuar liberando espacio</string>
@@ -1338,11 +1336,6 @@
     <plurals name="free_up_awaiting_consent_notification_text">
         <item quantity="one">Abre Liberar espacio para permitir eliminar %1$d copia del dispositivo.</item>
         <item quantity="other">Abre Liberar espacio para permitir eliminar %1$d copias del dispositivo.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Listo para liberar espacio</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Abre Liberar espacio para terminar de eliminar %1$d copia del dispositivo.</item>
-        <item quantity="other">Abre Liberar espacio para terminar de eliminar %1$d copias del dispositivo.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d foto, %2$s por liberar</item>

@@ -1235,8 +1235,6 @@
     <string name="free_up_verifying">Sprawdzanie na Drive, czy każda kopia jest bezpieczna…</string>
     <string name="free_up_explainer">Każde zdjęcie poniżej ma kopię na Drive. Usuwana jest tylko kopia na tym urządzeniu.</string>
     <string name="free_up_progress">Przetworzono %1$d z %2$d (usunięto: %3$d)</string>
-    <string name="free_up_rechecking">Ponowne sprawdzanie na Drive przed zwolnieniem miejsca…</string>
-    <string name="free_up_recheck_progress">Ponownie sprawdzono %1$d z %2$d</string>
     <string name="free_up_stop_checking">Zatrzymaj sprawdzanie</string>
     <string name="free_up_stop_freeing">Zatrzymaj zwalnianie</string>
     <string name="free_up_continue">Kontynuuj zwalnianie</string>
@@ -1252,13 +1250,6 @@
         <item quantity="few">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
         <item quantity="many">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
         <item quantity="other">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Gotowe do zwolnienia miejsca</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Otwórz Zwolnij miejsce, aby dokończyć usuwanie %1$d kopii na urządzeniu.</item>
-        <item quantity="few">Otwórz Zwolnij miejsce, aby dokończyć usuwanie %1$d kopii na urządzeniu.</item>
-        <item quantity="many">Otwórz Zwolnij miejsce, aby dokończyć usuwanie %1$d kopii na urządzeniu.</item>
-        <item quantity="other">Otwórz Zwolnij miejsce, aby dokończyć usuwanie %1$d kopii na urządzeniu.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d zdjęcie, %2$s do zwolnienia</item>

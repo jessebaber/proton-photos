@@ -1235,8 +1235,6 @@
     <string name="free_up_verifying">Overovanie na Drive, že každá kópia je v bezpečí…</string>
     <string name="free_up_explainer">Každá fotka nižšie má kópiu na Drive. Maže sa len kópia v tomto zariadení.</string>
     <string name="free_up_progress">Spracovaných %1$d z %2$d (odstránených %3$d)</string>
-    <string name="free_up_rechecking">Opätovná kontrola na Drive pred uvoľnením miesta…</string>
-    <string name="free_up_recheck_progress">Opätovne skontrolovaných %1$d z %2$d</string>
     <string name="free_up_stop_checking">Zastaviť kontrolu</string>
     <string name="free_up_stop_freeing">Zastaviť uvoľňovanie</string>
     <string name="free_up_continue">Pokračovať v uvoľňovaní</string>
@@ -1252,13 +1250,6 @@
         <item quantity="few">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópie v zariadení.</item>
         <item quantity="many">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópie v zariadení.</item>
         <item quantity="other">Otvorte Uvoľniť miesto a povoľte odstránenie %1$d kópií v zariadení.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Pripravené na uvoľnenie miesta</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópie v zariadení.</item>
-        <item quantity="few">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópie v zariadení.</item>
-        <item quantity="many">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópie v zariadení.</item>
-        <item quantity="other">Otvorte Uvoľniť miesto a dokončite odstránenie %1$d kópií v zariadení.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d fotka, %2$s na uvoľnenie</item>

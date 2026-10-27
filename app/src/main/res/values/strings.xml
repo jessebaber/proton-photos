@@ -1646,8 +1646,6 @@
     <string name="free_up_verifying">Checking with Drive that every copy is safe…</string>
     <string name="free_up_explainer">Each photo below has a copy on Drive. Only the copy on this device is deleted.</string>
     <string name="free_up_progress">Processed %1$d of %2$d (%3$d removed)</string>
-    <string name="free_up_rechecking">Rechecking with Drive before freeing space…</string>
-    <string name="free_up_recheck_progress">Rechecked %1$d of %2$d</string>
     <string name="free_up_stop_checking">Stop checking</string>
     <string name="free_up_stop_freeing">Stop freeing</string>
     <string name="free_up_continue">Continue freeing</string>
@@ -1661,11 +1659,6 @@
     <plurals name="free_up_awaiting_consent_notification_text">
         <item quantity="one">Open Free up space to allow removing %1$d device copy.</item>
         <item quantity="other">Open Free up space to allow removing %1$d device copies.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Ready to free space</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Open Free up space to finish removing %1$d device copy.</item>
-        <item quantity="other">Open Free up space to finish removing %1$d device copies.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d photo, %2$s to free</item>

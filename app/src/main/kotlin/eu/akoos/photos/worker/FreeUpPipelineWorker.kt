@@ -159,11 +159,10 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         }
 
         return try {
-            val onProgress: (FreeUpSpaceUseCase.PipelineProgress) -> Unit = { progress ->
-                val phase = phaseWireName(progress.phase)
+            val onProgress: suspend (FreeUpSpaceUseCase.PipelineProgress) -> Unit = { progress ->
                 publishProgress(
                     isManual = isManual,
-                    phase = phase,
+                    phase = phaseWireName(progress.phase),
                     processed = progress.processed,
                     total = progress.total,
                     removed = progress.removed,
@@ -250,7 +249,7 @@ class FreeUpPipelineWorker @AssistedInject constructor(
             needsPermissionCount = 0,
         )
 
-    private fun publishProgress(
+    private suspend fun publishProgress(
         isManual: Boolean,
         phase: String,
         processed: Int,
@@ -259,13 +258,13 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         needsPermissionCount: Int,
     ) {
         runCatching {
-            setProgressAsync(
-                progressData(phase, processed, total, removed, needsPermissionCount),
-            )
+            setProgress(progressData(phase, processed, total, removed, needsPermissionCount))
         }
         if (!isManual) return
+        // Await setForeground so the shade cannot race ahead of WorkInfo progress; Async
+        // variants returned before the update landed and left late ticks dropped.
         runCatching {
-            setForegroundAsync(
+            setForeground(
                 buildForegroundInfo(
                     NotificationIds.MANUAL_FREE_UP,
                     phase,
@@ -350,7 +349,7 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         }
         val contentIntent = PendingIntent.getActivity(
             context,
-            NotificationIds.MANUAL_FREE_UP_READY,
+            NotificationIds.FREE_UP_ACTION_REQUIRED,
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -370,7 +369,7 @@ class FreeUpPipelineWorker @AssistedInject constructor(
             .build()
         runCatching {
             NotificationManagerCompat.from(context)
-                .notify(NotificationIds.MANUAL_FREE_UP_READY, notification)
+                .notify(NotificationIds.FREE_UP_ACTION_REQUIRED, notification)
         }
     }
 
@@ -387,15 +386,10 @@ class FreeUpPipelineWorker @AssistedInject constructor(
         const val KEY_REMOVED = "removed"
         const val KEY_NEEDS_PERMISSION_COUNT = "needs_permission_count"
 
-        /** Compatibility alias for ViewModel observers that still read KEY_DONE. */
-        const val KEY_DONE = "done"
-
         const val TRIGGER_MANUAL = "manual"
         const val TRIGGER_AUTOMATIC = "automatic"
 
         const val PHASE_VERIFYING = "verifying"
-        /** Retained for ViewModel wire compat until free-up-ui drops Rechecking; never published. */
-        const val PHASE_RECHECKING = "rechecking"
         const val PHASE_DELETING = "deleting"
         const val PHASE_AWAITING_CONSENT = "awaiting_consent"
 
@@ -451,31 +445,25 @@ class FreeUpPipelineWorker @AssistedInject constructor(
          */
         fun mapPipelineOutcome(result: FreeUpSpaceUseCase.FreeUpResult): MappedPipelineOutcome =
             when (result) {
-                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                    val processed = result.completedUris.size + result.localUris.size
-                    MappedPipelineOutcome(
-                        phase = PHASE_AWAITING_CONSENT,
-                        processed = processed,
-                        total = processed,
-                        removed = result.completedUris.size,
-                        needsPermissionCount = result.localUris.size,
-                        offerUris = result.localUris,
-                        postConsentNotification = true,
-                    )
-                }
+                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> MappedPipelineOutcome(
+                    phase = PHASE_AWAITING_CONSENT,
+                    processed = result.checked,
+                    total = result.checked,
+                    removed = result.freed,
+                    needsPermissionCount = result.localUris.size,
+                    offerUris = result.localUris,
+                    postConsentNotification = true,
+                )
                 is FreeUpSpaceUseCase.FreeUpResult.Done -> MappedPipelineOutcome(
                     phase = PHASE_DELETING,
-                    processed = result.freed,
-                    total = result.freed,
+                    processed = result.checked,
+                    total = result.checked,
                     removed = result.freed,
                     needsPermissionCount = 0,
                     offerUris = emptyList(),
                     postConsentNotification = false,
                 )
             }
-
-        fun foregroundNotificationId(isManual: Boolean): Int =
-            if (isManual) NotificationIds.MANUAL_FREE_UP else NotificationIds.AUTO_FREE_UP
 
         fun manualConstraints(): Constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -502,7 +490,6 @@ class FreeUpPipelineWorker @AssistedInject constructor(
             KEY_TOTAL to total,
             KEY_REMOVED to removed,
             KEY_NEEDS_PERMISSION_COUNT to needsPermissionCount,
-            KEY_DONE to processed,
         )
 
         fun outputData(

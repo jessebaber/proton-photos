@@ -1306,8 +1306,6 @@
     <string name="free_up_verifying">Vérification auprès de Drive que chaque copie est bien là…</string>
     <string name="free_up_explainer">Chaque photo ci-dessous a une copie sur Drive. Seule la copie de cet appareil est supprimée.</string>
     <string name="free_up_progress">%1$d sur %2$d traitées (%3$d supprimées)</string>
-    <string name="free_up_rechecking">Nouvelle vérification avec Drive avant de libérer de l\'espace…</string>
-    <string name="free_up_recheck_progress">%1$d sur %2$d revérifiées</string>
     <string name="free_up_stop_checking">Arrêter la vérification</string>
     <string name="free_up_stop_freeing">Arrêter la libération</string>
     <string name="free_up_continue">Continuer la libération</string>
@@ -1321,11 +1319,6 @@
     <plurals name="free_up_awaiting_consent_notification_text">
         <item quantity="one">Ouvrez Libérer de l\'espace pour autoriser la suppression de %1$d copie sur l\'appareil.</item>
         <item quantity="other">Ouvrez Libérer de l\'espace pour autoriser la suppression de %1$d copies sur l\'appareil.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Prêt à libérer de l\'espace</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Ouvrez Libérer de l\'espace pour finir de supprimer %1$d copie sur l\'appareil.</item>
-        <item quantity="other">Ouvrez Libérer de l\'espace pour finir de supprimer %1$d copies sur l\'appareil.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d photo, %2$s à libérer</item>

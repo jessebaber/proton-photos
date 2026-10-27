@@ -174,6 +174,28 @@ class FreeUpPendingDeleteBridgeTest {
     }
 
     @Test
+    fun remove_drops_uris_without_emitting_settlement() = runTest {
+        val bridge = FreeUpPendingDeleteBridge()
+        bridge.offer(listOf("content://a", "content://b", "content://c"))
+
+        val emissions = mutableListOf<FreeUpConsentSettlement>()
+        backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            bridge.settled.collect { emissions.add(it) }
+        }
+
+        bridge.remove(setOf("content://a", "content://c"))
+
+        assertTrue(emissions.isEmpty())
+        assertEquals(setOf("content://b"), bridge.uris.value)
+        assertNotNull(bridge.offeredAtMs)
+
+        bridge.remove(setOf("content://b"))
+        assertTrue(emissions.isEmpty())
+        assertTrue(bridge.uris.value.isEmpty())
+        assertNull(bridge.offeredAtMs)
+    }
+
+    @Test
     fun settleAllPending_clears_offeredAtMs_so_offer_is_no_longer_stale() {
         val bridge = FreeUpPendingDeleteBridge()
         bridge.offer(listOf("content://old"))

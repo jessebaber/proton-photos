@@ -1322,8 +1322,6 @@
     <string name="free_up_verifying">Controleren bij Drive of elke kopie er is…</string>
     <string name="free_up_explainer">Elke foto hieronder heeft een kopie op Drive. Alleen de kopie op dit apparaat wordt verwijderd.</string>
     <string name="free_up_progress">%1$d van %2$d verwerkt (%3$d verwijderd)</string>
-    <string name="free_up_rechecking">Drive opnieuw controleren voordat ruimte wordt vrijgemaakt…</string>
-    <string name="free_up_recheck_progress">%1$d van %2$d opnieuw gecontroleerd</string>
     <string name="free_up_stop_checking">Controle stoppen</string>
     <string name="free_up_stop_freeing">Vrijmaken stoppen</string>
     <string name="free_up_continue">Doorgaan met vrijmaken</string>
@@ -1337,11 +1335,6 @@
     <plurals name="free_up_awaiting_consent_notification_text">
         <item quantity="one">Open Ruimte vrijmaken om het verwijderen van %1$d apparaatkopie toe te staan.</item>
         <item quantity="other">Open Ruimte vrijmaken om het verwijderen van %1$d apparaatkopieën toe te staan.</item>
-    </plurals>
-    <string name="free_up_ready_notification_title">Klaar om ruimte vrij te maken</string>
-    <plurals name="free_up_ready_notification_text">
-        <item quantity="one">Open Ruimte vrijmaken om %1$d apparaatkopie te verwijderen.</item>
-        <item quantity="other">Open Ruimte vrijmaken om %1$d apparaatkopieën te verwijderen.</item>
     </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d foto, %2$s vrij te maken</item>

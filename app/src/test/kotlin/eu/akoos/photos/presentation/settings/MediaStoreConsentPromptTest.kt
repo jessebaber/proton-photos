@@ -30,7 +30,7 @@ import org.junit.Test
 /**
  * Pure decision coverage for [shouldPromptMediaStoreConsent]: trash growth re-prompt,
  * permanent-delete deny stop, and in-flight gating; plus
- * [mediaStoreConsentLaunchFailureAction] bounded PermanentDelete launch retry.
+ * [recordMediaStoreConsentLaunchFailure] bounded per-batch PermanentDelete launch retry.
  */
 class MediaStoreConsentPromptTest {
 
@@ -155,41 +155,63 @@ class MediaStoreConsentPromptTest {
 
     @Test
     fun launchFailure_trash_is_none() {
-        assertEquals(
-            MediaStoreConsentLaunchFailureAction.None,
-            mediaStoreConsentLaunchFailureAction(
-                mode = MediaStoreConsentMode.Trash,
-                failuresSoFar = 1,
-            ),
+        val initial = MediaStoreConsentRetryState()
+
+        val transition = recordMediaStoreConsentLaunchFailure(
+            mode = MediaStoreConsentMode.Trash,
+            batch = setOf("content://1"),
+            state = initial,
         )
-        assertEquals(
-            MediaStoreConsentLaunchFailureAction.None,
-            mediaStoreConsentLaunchFailureAction(
-                mode = MediaStoreConsentMode.Trash,
-                failuresSoFar = 99,
-            ),
-        )
+
+        assertEquals(MediaStoreConsentLaunchFailureAction.None, transition.action)
+        assertEquals(initial, transition.state)
     }
 
     @Test
-    fun launchFailure_permanentDelete_first_clears_attempted_batch() {
-        assertEquals(
-            MediaStoreConsentLaunchFailureAction.RetryClearAttemptedBatch,
-            mediaStoreConsentLaunchFailureAction(
-                mode = MediaStoreConsentMode.PermanentDelete,
-                failuresSoFar = 1,
-            ),
+    fun samePermanentDeleteBatch_retries_once_then_notifies_failure() {
+        val batch = linkedSetOf("content://1", "content://2")
+        val first = recordMediaStoreConsentLaunchFailure(
+            mode = MediaStoreConsentMode.PermanentDelete,
+            batch = batch,
+            state = MediaStoreConsentRetryState(),
         )
+        // Clearing lastAttemptedBatch is deliberately not represented in retry state.
+        val second = recordMediaStoreConsentLaunchFailure(
+            mode = MediaStoreConsentMode.PermanentDelete,
+            batch = batch,
+            state = first.state,
+        )
+        val alreadyReported = recordMediaStoreConsentLaunchFailure(
+            mode = MediaStoreConsentMode.PermanentDelete,
+            batch = batch,
+            state = second.state,
+        )
+
+        assertEquals(MediaStoreConsentLaunchFailureAction.Retry, first.action)
+        assertEquals(1, first.state.failureCount)
+        assertEquals(batch, first.state.failureBatch)
+        assertEquals(MediaStoreConsentLaunchFailureAction.NotifyFailure, second.action)
+        assertEquals(2, second.state.failureCount)
+        assertEquals(batch, second.state.failureBatch)
+        assertEquals(MediaStoreConsentLaunchFailureAction.None, alreadyReported.action)
     }
 
     @Test
-    fun launchFailure_permanentDelete_second_stops_without_settling() {
-        assertEquals(
-            MediaStoreConsentLaunchFailureAction.StopPrompting,
-            mediaStoreConsentLaunchFailureAction(
-                mode = MediaStoreConsentMode.PermanentDelete,
-                failuresSoFar = 2,
-            ),
+    fun differentPermanentDeleteBatch_receives_a_fresh_retry_budget() {
+        val first = recordMediaStoreConsentLaunchFailure(
+            mode = MediaStoreConsentMode.PermanentDelete,
+            batch = setOf("content://1"),
+            state = MediaStoreConsentRetryState(),
         )
+
+        val different = recordMediaStoreConsentLaunchFailure(
+            mode = MediaStoreConsentMode.PermanentDelete,
+            batch = setOf("content://2"),
+            state = first.state,
+        )
+
+        assertEquals(MediaStoreConsentLaunchFailureAction.Retry, different.action)
+        assertEquals(1, different.state.failureCount)
+        assertEquals(setOf("content://2"), different.state.failureBatch)
     }
 }

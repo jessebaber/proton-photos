@@ -23,7 +23,6 @@
 package eu.akoos.photos.worker
 
 import android.content.Context
-import androidx.work.Constraints
 
 /**
  * Manual Free-up entry points: enqueue/cancel the shared [FreeUpPipelineWorker] under a distinct
@@ -34,15 +33,6 @@ import androidx.work.Constraints
 object ManualFreeUpWorker {
     const val TAG = "manual_free_up_worker"
     const val UNIQUE_NAME = "manual_free_up"
-
-    /** @see FreeUpPipelineWorker.KEY_DONE */
-    const val KEY_DONE = FreeUpPipelineWorker.KEY_DONE
-
-    /** @see FreeUpPipelineWorker.KEY_TOTAL */
-    const val KEY_TOTAL = FreeUpPipelineWorker.KEY_TOTAL
-
-    /** Constraints for the manual pipeline: network required; no AUTO_FREE_UP / thermal. */
-    fun verifyConstraints(): Constraints = FreeUpPipelineWorker.manualConstraints()
 
     fun enqueue(context: Context) {
         FreeUpPipelineWorker.enqueueManual(context)
