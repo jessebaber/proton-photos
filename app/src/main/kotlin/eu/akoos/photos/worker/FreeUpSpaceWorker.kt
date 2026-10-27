@@ -43,8 +43,8 @@ object FreeUpSpaceWorker {
     const val NO_INTERVAL_MS = -1L
 
     /**
-     * Whether [doWork] should return success without sweeping when the AUTO_FREE_UP setting is
-     * off. Pure so the setting gate can be pinned by a plain JVM test.
+     * Whether the automatic pipeline should return success without sweeping when the AUTO_FREE_UP
+     * setting is off. Pure so the setting gate can be pinned by a plain JVM test.
      */
     fun shouldSkipWhenAutoFreeUpDisabled(enabled: Boolean): Boolean = !enabled
 

@@ -80,7 +80,8 @@ import eu.akoos.photos.presentation.util.formatBytes
 
 /**
  * Shows reclaimable photos and enqueues/cancels the manual Free-up pipeline worker. Progress and
- * reclaim run under WorkManager; consent is handled by [FreeUpPermanentDeleteHandler].
+ * reclaim run under WorkManager; permanent-delete consent (strict prepareBatch + launch-failure
+ * recovery) is handled by [FreeUpPermanentDeleteHandler] mounted on this route.
  */
 @Composable
 fun FreeUpSpaceScreen(

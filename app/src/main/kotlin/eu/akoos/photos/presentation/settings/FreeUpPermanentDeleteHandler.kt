@@ -22,18 +22,24 @@
 
 package eu.akoos.photos.presentation.settings
 
+import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.freeup.cancelFreeUpActionRequiredNotification
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
+import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
 /**
@@ -47,11 +53,15 @@ import javax.inject.Inject
  *
  * Grant settles the consented chunk even when the status update fails (files are already gone).
  * Deny settles the entire pending queue so remaining chunks are not re-offered.
+ * Technical launch failure clears the offer (not as user denial) so Continue can re-verify.
  */
 @HiltViewModel
 class FreeUpPermanentDeleteViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val bridge: FreeUpPendingDeleteQueue,
     private val syncStateRepo: SyncStateRepository,
+    private val freeUpSpace: FreeUpSpaceUseCase,
+    private val accountManager: AccountManager,
 ) : ViewModel() {
 
     val pendingUris: StateFlow<Set<String>> = bridge.uris
@@ -60,6 +70,32 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
     fun clearStaleOfferIfNeeded(nowMs: Long = System.currentTimeMillis()) {
         if (!isFreeUpPendingOfferStale(bridge.offeredAtMs, nowMs)) return
         bridge.settleAllPending(granted = false)
+        cancelFreeUpActionRequiredNotification(context)
+    }
+
+    /**
+     * Strict just-in-time Drive verification before [android.provider.MediaStore.createDeleteRequest].
+     * Rejected URIs leave the free-up queue via [FreeUpPendingDeleteQueue.remove] (no settlement).
+     */
+    suspend fun prepareBatch(batch: Set<String>): Set<String> {
+        if (batch.isEmpty()) return emptySet()
+        val userId = accountManager.getPrimaryUserId().first()
+        if (userId == null) {
+            bridge.remove(batch)
+            if (bridge.uris.value.isEmpty()) {
+                cancelFreeUpActionRequiredNotification(context)
+            }
+            return emptySet()
+        }
+        val verified = freeUpSpace.verifyPendingConsentBatch(userId, batch)
+        val rejected = batch - verified
+        if (rejected.isNotEmpty()) {
+            bridge.remove(rejected)
+            if (bridge.uris.value.isEmpty()) {
+                cancelFreeUpActionRequiredNotification(context)
+            }
+        }
+        return verified
     }
 
     fun onConsentGranted(uris: Set<String>) {
@@ -70,12 +106,27 @@ class FreeUpPermanentDeleteViewModel @Inject constructor(
             // Always settle: RESULT_OK means MediaStore already deleted; a failed status write
             // must not leave the queue blocking Free up.
             bridge.settle(uris, granted = true)
+            if (bridge.uris.value.isEmpty()) {
+                cancelFreeUpActionRequiredNotification(context)
+            }
         }
     }
 
     fun onConsentDenied(@Suppress("UNUSED_PARAMETER") uris: Set<String>) {
         viewModelScope.launch {
             bridge.settleAllPending(granted = false)
+            cancelFreeUpActionRequiredNotification(context)
+        }
+    }
+
+    /**
+     * Exhausted createDeleteRequest / launcher failure. Clears the permanent offer so Continue can
+     * re-run verification. Does **not** route through [onConsentDenied] / user-deny messaging.
+     */
+    fun onLaunchFailed(@Suppress("UNUSED_PARAMETER") uris: Set<String>) {
+        viewModelScope.launch {
+            bridge.settleAllPending(granted = false)
+            cancelFreeUpActionRequiredNotification(context)
         }
     }
 }
@@ -91,7 +142,9 @@ fun FreeUpPermanentDeleteHandler(
         pendingUris = viewModel.pendingUris,
         mode = MediaStoreConsentMode.PermanentDelete,
         settleDelayMs = 0L,
+        prepareBatch = viewModel::prepareBatch,
         onGranted = viewModel::onConsentGranted,
         onDenied = viewModel::onConsentDenied,
+        onLaunchFailed = viewModel::onLaunchFailed,
     )
 }

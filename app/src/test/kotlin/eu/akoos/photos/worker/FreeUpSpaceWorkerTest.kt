@@ -153,7 +153,7 @@ class FreeUpSpaceWorkerTest {
     @Test
     fun `auto free-up disabled skips the sweep`() {
         assertTrue(
-            "turning AUTO_FREE_UP off must short-circuit doWork before any reclaim",
+            "turning AUTO_FREE_UP off must short-circuit the automatic pipeline before any reclaim",
             FreeUpSpaceWorker.shouldSkipWhenAutoFreeUpDisabled(enabled = false),
         )
     }

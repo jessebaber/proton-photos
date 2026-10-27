@@ -90,14 +90,11 @@ object NotificationIds {
     const val MANUAL_FREE_UP = 4257
 
     /**
-     * Terminal "open Free up space" / awaiting-consent notice after the pipeline needs MediaStore
-     * permission. Own id so WorkManager teardown of [MANUAL_FREE_UP] / [AUTO_FREE_UP] does not
-     * dismiss it.
+     * Shared free-up "action required" notice (open Free up space / awaiting MediaStore consent).
+     * Used by both manual and automatic triggers. Own id so WorkManager teardown of
+     * [MANUAL_FREE_UP] does not dismiss it.
      */
-    const val MANUAL_FREE_UP_READY = 4258
-
-    /** Automatic free-up pipeline worker's foreground progress notification. */
-    const val AUTO_FREE_UP = 4259
+    const val FREE_UP_ACTION_REQUIRED = 4258
 
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep

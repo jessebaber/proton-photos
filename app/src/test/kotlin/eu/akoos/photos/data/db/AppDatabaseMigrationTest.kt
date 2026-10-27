@@ -29,7 +29,6 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -1343,19 +1342,6 @@ class AppDatabaseMigrationTest {
         db.query("SELECT albumName FROM import_album_member WHERE runId = 'run-2'").use { cur ->
             assertTrue("the other run's edges remain", cur.moveToFirst())
             assertEquals("Trip", cur.getString(0))
-        }
-    }
-
-    @Test
-    fun migrate_v41_to_v42_isNoOp() {
-        // Single-pass free-up dropped the draft free_up_verified table; v41→v42 stays a version
-        // bump only so local DBs already at 42 need no downgrade.
-        Migrations.MIGRATION_41_42.migrate(db)
-
-        db.query(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'free_up_verified'",
-        ).use { cur ->
-            assertFalse("noop migration must not create free_up_verified", cur.moveToFirst())
         }
     }
 

@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.data.freeup
 
+import android.content.Context
+import androidx.core.app.NotificationManagerCompat
+import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.domain.repository.FreeUpConsentSettlement
 import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -33,6 +36,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * Cancels the free-up action-required / awaiting-consent shade entry.
+ * Call whenever the permanent-delete queue drains, is denied, goes stale, or fails technically.
+ */
+fun cancelFreeUpActionRequiredNotification(context: Context) {
+    runCatching {
+        NotificationManagerCompat.from(context).cancel(NotificationIds.FREE_UP_ACTION_REQUIRED)
+    }
+}
 
 /**
  * Data-layer [FreeUpPendingDeleteQueue] for free-up permanent-delete consent.
@@ -81,6 +94,10 @@ class FreeUpPendingDeleteBridge @Inject constructor() : FreeUpPendingDeleteQueue
         settle(snapshot, granted)
     }
 
+    /**
+     * Silently drops [uris] without emitting a [FreeUpConsentSettlement].
+     * Used by the just-in-time verifier to discard Drive-rejected URIs before consent launches.
+     */
     override fun remove(uris: Set<String>) {
         if (uris.isEmpty()) return
         _uris.update { current ->

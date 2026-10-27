@@ -31,6 +31,7 @@ import androidx.core.app.NotificationCompat
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.mediastore.MediaStoreRowsProbe
 import eu.akoos.photos.data.mediastore.mediaStoreRowId
 import eu.akoos.photos.data.mediastore.parseContentUriOrNull
 import eu.akoos.photos.data.mediastore.queryExistingMediaStoreRows
@@ -76,9 +77,16 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         // [pendingDeleteEntryIsStale] rule on each. Stale entries get their SyncState collapsed to
         // CLOUD_ONLY so the gallery stops painting them as locally present, and they're removed
         // from the queue so the next createTrashRequest doesn't trip over them.
-        val presenceById = runCatching {
-            queryExistingMediaStoreRows(context.contentResolver, pendingRaw)
-        }.getOrDefault(emptyMap())
+        // An inconclusive probe (null cursor / provider failure) must leave the queue and statuses
+        // alone — never treat uncertainty as "all rows missing".
+        val probe = queryExistingMediaStoreRows(context.contentResolver, pendingRaw)
+        val presenceById = when (probe) {
+            MediaStoreRowsProbe.Inconclusive -> {
+                Log.w(TAG, "MediaStore probe inconclusive — leaving delete queue untouched")
+                return@withContext
+            }
+            is MediaStoreRowsProbe.Complete -> probe.byId
+        }
         val (aliveAll, stale) = pendingRaw.partition { uriStr ->
             val id = mediaStoreRowId(uriStr)
             val presence = id?.let { presenceById[it] }
@@ -117,7 +125,7 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             return
         }
         // createTrashRequest shares the same 2000-URI platform ceiling as createDeleteRequest.
-        val firstChunk = deleteRequestChunks(alive).firstOrNull().orEmpty()
+        val firstChunk = nextMediaStoreRequestBatch(alive)
         val uris = firstChunk.mapNotNull { parseContentUriOrNull(it) }
         if (uris.isEmpty()) {
             nm.cancel(DELETE_NOTIFICATION_ID)
@@ -183,11 +191,9 @@ class PendingDeleteNotificationUseCase @Inject constructor(
          */
         fun trimPendingDeleteQueue(alive: List<String>, max: Int): List<String> =
             if (alive.size <= max) alive
-            else alive.sortedByDescending { mediaStoreRowId(it) }.take(max)
-
-        /** The trailing MediaStore row id of a queued URI, or -1 when it carries none. */
-        private fun mediaStoreRowId(uri: String): Long =
-            uri.substringAfterLast('/').toLongOrNull() ?: -1L
+            // Shared parser returns null when there is no numeric id; sort those oldest (-1) so
+            // they are the first dropped under the cap.
+            else alive.sortedByDescending { mediaStoreRowId(it) ?: -1L }.take(max)
 
         const val DELETE_CHANNEL_ID = "delete_consent"
         const val DELETE_NOTIFICATION_ID = NotificationIds.DELETE_CONSENT

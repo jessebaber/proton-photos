@@ -39,7 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import eu.akoos.photos.domain.usecase.DELETE_REQUEST_MAX_URIS
+import eu.akoos.photos.domain.usecase.nextMediaStoreRequestBatch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -53,18 +53,6 @@ import kotlinx.coroutines.withContext
 enum class MediaStoreConsentMode {
     Trash,
     PermanentDelete,
-}
-
-/**
- * Next URI batch for a MediaStore consent dialog, capped at [DELETE_REQUEST_MAX_URIS].
- * Pure helper so chunk advance can be pinned without Compose.
- */
-fun nextMediaStoreConsentBatch(
-    pending: Set<String>,
-    max: Int = DELETE_REQUEST_MAX_URIS,
-): Set<String> {
-    if (pending.isEmpty() || max <= 0) return emptySet()
-    return pending.toList().take(max).toSet()
 }
 
 /**
@@ -94,36 +82,65 @@ fun shouldPromptMediaStoreConsent(
  * How [MediaStoreConsentHandler] reacts when `createTrashRequest` / `createDeleteRequest`
  * or `launcher.launch` fails (distinct from the user denying the system dialog).
  *
- * Launch failure stops PermanentDelete prompting after one retry without settling the queue —
- * it must **not** call [MediaStoreConsentHandler]'s `onDenied`.
+ * PermanentDelete retries the same batch once, then stops prompting and invokes its technical
+ * failure callback. It must **not** report a technical failure as user denial.
  */
 enum class MediaStoreConsentLaunchFailureAction {
-    /** PermanentDelete first failure: clear `lastAttemptedBatch` so one re-entry is allowed. */
-    RetryClearAttemptedBatch,
-    /** PermanentDelete exhausted retries: stop prompting; leave the queue unsettled. */
-    StopPrompting,
-    /** Trash (or no further action beyond clearing `inFlight`). */
+    /** PermanentDelete still has a launch retry available for this exact batch. */
+    Retry,
+    /** PermanentDelete exhausted this batch's launch retry budget. */
+    NotifyFailure,
+    /** Trash, or a PermanentDelete batch whose exhausted failure was already reported. */
     None,
 }
 
 /**
- * @param failuresSoFar count of PermanentDelete launch failures for the current batch
- *   **after** recording this failure (1 on first failure).
- * @param maxRetries how many failures may clear the attempted batch before stopping (default 1).
+ * Launch-failure accounting independent of `lastAttemptedBatch`.
+ *
+ * Clearing the attempted-batch launch guard to permit a retry must not make the same batch look
+ * new and reset its failure count.
  */
-fun mediaStoreConsentLaunchFailureAction(
+data class MediaStoreConsentRetryState(
+    val failureBatch: Set<String> = emptySet(),
+    val failureCount: Int = 0,
+)
+
+data class MediaStoreConsentFailureTransition(
+    val state: MediaStoreConsentRetryState,
+    val action: MediaStoreConsentLaunchFailureAction,
+)
+
+/**
+ * Records one request-creation or launcher failure.
+ *
+ * A genuinely different PermanentDelete batch starts a fresh budget. With the default one retry,
+ * the first failure returns [MediaStoreConsentLaunchFailureAction.Retry] and the second returns
+ * [MediaStoreConsentLaunchFailureAction.NotifyFailure].
+ */
+fun recordMediaStoreConsentLaunchFailure(
     mode: MediaStoreConsentMode,
-    failuresSoFar: Int,
+    batch: Set<String>,
+    state: MediaStoreConsentRetryState,
     maxRetries: Int = 1,
-): MediaStoreConsentLaunchFailureAction {
+): MediaStoreConsentFailureTransition {
+    require(maxRetries >= 0) { "maxRetries must be non-negative, was $maxRetries" }
     if (mode != MediaStoreConsentMode.PermanentDelete) {
-        return MediaStoreConsentLaunchFailureAction.None
+        return MediaStoreConsentFailureTransition(
+            state = state,
+            action = MediaStoreConsentLaunchFailureAction.None,
+        )
     }
-    return if (failuresSoFar <= maxRetries) {
-        MediaStoreConsentLaunchFailureAction.RetryClearAttemptedBatch
-    } else {
-        MediaStoreConsentLaunchFailureAction.StopPrompting
+    val failureCount = if (batch == state.failureBatch) state.failureCount + 1 else 1
+    val nextState = MediaStoreConsentRetryState(
+        failureBatch = batch.toSet(),
+        failureCount = failureCount,
+    )
+    val action = when {
+        failureCount <= maxRetries -> MediaStoreConsentLaunchFailureAction.Retry
+        failureCount == maxRetries + 1 -> MediaStoreConsentLaunchFailureAction.NotifyFailure
+        else -> MediaStoreConsentLaunchFailureAction.None
     }
+    return MediaStoreConsentFailureTransition(nextState, action)
 }
 
 /**
@@ -132,16 +149,24 @@ fun mediaStoreConsentLaunchFailureAction(
  * (`PENDING_DELETE_URIS`) and free-up permanent delete never share a sink.
  *
  * Trash restores upstream growth re-prompt via a [rememberSaveable] int high-water mark only —
- * never saveable URI sets (TransactionTooLarge risk). Permanent delete drains
- * [DELETE_REQUEST_MAX_URIS] chunks; deny stops further chunks until the sink is emptied.
+ * never saveable URI sets (TransactionTooLarge risk). Permanent delete drains bounded batches;
+ * deny stops further batches until the sink is emptied. Its [prepareBatch] must strictly verify
+ * that each URI still has an active cloud copy; the safe default permits only Trash identity.
  */
 @Composable
 fun MediaStoreConsentHandler(
     pendingUris: StateFlow<Set<String>>,
     mode: MediaStoreConsentMode,
     settleDelayMs: Long = 3_000L,
+    prepareBatch: suspend (Set<String>) -> Set<String> = { batch ->
+        check(mode == MediaStoreConsentMode.Trash) {
+            "PermanentDelete requires a strict prepareBatch verifier"
+        }
+        batch
+    },
     onGranted: (Set<String>) -> Unit,
     onDenied: (Set<String>) -> Unit = {},
+    onLaunchFailed: (Set<String>) -> Unit = {},
 ) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
 
@@ -154,8 +179,8 @@ fun MediaStoreConsentHandler(
     var lastAttemptedBatch by remember { mutableStateOf<Set<String>>(emptySet()) }
     // PermanentDelete only: deny stops chunk advance until the sink drains.
     var denyStopped by remember { mutableStateOf(false) }
-    // PermanentDelete only: launch failures for the current attempted batch (one retry).
-    var launchFailCount by remember { mutableIntStateOf(0) }
+    // Separate from lastAttemptedBatch: clearing the launch guard must not reset retry accounting.
+    var retryState by remember { mutableStateOf(MediaStoreConsentRetryState()) }
     // Trash only: int high-water for growth re-prompt; survives config change.
     var lastPromptedSize by rememberSaveable { mutableIntStateOf(0) }
 
@@ -164,7 +189,7 @@ fun MediaStoreConsentHandler(
     ) { result ->
         inFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
-            launchFailCount = 0
+            retryState = MediaStoreConsentRetryState()
             if (mode == MediaStoreConsentMode.Trash) {
                 // Batch settled — allow remaining / next growth to prompt again.
                 lastPromptedSize = 0
@@ -183,7 +208,7 @@ fun MediaStoreConsentHandler(
         if (pending.isEmpty()) {
             lastAttemptedBatch = emptySet()
             denyStopped = false
-            launchFailCount = 0
+            retryState = MediaStoreConsentRetryState()
             lastPromptedSize = 0
             return@LaunchedEffect
         }
@@ -197,7 +222,7 @@ fun MediaStoreConsentHandler(
         ) {
             return@LaunchedEffect
         }
-        val batch = nextMediaStoreConsentBatch(pending)
+        val batch = nextMediaStoreRequestBatch(pending).toSet()
         if (batch.isEmpty()) return@LaunchedEffect
         if (mode == MediaStoreConsentMode.PermanentDelete && batch == lastAttemptedBatch) {
             return@LaunchedEffect
@@ -215,24 +240,48 @@ fun MediaStoreConsentHandler(
         ) {
             return@LaunchedEffect
         }
-        val currentBatch = nextMediaStoreConsentBatch(snapshot)
+        val currentBatch = nextMediaStoreRequestBatch(snapshot).toSet()
         if (currentBatch.isEmpty()) return@LaunchedEffect
         if (mode == MediaStoreConsentMode.PermanentDelete && currentBatch == lastAttemptedBatch) {
             return@LaunchedEffect
         }
-        val uris: List<Uri> = currentBatch.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
-        if (uris.isEmpty()) return@LaunchedEffect
         inFlight = true
-        lastBatch = currentBatch
-        // New attempted batch — reset per-batch launch failure budget.
-        if (currentBatch != lastAttemptedBatch) {
-            launchFailCount = 0
-        }
+        // Guard this offered batch while verification/request creation is in progress.
         lastAttemptedBatch = currentBatch
         if (mode == MediaStoreConsentMode.Trash) {
             lastPromptedSize = snapshot.size
         }
         scope.launch {
+            val prepared = runCatching {
+                prepareBatch(currentBatch)
+            }.getOrElse {
+                inFlight = false
+                if (mode == MediaStoreConsentMode.PermanentDelete) {
+                    denyStopped = true
+                }
+                onLaunchFailed(currentBatch)
+                return@launch
+            }
+            // A hook may only filter the offered batch; it cannot add URIs or revive queue entries.
+            val requestBatch = currentBatch.filterTo(linkedSetOf()) { uri ->
+                uri in prepared && uri in pendingUris.value
+            }
+            if (requestBatch.isEmpty()) {
+                inFlight = false
+                return@launch
+            }
+            val uris: List<Uri> = requestBatch.mapNotNull {
+                runCatching { Uri.parse(it) }.getOrNull()
+            }
+            if (uris.isEmpty()) {
+                inFlight = false
+                if (mode == MediaStoreConsentMode.PermanentDelete) {
+                    denyStopped = true
+                }
+                onLaunchFailed(requestBatch)
+                return@launch
+            }
+            lastBatch = requestBatch
             runCatching {
                 val resolver = context.contentResolver
                 val pi = withContext(Dispatchers.IO) {
@@ -246,20 +295,19 @@ fun MediaStoreConsentHandler(
                 launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
             }.onFailure {
                 inFlight = false
-                when (
-                    mediaStoreConsentLaunchFailureAction(
-                        mode = mode,
-                        failuresSoFar = launchFailCount + 1,
-                    )
-                ) {
-                    MediaStoreConsentLaunchFailureAction.RetryClearAttemptedBatch -> {
-                        launchFailCount += 1
+                val transition = recordMediaStoreConsentLaunchFailure(
+                    mode = mode,
+                    batch = requestBatch,
+                    state = retryState,
+                )
+                retryState = transition.state
+                when (transition.action) {
+                    MediaStoreConsentLaunchFailureAction.Retry -> {
                         lastAttemptedBatch = emptySet()
                     }
-                    MediaStoreConsentLaunchFailureAction.StopPrompting -> {
-                        launchFailCount += 1
+                    MediaStoreConsentLaunchFailureAction.NotifyFailure -> {
                         denyStopped = true
-                        // Do not clear lastAttemptedBatch; do not call onDenied.
+                        onLaunchFailed(requestBatch)
                     }
                     MediaStoreConsentLaunchFailureAction.None -> Unit
                 }

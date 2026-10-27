@@ -31,16 +31,16 @@ package eu.akoos.photos.domain.usecase
 const val DELETE_REQUEST_MAX_URIS = 2_000
 
 /**
- * Slice [uris] into batches of at most [max] for MediaStore delete/trash request builders.
+ * Returns the next stable-order URI batch for a MediaStore delete/trash request builder.
  *
- * Pure and side-effect-free so the Binder / platform ceiling can be pinned by a plain JVM test.
- * An empty input yields no chunks; every non-empty input is covered exactly once in order.
+ * Callers remove a completed batch from their queue before requesting the next one. Keeping this
+ * helper single-batch avoids materialising a potentially large list of chunks when only the first
+ * can be launched. Empty input returns an empty list.
  */
-fun deleteRequestChunks(
-    uris: List<String>,
+fun nextMediaStoreRequestBatch(
+    uris: Iterable<String>,
     max: Int = DELETE_REQUEST_MAX_URIS,
-): List<List<String>> {
+): List<String> {
     require(max > 0) { "max must be positive, was $max" }
-    if (uris.isEmpty()) return emptyList()
-    return uris.chunked(max)
+    return uris.take(max)
 }

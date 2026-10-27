@@ -37,18 +37,17 @@ import org.junit.Test
 class ManualFreeUpWorkerTest {
 
     @Test
-    fun `verify constraints require a connected network`() {
-        val constraints = ManualFreeUpWorker.verifyConstraints()
+    fun `manual constraints require a connected network`() {
+        val constraints = FreeUpPipelineWorker.manualConstraints()
         assertEquals(NetworkType.CONNECTED, constraints.requiredNetworkType)
+        assertFalse(constraints.requiresBatteryNotLow())
     }
 
     @Test
     fun `manual free-up notification id is unique and outside the album range`() {
         assertTrue(NotificationIds.MANUAL_FREE_UP !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
-        assertTrue(NotificationIds.MANUAL_FREE_UP_READY !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
-        assertTrue(NotificationIds.AUTO_FREE_UP !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
-        assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.MANUAL_FREE_UP_READY)
-        assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.AUTO_FREE_UP)
+        assertTrue(NotificationIds.FREE_UP_ACTION_REQUIRED !in NotificationIds.ALBUM_DOWNLOAD_RANGE)
+        assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.FREE_UP_ACTION_REQUIRED)
         assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.DELETE_CONSENT)
         assertNotEquals(NotificationIds.MANUAL_FREE_UP, NotificationIds.METADATA_EDIT)
     }
@@ -59,7 +58,8 @@ class ManualFreeUpWorkerTest {
         // unique name + CONNECTED-only constraints is the regression lock here.
         assertEquals("manual_free_up", ManualFreeUpWorker.UNIQUE_NAME)
         assertEquals("manual_free_up_worker", ManualFreeUpWorker.TAG)
-        assertEquals(FreeUpPipelineWorker.manualConstraints(), ManualFreeUpWorker.verifyConstraints())
+        assertEquals(NetworkType.CONNECTED, FreeUpPipelineWorker.manualConstraints().requiredNetworkType)
+        assertFalse(FreeUpPipelineWorker.manualConstraints().requiresBatteryNotLow())
     }
 
     @Test
