@@ -36,8 +36,8 @@ import org.junit.Test
  *
  * The interval gate is the dangerous one: it decides whether a sweep request states a real minimum
  * age at all. An interval of zero puts the cutoff at "now", which matches every backed-up photo, so
- * a gate that admits it would verify (and later permanently delete via the finisher) an entire
- * library. The values fed to it are [FreeUpInterval.ms], so the accepted cases read from that enum
+ * a gate that admits it would verify and later permanently delete an entire library. The values fed
+ * to it are [FreeUpInterval.ms], so the accepted cases read from that enum
  * and this test fails if an interval of zero is ever offered.
  *
  * The constraint assertions are a tripwire: scheduled verify talks to Drive, so the sweep must keep

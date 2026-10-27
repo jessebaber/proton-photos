@@ -717,8 +717,8 @@ fun NavGraph(
         }
 
         composable(Screen.Gallery.route) {
-            // Trash consent for delete-after-backup: Gallery only (upstream parity) so the OS
-            // dialog does not appear over editor/viewer. Free-up permanent delete mounts on Free up.
+            // Trash consent for delete-after-backup: Gallery only, so the OS dialog does not appear
+            // over editor/viewer. Free-up permanent delete mounts on Free up.
             PendingDeleteHandler()
             // One-time post-update highlights. The startup router only lands here once the user is
             // fully Ready (logged in AND onboarded), so reaching this composable already implies

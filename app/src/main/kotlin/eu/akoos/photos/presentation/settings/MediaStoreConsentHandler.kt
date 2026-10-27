@@ -148,7 +148,7 @@ fun recordMediaStoreConsentLaunchFailure(
  * and reports grant/deny. Callers supply their own URI source and callbacks so trash
  * (`PENDING_DELETE_URIS`) and free-up permanent delete never share a sink.
  *
- * Trash restores upstream growth re-prompt via a [rememberSaveable] int high-water mark only —
+ * Trash preserves growth-based re-prompting with a [rememberSaveable] int high-water mark only —
  * never saveable URI sets (TransactionTooLarge risk). Permanent delete drains bounded batches;
  * deny stops further batches until the sink is emptied. Its [prepareBatch] must strictly verify
  * that each URI still has an active cloud copy; the safe default permits only Trash identity.

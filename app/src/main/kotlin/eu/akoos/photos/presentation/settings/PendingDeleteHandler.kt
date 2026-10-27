@@ -46,8 +46,8 @@ import javax.inject.Inject
  * dialog. Free-up permanent delete uses a separate sink ([FreeUpPermanentDeleteHandler]) and must
  * never write [SettingsKeys.PENDING_DELETE_URIS] or [MediaStoreConsentMode.Trash].
  *
- * Mounted on the Gallery route (upstream parity) so the system trash dialog does not appear over
- * the editor, viewer, or other authenticated screens. Growth-based re-prompt lives in
+ * Mounted on the Gallery route so the system trash dialog does not appear over the editor, viewer,
+ * or other authenticated screens. Growth-based re-prompt lives in
  * [MediaStoreConsentHandler] for [MediaStoreConsentMode.Trash].
  */
 @HiltViewModel
