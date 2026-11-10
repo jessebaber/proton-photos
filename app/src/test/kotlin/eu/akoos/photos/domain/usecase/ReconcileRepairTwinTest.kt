@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.repairTwinLinkId
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

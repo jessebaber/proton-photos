@@ -22,13 +22,14 @@
 
 package eu.akoos.photos.data.importer
 
+import eu.akoos.photos.data.usecase.uploadRewritesBytes
+
 import eu.akoos.photos.data.db.dao.ImportUploadedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.UploadFormatNaming
-import eu.akoos.photos.domain.usecase.uploadRewritesBytes
 import kotlinx.coroutines.CancellationException
 import me.proton.core.domain.entity.UserId
 import javax.inject.Inject

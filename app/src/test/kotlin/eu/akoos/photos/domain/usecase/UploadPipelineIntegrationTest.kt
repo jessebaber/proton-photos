@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ReconcileSyncStateUseCaseImpl
+
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -174,7 +176,7 @@ class UploadPipelineIntegrationTest {
             appScope = appScope,
             albumListEvents = albumEvents,
         )
-        reconcileUseCase = ReconcileSyncStateUseCase(local, cloud, syncRepo, fakeCloudListing(), context, appScope)
+        reconcileUseCase = ReconcileSyncStateUseCaseImpl(local, cloud, syncRepo, fakeCloudListing(), context, appScope)
         forceUploadUseCase = ForceUploadLocalUrisUseCase(context, syncRepo, cloud, targetDao)
     }
 

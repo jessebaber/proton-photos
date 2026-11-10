@@ -43,9 +43,7 @@ domain-location eu/akoos/photos/domain/usecase/RenamePersonUseCase.kt
 domain-location eu/akoos/photos/domain/usecase/SemanticSearchUseCase.kt
 
 # stream: feat/extract-sync
-domain-location eu/akoos/photos/domain/usecase/DrivePairLookup.kt
-domain-location eu/akoos/photos/domain/usecase/GetGalleryItemsUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/ReconcileSyncStateUseCase.kt
+
 
 # stream: feat/presentation-facades
 
