@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.metadata
+package eu.akoos.photos.domain.metadata
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

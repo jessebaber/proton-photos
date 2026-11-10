@@ -82,8 +82,8 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
-import eu.akoos.photos.presentation.settings.ThemePalette
-import eu.akoos.photos.presentation.theme.paletteAccent
+import eu.akoos.photos.util.ThemePalette
+import eu.akoos.photos.util.paletteAccentArgb
 import eu.akoos.photos.util.copySensitiveText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -1351,7 +1351,7 @@ class ScreenshotOverlayService : Service() {
         }
         val key = runCatching { settingsDataStore.data.first()[SettingsKeys.THEME_PALETTE] }.getOrNull()
         isLightTheme = light
-        accentColor = paletteAccent(ThemePalette.fromKey(key), light).toArgb()
+        accentColor = paletteAccentArgb(ThemePalette.fromKey(key), light)
     }
 
     /** The app's pill background: the accent fill, or the opaque in-app pill with a subtle border,

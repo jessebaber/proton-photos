@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.gifmaker
+package eu.akoos.photos.domain.gif
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

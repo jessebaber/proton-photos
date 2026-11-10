@@ -27,9 +27,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.repository.drive.CloudTrashOutcome
-import eu.akoos.photos.data.repository.drive.UploadPhase
-import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
+import eu.akoos.photos.domain.repository.CloudDeleteOutcome
+import eu.akoos.photos.domain.repository.CloudRestoreOutcome
+import eu.akoos.photos.domain.repository.CloudTrashOutcome
+import eu.akoos.photos.domain.repository.UploadPhase
+import eu.akoos.photos.domain.repository.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
 import eu.akoos.photos.domain.entity.AlbumNotFoundException
@@ -65,7 +67,7 @@ import java.io.File
  *    [cloudContentHash] returns null.
  * Every other member is an unused no-op / empty result.
  */
-internal class FakeDrivePhotoRepository : DrivePhotoRepository {
+class FakeDrivePhotoRepository : DrivePhotoRepository {
 
     val photos = MutableStateFlow<List<CloudPhoto>>(emptyList())
     private val albumMembership = mutableMapOf<String, MutableList<String>>()
@@ -247,10 +249,10 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
-        preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
     ): File = (fullResCacheDir?.let { dir ->
-        File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
+        val ext = photo.mimeType.substringAfterLast('/').lowercase().let { if (it == "jpeg") "jpg" else it }
+        File(dir, "${photo.linkId}.$ext").also { it.parentFile?.mkdirs() }
     } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
         writeBytes(downloadBytes)
         deleteOnExit()
@@ -319,13 +321,13 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun restoreFromCloudTrash(
         userId: UserId,
         linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudRestoreOutcome =
-        eu.akoos.photos.data.repository.drive.CloudRestoreOutcome(emptySet(), emptySet(), false)
+    ): CloudRestoreOutcome =
+        CloudRestoreOutcome(emptySet(), emptySet(), false)
     override suspend fun deleteFromCloudForever(
         userId: UserId,
         linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome =
-        eu.akoos.photos.data.repository.drive.CloudDeleteOutcome(emptySet(), emptySet())
+    ): CloudDeleteOutcome =
+        CloudDeleteOutcome(emptySet(), emptySet())
     override suspend fun createAlbumShareLink(
         userId: UserId,
         albumLinkId: String,

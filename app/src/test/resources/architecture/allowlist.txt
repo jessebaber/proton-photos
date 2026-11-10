@@ -1,14 +1,6 @@
 # stream: feat/domain-module
 
 # stream: feat/domain-contracts
-data-presentation eu/akoos/photos/data/gif/GifExporter.kt
-data-presentation eu/akoos/photos/service/GifExportService.kt
-data-presentation eu/akoos/photos/service/ModelDownloadService.kt
-data-presentation eu/akoos/photos/service/ScreenshotOverlayService.kt
-domain-location eu/akoos/photos/domain/ocr/TextBlockCleanup.kt
-domain-location eu/akoos/photos/domain/ocr/TextRecognition.kt
-domain-location eu/akoos/photos/domain/repository/DrivePhotoRepository.kt
-domain-location eu/akoos/photos/domain/repository/NewsRepository.kt
 
 # stream: feat/settings-store
 
@@ -159,7 +151,6 @@ presentation-data eu/akoos/photos/presentation/importer/ImportReviewSection.kt
 presentation-data eu/akoos/photos/presentation/importer/ImportScreen.kt
 presentation-data eu/akoos/photos/presentation/importer/ImportViewModel.kt
 presentation-data eu/akoos/photos/presentation/lock/AppLockManager.kt
-presentation-data eu/akoos/photos/presentation/news/NewsScreen.kt
 presentation-data eu/akoos/photos/presentation/offline/OfflinePhotosViewModel.kt
 presentation-data eu/akoos/photos/presentation/onboarding/OnboardingScreen.kt
 presentation-data eu/akoos/photos/presentation/onboarding/steps/MlIntroStep.kt

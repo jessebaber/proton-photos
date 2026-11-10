@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.domain.ocr
 
-import eu.akoos.photos.util.FitPoint
+import eu.akoos.photos.domain.geometry.FitPoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -91,45 +91,11 @@ import javax.inject.Singleton
 
 private const val TAG = "PhotoUploadSvc"
 
-/**
- * Phase reported via `uploadFile`'s `onProgress` callback. Each phase emits its own 0 →
- * totalBytes curve with a guaranteed final 100% tick so the bar settles cleanly.
- */
-enum class UploadPhase { Encrypting, Uploading }
+typealias UploadPhase = eu.akoos.photos.domain.repository.UploadPhase
+typealias UploadXAttrMetadata = eu.akoos.photos.domain.repository.UploadXAttrMetadata
 
-/**
- * Source-derived metadata for the photo xAttr Camera/Location blocks, resolved BEFORE any strip
- * pass and already gated against the user's [eu.akoos.photos.util.MetadataStripConfig] so the
- * encrypted xAttr can never re-leak a field the file itself had erased. All fields are nullable —
- * a null block is simply omitted from the xAttr JSON.
- *
- *  - [latitude]/[longitude]: present only when GPS is NOT stripped.
- *  - [cameraOrientation]: raw EXIF orientation int (1..8), always present when known (never stripped).
- *  - [cameraCaptureTimeIso]: ISO_INSTANT capture time — the floored upload time when timestamps
- *    are stripped, else the real EXIF/MediaStore capture time.
- *  - [cameraDevice]: EXIF model, present only when camera info is NOT stripped.
- *  - [subjectCoordinates]: [Top,Left,Bottom,Right] from EXIF SubjectArea, present only when camera
- *    info is NOT stripped.
- *  - [displayWidth]/[displayHeight]: rotation-corrected dimensions for xAttr Media — already
- *    W/H-swapped when the EXIF orientation or video rotation is 90/270. Null falls back to the
- *    MediaStore values on [eu.akoos.photos.domain.entity.LocalMediaItem].
- *  - [durationMillis]: video length for xAttr Media, read from the source container. Null falls back
- *    to the [eu.akoos.photos.domain.entity.LocalMediaItem] duration.
- */
 /** A photo the Drive SDK committed, with the grid thumbnail it was sent with. */
 internal class SdkUploadedPhoto(val linkId: String, val revisionId: String, val thumbnailBytes: ByteArray?)
-
-data class UploadXAttrMetadata(
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val cameraOrientation: Int? = null,
-    val cameraCaptureTimeIso: String? = null,
-    val cameraDevice: String? = null,
-    val subjectCoordinates: IntArray? = null,
-    val displayWidth: Int? = null,
-    val displayHeight: Int? = null,
-    val durationMillis: Long? = null,
-)
 
 /**
  * Concurrent block encrypt+sign+spill slots. Three keeps the CPU busy on PGP/AES without

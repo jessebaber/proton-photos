@@ -348,29 +348,23 @@ enum class ThemeMode(val storageKey: String, val labelRes: Int) {
     }
 }
 
-/**
- * Accent-color palette. Orthogonal to [ThemeMode] — picking Forest doesn't switch
- * between light and dark, only the accent/accent2 tokens shift. [Default] is the
- * original Proton purple kept around for backward compatibility (no visual change
- * for users who never open the new picker).
- */
-enum class ThemePalette(val storageKey: String, val labelRes: Int) {
-    Default("default", eu.akoos.photos.R.string.palette_default),
-    Forest ("forest",  eu.akoos.photos.R.string.palette_forest),
-    Sunset ("sunset",  eu.akoos.photos.R.string.palette_sunset),
-    Sea    ("sea",     eu.akoos.photos.R.string.palette_sea),
-    Sepia  ("sepia",   eu.akoos.photos.R.string.palette_sepia),
-    Mono   ("mono",    eu.akoos.photos.R.string.palette_mono),
-    Lavender("lavender", eu.akoos.photos.R.string.palette_lavender),
-    Rose   ("rose",    eu.akoos.photos.R.string.palette_rose),
-    Mint   ("mint",    eu.akoos.photos.R.string.palette_mint),
-    Gold   ("gold",    eu.akoos.photos.R.string.palette_gold),
-    Ruby   ("ruby",    eu.akoos.photos.R.string.palette_ruby);
+typealias ThemePalette = eu.akoos.photos.util.ThemePalette
 
-    companion object {
-        fun fromKey(key: String?): ThemePalette = entries.firstOrNull { it.storageKey == key } ?: Default
+/** Picker label for a [ThemePalette]. */
+val ThemePalette.labelRes: Int
+    get() = when (this) {
+        ThemePalette.Default -> eu.akoos.photos.R.string.palette_default
+        ThemePalette.Forest -> eu.akoos.photos.R.string.palette_forest
+        ThemePalette.Sunset -> eu.akoos.photos.R.string.palette_sunset
+        ThemePalette.Sea -> eu.akoos.photos.R.string.palette_sea
+        ThemePalette.Sepia -> eu.akoos.photos.R.string.palette_sepia
+        ThemePalette.Mono -> eu.akoos.photos.R.string.palette_mono
+        ThemePalette.Lavender -> eu.akoos.photos.R.string.palette_lavender
+        ThemePalette.Rose -> eu.akoos.photos.R.string.palette_rose
+        ThemePalette.Mint -> eu.akoos.photos.R.string.palette_mint
+        ThemePalette.Gold -> eu.akoos.photos.R.string.palette_gold
+        ThemePalette.Ruby -> eu.akoos.photos.R.string.palette_ruby
     }
-}
 
 /**
  * Top-level gallery tab the app opens on at start. [index] matches the pager page

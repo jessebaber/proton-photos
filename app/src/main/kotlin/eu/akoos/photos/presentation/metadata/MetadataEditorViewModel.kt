@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.metadata
 
+import eu.akoos.photos.domain.metadata.FilenameDate
+
 import android.content.Context
 import android.content.IntentSender
 import android.net.Uri

@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.domain.ocr
 
-import eu.akoos.photos.util.FitPoint
+import eu.akoos.photos.domain.geometry.FitPoint
 import kotlin.math.abs
 import kotlin.math.atan
 import kotlin.math.atan2

@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.domain.repository
 
-import eu.akoos.photos.data.api.model.NewsItem
+import eu.akoos.photos.domain.model.NewsItem
 import kotlinx.coroutines.flow.Flow
 
 /** The news screen's contents as they stand from the cache: the entries, where feedback goes, and

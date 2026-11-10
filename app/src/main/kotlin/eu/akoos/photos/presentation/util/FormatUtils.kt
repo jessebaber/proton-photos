@@ -27,17 +27,9 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.ceil
 
-/** The one byte formatter for every surface. Binary units (1024) to match how Proton
- *  reports storage, so a quota shown here equals the same quota on Proton's own pages. */
-fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return "%.1f KB".format(kb)
-    val mb = kb / 1024.0
-    if (mb < 1024) return "%.1f MB".format(mb)
-    val gb = mb / 1024.0
-    return "%.2f GB".format(gb)
-}
+/** @see eu.akoos.photos.util.formatBytes */
+fun formatBytes(bytes: Long): String = eu.akoos.photos.util.formatBytes(bytes)
+
 
 /**
  * Video playhead / trim formatter. `withTenths = false` for `m:ss` (viewer pill,
