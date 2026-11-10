@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +51,9 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.isInHiddenAlbum
+import eu.akoos.photos.domain.usecase.withLiveNewest
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import java.util.concurrent.ConcurrentHashMap
@@ -69,12 +72,12 @@ private const val QUICK_START_COUNT = 2_000
 private const val QUICK_START_LIVE_COUNT = 200
 
 @Singleton
-class GetGalleryItemsUseCase @Inject constructor(
+class GetGalleryItemsUseCaseImpl @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateSnapshot: SyncStateSnapshot,
     @AppScope private val appScope: CoroutineScope,
-) {
+) : GetGalleryItemsUseCase {
     // One shared upstream merge per user, so the associateBy/groupBy/sort runs ONCE across all
     // collectors (Gallery, Search, Calendar, …) instead of re-running per cold subscription.
     private val cache = ConcurrentHashMap<UserId, SharedFlow<List<GalleryItem>>>()
@@ -82,7 +85,7 @@ class GetGalleryItemsUseCase @Inject constructor(
     private val firstMergeMarked = AtomicBoolean(false)
 
     @OptIn(FlowPreview::class)
-    fun invoke(userId: UserId): Flow<List<GalleryItem>> =
+    override fun invoke(userId: UserId): Flow<List<GalleryItem>> =
         cache.getOrPut(userId) {
             combine(
                 // distinctUntilChanged on each source BEFORE the merge: the cold listing's stub
@@ -147,7 +150,7 @@ class GetGalleryItemsUseCase @Inject constructor(
      * For a screen that shows the library, never one that acts on what is absent from it: the first list
      * lacks the older device photos.
      */
-    fun withQuickStart(userId: UserId?, full: Flow<List<GalleryItem>>): Flow<List<GalleryItem>> = channelFlow {
+    override fun withQuickStart(userId: UserId?, full: Flow<List<GalleryItem>>): Flow<List<GalleryItem>> = channelFlow {
         val order = Mutex()
         var fullSeen = false
         val quick = launch {
@@ -184,7 +187,7 @@ class GetGalleryItemsUseCase @Inject constructor(
      *  album-hide filter never removes a local-only item (those carry no cloud linkId), so the hidden
      *  member source is not consulted here. Reads and writes no per-user cache and mints no UserId:
      *  a structural null-session branch. */
-    fun invokeLocalOnly(): Flow<List<GalleryItem>> = localOnlyFeed
+    override fun invokeLocalOnly(): Flow<List<GalleryItem>> = localOnlyFeed
 
     /**
      * [invokeLocalOnly]'s one merge, shared by every guest surface (timeline, search, map, people)
@@ -434,34 +437,15 @@ class GetGalleryItemsUseCase @Inject constructor(
         })
         return order.map { visible[it] }
     }
-
-    /** A gallery item belongs to a hidden album when its cloud copy's linkId is a hidden-album
-     *  member. A LocalOnly item has no cloud linkId, so an album hide never removes a device-only
-     *  photo (those use the separate hidden vault). */
-    internal fun isInHiddenAlbum(item: GalleryItem, hiddenLinkIds: Set<String>): Boolean {
-        if (hiddenLinkIds.isEmpty()) return false
-        val linkId = when (item) {
-            is GalleryItem.Synced -> item.cloud.linkId
-            is GalleryItem.CloudOnly -> item.cloud.linkId
-            is GalleryItem.LocalOnly -> null
-        }
-        return linkId != null && linkId in hiddenLinkIds
-    }
 }
+
 
 /**
  * The Drive photos the timeline's quick first list may show. One paired to a device file that list does not hold
  * (an older photo, outside the newest few thousand) is left out until the whole scan arrives: shown before then it
- * would read as on Drive only, and an action picked on it would act on the Drive copy alone. Pure.
+ * would read as on Drive only, and an action picked on it would act on the Drive copy alone.
  */
-/** [kept] with [live] laid over it: a uri in both is taken from [live], which is read now. */
-internal fun withLiveNewest(kept: List<LocalMediaItem>, live: List<LocalMediaItem>): List<LocalMediaItem> {
-    if (live.isEmpty()) return kept
-    val liveUris = live.mapTo(HashSet(live.size * 2)) { it.uri }
-    return live + kept.filter { it.uri !in liveUris }
-}
-
-internal fun cloudForQuickStart(
+fun cloudForQuickStart(
     cloud: List<CloudPhoto>,
     newest: List<LocalMediaItem>,
     sync: SyncStateSnapshot.Rows,

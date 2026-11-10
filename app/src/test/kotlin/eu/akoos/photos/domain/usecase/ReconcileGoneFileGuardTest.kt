@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.deviceFileGone
+import eu.akoos.photos.data.usecase.writtenSinceScan
+
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
