@@ -49,6 +49,6 @@ object ImportCaptureDate {
         return nowMs
     }
 
-    internal fun isPlausible(ms: Long, nowMs: Long): Boolean =
+    fun isPlausible(ms: Long, nowMs: Long): Boolean =
         TimestampSanity.isReal(ms) && ms <= nowMs + FUTURE_SLACK_MS
 }
