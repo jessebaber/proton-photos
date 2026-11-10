@@ -6,6 +6,7 @@
 .DS_Store
 /build
 /app/build
+/domain/build
 /baseline-profile/build
 /captures
 .externalNativeBuild

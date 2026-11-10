@@ -27,7 +27,7 @@ package eu.akoos.photos.domain.entity
  * carries the JPEG quality plus longest-edge cap the photo path re-encodes at ([maxLongEdgePx] of 0
  * means keep the original dimensions), and the short-edge and frame-rate caps the video path
  * transcodes at (0 and null keep the source's). The ordinal is what
- * gets persisted in [eu.akoos.photos.data.preferences.SettingsKeys.COMPRESS_UPLOAD_TIER], so keep
+ * gets persisted in SettingsKeys.COMPRESS_UPLOAD_TIER, so keep
  * the declaration order stable: reordering silently repoints every saved setting at a different
  * tier. Picker labels and descriptions map to string resources in the settings UI layer.
  */
