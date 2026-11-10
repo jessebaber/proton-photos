@@ -47,6 +47,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.ThemePalette
+import eu.akoos.photos.util.themeAccentArgbDark
+import eu.akoos.photos.util.themeAccentArgbLight
 
 // No-op indication — suppresses all press ripple/animation
 private object NoIndication : IndicationNodeFactory {
@@ -65,19 +67,6 @@ private val Bg2Dark = Color(0xFF1A1A1A)
 private val FgPrimaryDark = Color(0xFFECEBF3)
 private val FgDimDark = Color(0xFFA4A1B4)
 private val FgMuteDark = Color(0xFF6B6880)
-private val AccentDark = Color(0xFF8B7CFF)
-private val Accent2Dark = Color(0xFF6957D7)
-// ── Palette accents (dark mode) — only `accent`/`accent2` shift between palettes. ──
-private val AccentDarkForest  = Color(0xFF7BC47F); private val Accent2DarkForest  = Color(0xFF3F8C44)
-private val AccentDarkSunset  = Color(0xFFFF8A65); private val Accent2DarkSunset  = Color(0xFFE64A19)
-private val AccentDarkSea     = Color(0xFF4FC3F7); private val Accent2DarkSea     = Color(0xFF0288D1)
-private val AccentDarkSepia   = Color(0xFFD4A574); private val Accent2DarkSepia   = Color(0xFF8B6F47)
-private val AccentDarkMono    = Color(0xFFE0E0E0); private val Accent2DarkMono    = Color(0xFF9E9E9E)
-private val AccentDarkLavender = Color(0xFFC9A7EB); private val Accent2DarkLavender = Color(0xFF9B7FD4)
-private val AccentDarkRose     = Color(0xFFF48FB1); private val Accent2DarkRose     = Color(0xFFE06699)
-private val AccentDarkMint     = Color(0xFF6FE0C4); private val Accent2DarkMint     = Color(0xFF2FB89C)
-private val AccentDarkGold     = Color(0xFFFFD166); private val Accent2DarkGold     = Color(0xFFE9AE3C)
-private val AccentDarkRuby     = Color(0xFFFF7A88); private val Accent2DarkRuby     = Color(0xFFE84C5E)
 private val LineDark = Color(0x14FFFFFF)
 private val Line2Dark = Color(0x1EFFFFFF)
 private val PillBgDark = Color(0xBE1C1C1E)
@@ -92,19 +81,6 @@ private val Bg2Light = Color(0xFFEAEAEC)
 private val FgPrimaryLight = Color(0xFF131318)
 private val FgDimLight = Color(0xFF5C5A6B)
 private val FgMuteLight = Color(0xFF8E8B9C)
-private val AccentLight = Color(0xFF6957D7)
-private val Accent2Light = Color(0xFF4A37BC)
-// ── Palette accents (light mode). ──
-private val AccentLightForest = Color(0xFF388E3C); private val Accent2LightForest = Color(0xFF1B5E20)
-private val AccentLightSunset = Color(0xFFE64A19); private val Accent2LightSunset = Color(0xFFBF360C)
-private val AccentLightSea    = Color(0xFF0288D1); private val Accent2LightSea    = Color(0xFF01579B)
-private val AccentLightSepia  = Color(0xFF8B6F47); private val Accent2LightSepia  = Color(0xFF5D4037)
-private val AccentLightMono   = Color(0xFF424242); private val Accent2LightMono   = Color(0xFF212121)
-private val AccentLightLavender = Color(0xFF9575CD); private val Accent2LightLavender = Color(0xFF6A4CAF)
-private val AccentLightRose     = Color(0xFFD6336C); private val Accent2LightRose     = Color(0xFFA61E4D)
-private val AccentLightMint     = Color(0xFF12A98C); private val Accent2LightMint     = Color(0xFF0B7A66)
-private val AccentLightGold     = Color(0xFFCC8A00); private val Accent2LightGold     = Color(0xFF995F00)
-private val AccentLightRuby     = Color(0xFFC62838); private val Accent2LightRuby     = Color(0xFF8E1B27)
 private val LineLight = Color(0x14000000)
 private val Line2Light = Color(0x1F000000)
 // Light-theme pills sit over photos (info pill, motion / panorama controls in the viewer), where
@@ -169,32 +145,14 @@ data class AppColorsTokens(
 // Only `accent` and `accent2` shift per palette; every other token stays palette-
 // agnostic. Default returns the historical Proton purple so existing installs see
 // zero visual change after this code lands.
-private fun darkAccentFor(palette: ThemePalette): Pair<Color, Color> = when (palette) {
-    ThemePalette.Default -> AccentDark         to Accent2Dark
-    ThemePalette.Forest  -> AccentDarkForest   to Accent2DarkForest
-    ThemePalette.Sunset  -> AccentDarkSunset   to Accent2DarkSunset
-    ThemePalette.Sea     -> AccentDarkSea      to Accent2DarkSea
-    ThemePalette.Sepia   -> AccentDarkSepia   to Accent2DarkSepia
-    ThemePalette.Mono    -> AccentDarkMono     to Accent2DarkMono
-    ThemePalette.Lavender -> AccentDarkLavender to Accent2DarkLavender
-    ThemePalette.Rose     -> AccentDarkRose     to Accent2DarkRose
-    ThemePalette.Mint     -> AccentDarkMint     to Accent2DarkMint
-    ThemePalette.Gold     -> AccentDarkGold     to Accent2DarkGold
-    ThemePalette.Ruby     -> AccentDarkRuby     to Accent2DarkRuby
+private fun darkAccentFor(palette: ThemePalette): Pair<Color, Color> {
+    val (a, b) = themeAccentArgbDark(palette)
+    return Color(a) to Color(b)
 }
 
-private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (palette) {
-    ThemePalette.Default -> AccentLight        to Accent2Light
-    ThemePalette.Forest  -> AccentLightForest  to Accent2LightForest
-    ThemePalette.Sunset  -> AccentLightSunset  to Accent2LightSunset
-    ThemePalette.Sea     -> AccentLightSea     to Accent2LightSea
-    ThemePalette.Sepia   -> AccentLightSepia   to Accent2LightSepia
-    ThemePalette.Mono    -> AccentLightMono    to Accent2LightMono
-    ThemePalette.Lavender -> AccentLightLavender to Accent2LightLavender
-    ThemePalette.Rose     -> AccentLightRose     to Accent2LightRose
-    ThemePalette.Mint     -> AccentLightMint     to Accent2LightMint
-    ThemePalette.Gold     -> AccentLightGold     to Accent2LightGold
-    ThemePalette.Ruby     -> AccentLightRuby     to Accent2LightRuby
+private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> {
+    val (a, b) = themeAccentArgbLight(palette)
+    return Color(a) to Color(b)
 }
 
 // AMOLED override — base surfaces drop to true black while cards/panels stay one step up so

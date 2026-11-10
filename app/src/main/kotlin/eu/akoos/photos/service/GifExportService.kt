@@ -42,8 +42,8 @@ import eu.akoos.photos.data.gif.GifExporter
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.transfer.TransferCenter
-import eu.akoos.photos.presentation.gifmaker.GIF_EDGE_STANDARD
-import eu.akoos.photos.presentation.gifmaker.GifAspect
+import eu.akoos.photos.domain.gif.GIF_EDGE_STANDARD
+import eu.akoos.photos.domain.gif.GifAspect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

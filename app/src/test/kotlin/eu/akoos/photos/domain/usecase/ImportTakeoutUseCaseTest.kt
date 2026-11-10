@@ -23,7 +23,7 @@
 package eu.akoos.photos.domain.usecase
 
 import eu.akoos.photos.domain.importer.SidecarMeta
-import eu.akoos.photos.presentation.metadata.FilenameDate
+import eu.akoos.photos.domain.metadata.FilenameDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull

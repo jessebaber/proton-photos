@@ -152,6 +152,10 @@ kotlin {
     }
 }
 
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose-stability.conf"))
+}
+
 ksp {
     // Export Room schema JSONs into the source tree so they can be committed
     // and used by MigrationTestHelper / kept under code review.
@@ -159,6 +163,9 @@ ksp {
 }
 
 dependencies {
+    implementation(project(":domain"))
+    testImplementation(testFixtures(project(":domain")))
+
     // Media3 brings in an older Guava with a known deserialization flaw; the fixed one is required instead.
     constraints {
         implementation(libs.guava)
