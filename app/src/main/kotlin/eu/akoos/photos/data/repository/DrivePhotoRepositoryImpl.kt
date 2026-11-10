@@ -266,10 +266,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
-        preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
     ): File = downloadService.downloadFullResPhoto(
-        userId, photo, preResolvedLinkDetail, onProgress,
+        userId, photo, onProgress = onProgress,
     )
 
     override suspend fun uploadFile(
@@ -277,9 +276,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         item: LocalMediaItem,
         sha1HexContentDigest: String,
         uploadUri: String,
-        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata,
+        xAttrMetadata: eu.akoos.photos.domain.repository.UploadXAttrMetadata,
         onProgress: ((
-            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            phase: eu.akoos.photos.domain.repository.UploadPhase,
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)?,
@@ -292,11 +291,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         item: LocalMediaItem,
         sha1HexContentDigest: String,
         uploadUri: String,
-        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata,
+        xAttrMetadata: eu.akoos.photos.domain.repository.UploadXAttrMetadata,
         mainPhotoLinkId: String?,
         extraTags: Set<Int>,
         onProgress: ((
-            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            phase: eu.akoos.photos.domain.repository.UploadPhase,
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)?,

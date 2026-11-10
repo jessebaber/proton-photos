@@ -55,7 +55,7 @@ import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.presentation.metadata.FilenameDate
+import eu.akoos.photos.domain.metadata.FilenameDate
 import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.ImportDiagnostics
 import eu.akoos.photos.util.MetadataStripConfig

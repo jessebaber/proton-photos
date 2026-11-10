@@ -164,6 +164,7 @@ ksp {
 
 dependencies {
     implementation(project(":domain"))
+    testImplementation(testFixtures(project(":domain")))
 
     // Media3 brings in an older Guava with a known deserialization flaw; the fixed one is required instead.
     constraints {

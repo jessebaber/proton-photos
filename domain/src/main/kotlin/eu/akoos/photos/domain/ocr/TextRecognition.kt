@@ -22,9 +22,8 @@
 
 package eu.akoos.photos.domain.ocr
 
-import android.graphics.Bitmap
-import eu.akoos.photos.util.FitBox
-import eu.akoos.photos.util.FitPoint
+import eu.akoos.photos.domain.geometry.FitBox
+import eu.akoos.photos.domain.geometry.FitPoint
 
 /**
  * The four corners a detector puts around one run of text, in the pixel coordinates of the frame it
@@ -95,12 +94,12 @@ data class RecognizedTextBlock(
 /**
  * Reads the text in one frame.
  *
- * The frame arrives already downsampled and already turned the way the user sees it, so every
- * returned coordinate is in that bitmap's own pixel space and needs no orientation correction.
- * Implementations run on a background dispatcher of their own choosing and must stay cancellable,
- * because the viewer drops the request the moment the user swipes to another photo.
+ * The frame type [F] is bound by the implementation (typically a Bitmap on Android). Coordinates in
+ * the returned blocks are in that frame's own pixel space. Implementations run on a background
+ * dispatcher of their own choosing and must stay cancellable, because the viewer drops the request
+ * the moment the user swipes to another photo. Close releases native sessions held across reads.
  */
-interface TextRecognizer {
+interface TextRecognizer<F> : AutoCloseable {
 
-    suspend fun recognize(bitmap: Bitmap): List<RecognizedTextBlock>
+    suspend fun recognize(frame: F): List<RecognizedTextBlock>
 }

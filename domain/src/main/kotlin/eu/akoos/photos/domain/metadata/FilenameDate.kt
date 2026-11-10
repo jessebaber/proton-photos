@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.metadata
+package eu.akoos.photos.domain.metadata
 
 import eu.akoos.photos.domain.entity.TimestampSanity
 import java.time.LocalDateTime

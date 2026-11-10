@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.gifmaker
 
+import eu.akoos.photos.domain.gif.GIF_EDGE_STANDARD
+import eu.akoos.photos.domain.gif.GifAspect
+
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -65,7 +68,6 @@ private const val GIF_MAX_ZOOM = 6f
  * frame whatever the size, so a larger edge buys sharpness, not colour depth, at a steep file-size cost:
  * [GIF_EDGE_MAX] can run to tens of megabytes for a full 10s clip.
  */
-const val GIF_EDGE_STANDARD = 480
 const val GIF_EDGE_HIGH = 720
 const val GIF_EDGE_MAX = 1080
 

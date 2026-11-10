@@ -23,6 +23,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
+    `java-test-fixtures`
 }
 
 kotlin {
@@ -41,6 +42,11 @@ dependencies {
     implementation(libs.javax.inject)
     implementation(libs.proton.domain)
     implementation(libs.kotlinx.serialization.json)
+
+    // testFixtures inherit main, but the Kotlin JVM + java-test-fixtures combo still needs these
+    // declared so FakeDrivePhotoRepository compiles against Flow / UserId.
+    testFixturesImplementation(libs.coroutines.core)
+    testFixturesImplementation(libs.proton.domain)
 
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
