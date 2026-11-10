@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.GetGalleryItemsUseCaseImpl
+
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -71,7 +73,7 @@ class GetGalleryItemsLocalOnlyShareTest {
         every { localRepo.observeLocalMedia() } returns device.onStart { subscriptions.incrementAndGet() }
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
-            val useCase = GetGalleryItemsUseCase(
+            val useCase = GetGalleryItemsUseCaseImpl(
                 localRepo,
                 mockk<DrivePhotoRepository>(),
                 mockk<SyncStateSnapshot>(),

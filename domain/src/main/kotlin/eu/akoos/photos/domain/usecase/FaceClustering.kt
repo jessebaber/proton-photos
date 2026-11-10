@@ -47,31 +47,31 @@ import kotlin.math.sqrt
  *  real face) chain together only below about 0.55; measured on the stored 512-d embeddings, the floor
  *  sits between the two so a loose chain of different things cannot fuse into one person, at the cost of
  *  a hard same-identity crop occasionally splitting off (recovered by naming or an explicit merge). */
-internal const val FACE_CLUSTER_THRESHOLD = 0.58f
+const val FACE_CLUSTER_THRESHOLD = 0.58f
 
 /** Extra cosine a weak face (low score, blurred, or turned) must clear to join, so a poor crop can
  *  still find an obvious match but cannot bridge two different people, applying a stricter distance
  *  for low-quality faces. */
-internal const val FACE_CLUSTER_STRICT_DELTA = 0.08f
+const val FACE_CLUSTER_STRICT_DELTA = 0.08f
 
 /** Two clusters whose mean directions are at least this close are treated as the same person split in
  *  two, and are merged. Kept at the join floor: a merge more lenient than the join would fuse people
  *  the join deliberately kept apart. Duplicate clusters of one person are consolidated by naming one
  *  (the unnamed twins then stay hidden) or by an explicit merge, not by loosening this. */
-internal const val FACE_CLUSTER_MERGE_THRESHOLD = 0.58f
+const val FACE_CLUSTER_MERGE_THRESHOLD = 0.58f
 
 /** How close an unnamed cluster must sit to a named person to be OFFERED as "Is this <name>?". Set
  *  below the merge floor so plausible-but-not-certain matches surface for the user to confirm or
  *  reject, rather than being auto-merged or hidden. */
-internal const val FACE_SUGGEST_THRESHOLD = 0.45f
+const val FACE_SUGGEST_THRESHOLD = 0.45f
 
 /** Component count of a stored face embedding. */
-internal const val FACE_EMBEDDING_DIM = 512
+const val FACE_EMBEDDING_DIM = 512
 
 /** Face-pipeline generation the stored faces belong to. A bump means the stored rows were produced by
  *  an older detector, recognition model, or quality gate, so the indexer clears the face rows once and
  *  re-detects and re-embeds them with the current pipeline before any clustering reads them. */
-internal const val FACE_MODEL_VERSION = 7
+const val FACE_MODEL_VERSION = 7
 
 /** Generation of the clustering PARAMETERS (the thresholds, the confident-face gate, the strict-delta,
  *  the show floor) rather than the embeddings. A bump means the stored people were grouped under an older
@@ -79,28 +79,28 @@ internal const val FACE_MODEL_VERSION = 7
  *  single time from the cache with no re-detect and no re-embed, unlike [FACE_MODEL_VERSION] which clears
  *  and rebuilds the embeddings. Bump this whenever a change to those constants should re-take on a
  *  library that is already fully indexed. */
-internal const val FACE_CLUSTER_PARAMS_VERSION = 1
+const val FACE_CLUSTER_PARAMS_VERSION = 1
 
 /** Highest detection score faces kept as a cluster's comparison anchors. */
-internal const val FACE_CLUSTER_EXEMPLARS = 5
+const val FACE_CLUSTER_EXEMPLARS = 5
 
 /** Hard ceiling on how many clusters the base pass may open. The pass is O(faces x clusters), so on a
  *  huge or heavily-fragmented library (tens of thousands of faces, most matching nothing) an unbounded
  *  cluster count turns it into an effectively infinite CPU hang. Past the cap a face that matches no
  *  existing cluster is left unassigned (routed to Unsorted) rather than opening a new one, which keeps
  *  the pass bounded. A normal library sits far below this. */
-internal const val MAX_CLUSTERS = 2000
+const val MAX_CLUSTERS = 2000
 
 /** The merge pass recomputes every centroid and every pair after each merge (so a chain of near-matches
  *  cannot fuse unlike people), which is O(clusters^3). That is cheap for a normal library (a few hundred
  *  people) but explodes on a fragmented one, so above this many clusters the merge is skipped and the
  *  split clusters are kept as-is rather than hanging. Threshold tuning keeps the real count well under
  *  this. */
-internal const val MERGE_MAX_CLUSTERS = 400
+const val MERGE_MAX_CLUSTERS = 400
 
 /** Whether [clusterFaces] left its merge out for [assignment]: the merge only ever lowers the group count and
  *  runs only at or under [MERGE_MAX_CLUSTERS] groups, so more groups than that means it was skipped. */
-internal fun mergeWasSkipped(assignment: IntArray?): Boolean =
+fun mergeWasSkipped(assignment: IntArray?): Boolean =
     assignment != null && assignment.asSequence().filter { it >= 0 }.toHashSet().size > MERGE_MAX_CLUSTERS
 
 /**
@@ -124,14 +124,14 @@ fun isNameableCluster(displayName: String?, isOther: Boolean, faceCount: Int): B
  * width) yields an empty array, which every caller's dimension guard skips, so a stale-width row can
  * neither crash nor poison clustering.
  */
-internal fun unpackEmbedding(bytes: ByteArray): FloatArray {
+fun unpackEmbedding(bytes: ByteArray): FloatArray {
     if (bytes.size != FACE_EMBEDDING_DIM * Float.SIZE_BYTES) return FloatArray(0)
     val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     return FloatArray(FACE_EMBEDDING_DIM) { buffer.float }
 }
 
 /** Cosine similarity of two unit-length embeddings, i.e. their dot product. */
-internal fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
     var dot = 0.0
     for (i in a.indices) dot += a[i].toDouble() * b[i]
     return dot.toFloat()
@@ -139,7 +139,7 @@ internal fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
 
 /** L2-normalises a vector to unit length, its direction. A zero vector maps to all-zeros (no
  *  direction), so a degenerate mean never divides by zero. */
-internal fun normalize(vector: FloatArray): FloatArray {
+fun normalize(vector: FloatArray): FloatArray {
     var normSq = 0.0
     for (v in vector) normSq += v.toDouble() * v
     val inv = if (normSq > 0.0) (1.0 / sqrt(normSq)).toFloat() else 0f

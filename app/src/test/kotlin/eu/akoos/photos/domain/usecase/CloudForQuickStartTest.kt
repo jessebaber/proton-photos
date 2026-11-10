@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.cloudForQuickStart
+
 import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.CloudPhoto

@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ReconcileSyncStateUseCaseImpl
+
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.room.Room
@@ -238,7 +240,7 @@ class ReconcileEquivalenceTest {
         every { cloud.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
 
         val progress = if (production) {
-            ReconcileSyncStateUseCase(device, cloud, recording, db.photoListingDao(), context, passScope)(userId).toList()
+            ReconcileSyncStateUseCaseImpl(device, cloud, recording, db.photoListingDao(), context, passScope)(userId).toList()
         } else {
             ReconcileReferencePass(device, cloud, recording, context)(userId).toList()
         }

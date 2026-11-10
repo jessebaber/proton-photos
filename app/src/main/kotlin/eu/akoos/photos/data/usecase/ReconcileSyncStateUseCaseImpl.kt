@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import android.content.Context
 import android.util.Log
@@ -53,6 +53,8 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
+import eu.akoos.photos.domain.usecase.UploadFormatNaming
 import eu.akoos.photos.util.PerfDiagnostics
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -84,21 +86,21 @@ internal const val DEVICE_CHANGE_HASH_BYTES_PER_PASS = 1L shl 30
  * began after it asked has finished.
  */
 @Singleton
-class ReconcileSyncStateUseCase @Inject constructor(
+class ReconcileSyncStateUseCaseImpl @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val photoListingDao: PhotoListingDao,
     @ApplicationContext private val context: Context,
     @AppScope private val appScope: CoroutineScope,
-) {
+) : ReconcileSyncStateUseCase {
     private val gates = ConcurrentHashMap<String, SharedRunGate<Int>>()
 
     private val passTurns = Mutex()
 
     /** Emits a running mark at once, then the finished totals of a pass that began after this call.
      *  Throws what that pass threw. */
-    suspend operator fun invoke(userId: UserId): Flow<SyncProgress> = flow {
+    override suspend operator fun invoke(userId: UserId): Flow<SyncProgress> = flow {
         emit(SyncProgress(total = 0, done = 0, running = true))
         val gate = gates.computeIfAbsent(userId.id) {
             SharedRunGate(appScope, passTurns) { reconcile(userId) }
