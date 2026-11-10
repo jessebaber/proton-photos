@@ -41,7 +41,7 @@ package eu.akoos.photos.domain.usecase
 /** The lowest box overlap that still counts two boxes as the same face across a detector change. Set
  *  high so only a clear match rebinds a name; a weak overlap leaves the face unnamed for the user to
  *  confirm rather than mislabelling it. */
-internal const val REATTACH_MIN_IOU = 0.5f
+const val REATTACH_MIN_IOU = 0.5f
 
 /** A name the user gave a face, tagged with where that face was, so it can be found again after a
  *  re-detection. Boxes are 0..1 fractions of the photo, the same form the face rows store. */
@@ -66,7 +66,7 @@ data class ReattachFace(
 )
 
 /** Intersection-over-union of two boxes, 0 when they do not overlap or either has no area. */
-internal fun boxIou(
+fun boxIou(
     aLeft: Float, aTop: Float, aRight: Float, aBottom: Float,
     bLeft: Float, bTop: Float, bRight: Float, bBottom: Float,
 ): Float {
