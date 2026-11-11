@@ -13,14 +13,6 @@ domain-location eu/akoos/photos/domain/repository/NewsRepository.kt
 # stream: feat/settings-store
 
 # stream: feat/extract-media
-domain-location eu/akoos/photos/domain/usecase/CloudLinkCheck.kt
-domain-location eu/akoos/photos/domain/usecase/DeletePhotoUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/DownloadPhotosUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/FreeUpSpaceUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/MoveToFolderUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/PendingDeleteNotificationUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/ResolveCoverGifUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/WriteLocalPhotoMetadataUseCase.kt
 
 # stream: feat/extract-people
 domain-location eu/akoos/photos/domain/usecase/AddPhotosToPersonUseCase.kt

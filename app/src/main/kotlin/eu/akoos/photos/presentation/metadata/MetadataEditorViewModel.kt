@@ -296,13 +296,13 @@ internal fun dateOverridesAfterEdit(
  * The date and place write the moment their picker closes; a text tag has no such moment, so each
  * text field carries its own apply, and [applyText] is the only thing that writes it. Every write is
  * reflected in the shown state, so the editor never has a separate commit step; foreign-file writes
- * the OS gates raise [MetadataWriteResult.NeedsPermission], which are gathered into one system
+ * the OS gates raise [MetadataWriteResult.NeedsPermission<IntentSender>], which are gathered into one system
  * consent request and replayed once the screen relays the user's approval.
  */
 @HiltViewModel
 class MetadataEditorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val writeMetadata: WriteLocalPhotoMetadataUseCase,
+    private val writeMetadata: WriteLocalPhotoMetadataUseCase<IntentSender>,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
     private val hiddenStorage: HiddenStorageManager,
@@ -347,7 +347,7 @@ class MetadataEditorViewModel @Inject constructor(
      *  subtype records under its own key (see [staleLocationIds]). */
     private var boundItems: List<GalleryItem> = emptyList()
 
-    /** The write awaiting a permission retry after [MetadataWriteResult.NeedsPermission], plus the
+    /** The write awaiting a permission retry after [MetadataWriteResult.NeedsPermission<IntentSender>], plus the
      *  exact URIs still to retry once the screen relays the user's consent. */
     private var pendingAction: PendingAction? = null
     private var pendingUris: List<String> = emptyList()
@@ -879,7 +879,7 @@ class MetadataEditorViewModel @Inject constructor(
                 for (uri in uris) {
                     when (val result = writeOne(action, uri)) {
                         is MetadataWriteResult.Success -> succeeded += uri
-                        is MetadataWriteResult.NeedsPermission -> needsPermission += uri to result.intentSender
+                        is MetadataWriteResult.NeedsPermission<IntentSender> -> needsPermission += uri to result.intentSender
                         is MetadataWriteResult.Failed -> failedCount++
                     }
                 }
@@ -947,7 +947,7 @@ class MetadataEditorViewModel @Inject constructor(
         }
     }
 
-    private suspend fun writeOne(action: PendingAction, uri: String): MetadataWriteResult =
+    private suspend fun writeOne(action: PendingAction, uri: String): MetadataWriteResult<IntentSender> =
         when (action) {
             is PendingAction.Date -> writeMetadata.writeCaptureDate(uri, action.ms)
             // The delta is shared, the instant is not: each file is written its own date plus the
