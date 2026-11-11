@@ -247,7 +247,8 @@ internal fun PhotoCell(
         //   >= 5 columns: cloud badge only.
         // Secondary priority (high to low): video duration > offline pin > type badge > favorite.
         val isVideo = photo.mimeType.startsWith("video/")
-        val hasDuration = isVideo && photo.durationMs != null && photo.durationMs > 0
+        val videoDurationMs = photo.durationMs
+        val hasDuration = isVideo && videoDurationMs != null && videoDurationMs > 0L
         val typeBadge: Pair<Int, Int?>? = when {
             // Videos are already marked by the center play icon, so no separate video badge here.
             4 in photo.tags -> R.drawable.ic_live to R.string.cd_motion_photo
@@ -340,7 +341,7 @@ internal fun PhotoCell(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            formatVideoTime(photo.durationMs),
+                            formatVideoTime(videoDurationMs!!),
                             color = Color.White,
                             fontSize = 10.sp,
                             // Drop the default bottom font padding so the number sits centered in the pill.

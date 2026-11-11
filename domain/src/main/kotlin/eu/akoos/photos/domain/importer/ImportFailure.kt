@@ -71,7 +71,7 @@ object ImportFailure {
         return if (tag == null) classes else "$classes [$tag]"
     }
 
-    internal fun messageTag(message: String?): String? {
+    fun messageTag(message: String?): String? {
         if (message.isNullOrEmpty()) return null
         return TAGS.firstOrNull { (fragment, _) -> message.contains(fragment, ignoreCase = true) }?.second
     }
