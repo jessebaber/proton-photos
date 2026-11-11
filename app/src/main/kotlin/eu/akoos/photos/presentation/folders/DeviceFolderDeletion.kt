@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.folders
 
+import android.app.PendingIntent
 import android.os.Build
 import androidx.annotation.StringRes
 import eu.akoos.photos.R
@@ -53,7 +54,7 @@ import javax.inject.Inject
  *
  * A folder delete takes the device files only. Drive copies are never touched: a backed-up photo stays
  * in Drive and becomes cloud-only. The delete itself is
- * [eu.akoos.photos.domain.usecase.DeletePhotoUseCase] behind the owning screen's system-consent
+ * [eu.akoos.photos.domain.usecase.DeletePhotoUseCase<PendingIntent>] behind the owning screen's system-consent
  * launcher, the path a selection delete takes, so nothing here removes a file.
  */
 object DeviceFolderDeletion {

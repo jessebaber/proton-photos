@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.IntentSender
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.room.Room
@@ -82,7 +83,7 @@ class ImportCompressionUploadDbTest {
     private lateinit var db: AppDatabase
     private lateinit var step: UploadCompressionStep
     private lateinit var links: LinkDetailHelpers
-    private lateinit var writer: WriteLocalPhotoMetadataUseCase
+    private lateinit var writer: WriteLocalPhotoMetadataUseCase<IntentSender>
     private lateinit var useCase: ImportTakeoutUseCase
     private val sent = mutableListOf<Sent>()
     private val compressed = mutableListOf<File>()

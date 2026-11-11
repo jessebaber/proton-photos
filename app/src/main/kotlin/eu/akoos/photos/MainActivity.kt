@@ -98,7 +98,7 @@ import eu.akoos.photos.data.hidden.VaultSignOutPolicy
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
+import eu.akoos.photos.data.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.settings.FreeUpInterval
 import eu.akoos.photos.presentation.common.UpdatePromptDialog

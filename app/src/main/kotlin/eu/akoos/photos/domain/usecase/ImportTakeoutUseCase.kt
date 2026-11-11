@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.IntentSender
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -184,7 +185,7 @@ internal fun importTally(
 class ImportTakeoutUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val drivePhotoRepository: DrivePhotoRepository,
-    private val writeLocalPhotoMetadataUseCase: WriteLocalPhotoMetadataUseCase,
+    private val writeLocalPhotoMetadataUseCase: WriteLocalPhotoMetadataUseCase<IntentSender>,
     private val importStagedDao: ImportStagedDao,
     private val importHistoryDao: ImportHistoryDao,
     private val importUploadedDao: ImportUploadedDao,

@@ -50,7 +50,7 @@ import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
+import eu.akoos.photos.data.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.worker.SyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

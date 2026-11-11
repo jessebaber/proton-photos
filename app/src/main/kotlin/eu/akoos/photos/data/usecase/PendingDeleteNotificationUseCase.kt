@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import android.app.NotificationManager
 import android.content.Context
@@ -37,6 +37,10 @@ import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.usecase.PendingDeleteProbe
+import eu.akoos.photos.domain.usecase.pendingDeleteEntryIsStale
+import eu.akoos.photos.domain.usecase.pendingDeleteProbe
+import eu.akoos.photos.domain.usecase.trimPendingDeleteQueue
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -157,61 +161,8 @@ class PendingDeleteNotificationUseCase @Inject constructor(
     }
 
     companion object {
-        /**
-         * Whether a queued delete-after-backup URI is done with and can leave the queue. Pure and
-         * side-effect-free so it can be pinned by a plain JVM test.
-         *
-         * Tapping the consent notification hands the user straight to the OS trash dialog, which
-         * reports nothing back to the app, so this probe is the only thing that ever empties the
-         * queue: an entry it keeps calling alive is re-posted forever and grows the set without
-         * bound. An entry is therefore done when its row is gone ([rowExists] false — deleted
-         * outright, or withheld by MediaStore because it is trashed) OR when the row still reads
-         * back and is marked [isTrashed]. Both arms are deliberate: whether MediaProvider hands a
-         * trashed row back to a per-item query turns on the caller owning the file, and the camera
-         * owns most of these, so neither answer is safe to build on. Below R nothing is ever
-         * trashed, which leaves [isTrashed] false and the ruling exactly as it is on any version.
-         */
-        fun pendingDeleteEntryIsStale(rowExists: Boolean, isTrashed: Boolean): Boolean =
-            !rowExists || isTrashed
-
-        /**
-         * What one probe of a queued URI proves. Only an answered query ([queried]) rules: a row that
-         * is gone or trashed is [PendingDeleteProbe.STALE], any other is [PendingDeleteProbe.ALIVE].
-         * A query that returned no cursor at all is [PendingDeleteProbe.UNKNOWN], never stale, since
-         * reading it as gone would mark a file still on the device as being only on Drive. Pure.
-         */
-        fun pendingDeleteProbe(queried: Boolean, rowExists: Boolean, isTrashed: Boolean): PendingDeleteProbe = when {
-            !queried -> PendingDeleteProbe.UNKNOWN
-            pendingDeleteEntryIsStale(rowExists, isTrashed) -> PendingDeleteProbe.STALE
-            else -> PendingDeleteProbe.ALIVE
-        }
-
-        /**
-         * [alive] trimmed to at most [max] entries, dropping the longest-waiting ones. Pure and
-         * side-effect-free so the choice can be pinned by a plain JVM test.
-         *
-         * A DataStore string set carries no insertion order, so "oldest" cannot be read back off
-         * the queue itself. The MediaStore row id trailing each URI is the closest recoverable
-         * stand-in: the provider hands ids out in ascending order as it records files, so the
-         * lowest ids are the entries that have waited longest. It is an approximation — a rescan
-         * renumbers rows, and a deleted top row lets SQLite reuse its id — but it is a stable total
-         * order, so every pass keeps the same survivors instead of dropping a different arbitrary
-         * slice each time. An entry with no numeric id sorts oldest: it is not an item URI the
-         * trash request could act on anyway.
-         */
-        fun trimPendingDeleteQueue(alive: List<String>, max: Int): List<String> =
-            if (alive.size <= max) alive
-            else alive.sortedByDescending { mediaStoreRowId(it) }.take(max)
-
-        /** The trailing MediaStore row id of a queued URI, or -1 when it carries none. */
-        private fun mediaStoreRowId(uri: String): Long =
-            uri.substringAfterLast('/').toLongOrNull() ?: -1L
-
         const val DELETE_CHANNEL_ID = "delete_consent"
         const val DELETE_NOTIFICATION_ID = NotificationIds.DELETE_CONSENT
         private const val TAG = "PendingDeleteNotif"
     }
 }
-
-/** The outcome of probing one queued delete-after-backup URI, see [PendingDeleteNotificationUseCase.pendingDeleteProbe]. */
-enum class PendingDeleteProbe { ALIVE, STALE, UNKNOWN }

@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.MoveToFolderResult
 
 import android.app.RecoverableSecurityException
 import android.content.ContentValues
@@ -31,21 +33,17 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.util.ProtonPhotosStorage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import eu.akoos.photos.domain.usecase.FolderMoveAlbumFollow
+import eu.akoos.photos.domain.usecase.MovedPhoto
+import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
+import eu.akoos.photos.domain.usecase.PendingMove
+import eu.akoos.photos.domain.usecase.moveTargetRelativePath
 import javax.inject.Inject
 
 private const val TAG = "MoveToFolderUseCase"
-
-/**
- * The part of a move the OS refused to run silently. A file the app does not own needs one-shot user
- * consent, so its move is deferred: the caller launches the write request from
- * [MoveToFolderUseCase.Result.NeedsPermission] and, once granted, replays exactly these [uris] into
- * [folderName] through [MoveToFolderUseCase.completeAfterPermissionGranted].
- */
-data class PendingMove(val uris: List<String>, val folderName: String)
 
 /**
  * Moves device photos and videos into a real on-device folder under DCIM/&lt;name&gt;/ by updating each
@@ -58,52 +56,38 @@ data class PendingMove(val uris: List<String>, val folderName: String)
  * which is collected and turned into a single system write request the caller launches before replaying
  * the move on the granted URIs. Every update runs on [Dispatchers.IO].
  */
-class MoveToFolderUseCase @Inject constructor(
+class MoveToFolderUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val albumFollow: FolderMoveAlbumFollow,
-) {
-    sealed interface Result {
-        /** [count] rows were relocated in place. */
-        data class Moved(val count: Int) : Result
-
-        /** One or more foreign files need one-shot write consent. The caller launches [intentSender]
-         *  and, on approval, calls [completeAfterPermissionGranted] with [pending]. */
-        data class NeedsPermission(val intentSender: IntentSender, val pending: PendingMove) : Result
-
-        data class Failed(val reason: String) : Result
-
-        /** Nothing was eligible to move (no parseable URIs, or every update was declined silently). */
-        data object NothingToDo : Result
-    }
-
-    suspend operator fun invoke(uris: List<String>, folderName: String): Result =
+) : MoveToFolderUseCase<IntentSender> {
+    override suspend operator fun invoke(uris: List<String>, folderName: String): MoveToFolderResult<IntentSender> =
         withContext(Dispatchers.IO) {
             val relPath = runCatching { moveTargetRelativePath(folderName) }.getOrNull()
-                ?: return@withContext Result.Failed("folder name is blank")
+                ?: return@withContext MoveToFolderResult.Failed("folder name is blank")
             // RELATIVE_PATH is a scoped-storage column (Android 10+). Below Q there is no in-place move,
             // and this use case is only reached from a Q+-gated action, so fail defensively rather than
             // silently do nothing.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                return@withContext Result.Failed("in-place move needs Android 10+")
+                return@withContext MoveToFolderResult.Failed("in-place move needs Android 10+")
             }
             moveAll(uris, relPath, folderName)
         }
 
     /** Replays the deferred move after the user granted the system write request. */
-    suspend fun completeAfterPermissionGranted(pending: PendingMove): Result =
+    override suspend fun completeAfterPermissionGranted(pending: PendingMove): MoveToFolderResult<IntentSender> =
         withContext(Dispatchers.IO) {
             val relPath = runCatching { moveTargetRelativePath(pending.folderName) }.getOrNull()
-                ?: return@withContext Result.Failed("folder name is blank")
+                ?: return@withContext MoveToFolderResult.Failed("folder name is blank")
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                return@withContext Result.Failed("in-place move needs Android 10+")
+                return@withContext MoveToFolderResult.Failed("in-place move needs Android 10+")
             }
             moveAll(pending.uris, relPath, pending.folderName)
         }
 
-    private fun moveAll(uris: List<String>, relPath: String, folderName: String): Result {
+    private fun moveAll(uris: List<String>, relPath: String, folderName: String): MoveToFolderResult<IntentSender> {
         // Parse defensively so one malformed URI string cannot abort the whole batch.
         val parsed = uris.mapNotNull { s -> runCatching { Uri.parse(s) }.getOrNull()?.let { s to it } }
-        if (parsed.isEmpty()) return Result.NothingToDo
+        if (parsed.isEmpty()) return MoveToFolderResult.NothingToDo
 
         Log.d(TAG, "move: uris=${uris.size} parsed=${parsed.size} -> $relPath")
 
@@ -141,14 +125,14 @@ class MoveToFolderUseCase @Inject constructor(
             val sender = buildWriteConsent(foreign)
             if (sender != null) {
                 Log.d(TAG, "move: $moved relocated silently, ${foreign.size} need write consent")
-                return Result.NeedsPermission(sender, PendingMove(foreign.map { it.uriString }, folderName))
+                return MoveToFolderResult.NeedsPermission(sender, PendingMove(foreign.map { it.uriString }, folderName))
             }
             // Building the request failed on a platform that should support it; report whatever moved
             // silently rather than stranding the batch with no signal.
             Log.w(TAG, "Could not build write consent for ${foreign.size} foreign uri(s); moved=$moved")
         }
 
-        return if (moved > 0) Result.Moved(moved) else Result.NothingToDo
+        return if (moved > 0) MoveToFolderResult.Moved(moved) else MoveToFolderResult.NothingToDo
     }
 
     /** The device folder (MediaStore bucket name) [uri] is in now and its file name, or null when unreadable. */
@@ -194,14 +178,3 @@ class MoveToFolderUseCase @Inject constructor(
     )
 }
 
-/**
- * The MediaStore RELATIVE_PATH a move targets: DCIM/&lt;sanitized name&gt;/ with a trailing slash.
- * Reuses [ProtonPhotosStorage.sanitize] so the folder is a single safe path segment, and rejects a name
- * that reduces to nothing. The DCIM literal equals [android.os.Environment.DIRECTORY_DCIM] and is kept
- * as a plain string so this stays SDK-free and unit-testable.
- */
-internal fun moveTargetRelativePath(folderName: String): String {
-    val clean = ProtonPhotosStorage.sanitize(folderName)
-    require(clean.isNotEmpty()) { "folder name is blank after sanitizing" }
-    return "DCIM/$clean/"
-}

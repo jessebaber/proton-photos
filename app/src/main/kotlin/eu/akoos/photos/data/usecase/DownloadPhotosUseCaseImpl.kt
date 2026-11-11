@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import android.content.ContentValues
 import android.content.Context
@@ -42,10 +42,11 @@ import eu.akoos.photos.data.repository.PhotoLocationResolver
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.Mp4CreationTime
-import eu.akoos.photos.util.isExifWritableImageMime
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
@@ -67,15 +68,13 @@ private const val TAG = "DownloadPhotos"
 private const val DOWNLOAD_PARALLELISM = 6
 
 @Singleton
-class DownloadPhotosUseCase @Inject constructor(
+class DownloadPhotosUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val locationResolver: PhotoLocationResolver,
-) {
-    data class Progress(val done: Int, val total: Int, val failed: Int, val skipped: Int = 0)
-
+) : DownloadPhotosUseCase {
     /** Pre-resolved per-file metadata for a download set, keyed strictly by linkId. A linkId
      *  absent from a map means "not prefetched" — the downloader falls back to its per-file
      *  fetch for that file, so behaviour is identical to a download with no prefetch at all. */
@@ -127,17 +126,17 @@ class DownloadPhotosUseCase @Inject constructor(
      * Already-on-device photos are recognised globally (across all MediaStore folders) so
      * the same file is never downloaded twice; SyncState is linked to the existing URI.
      */
-    suspend fun downloadCloudPhotos(
+    override suspend fun downloadCloudPhotos(
         userId: UserId,
         photos: List<CloudPhoto>,
         folderName: String,
-        folderByLinkId: Map<String, String> = emptyMap(),
-        onSaved: (String) -> Unit = {},
-        onProgress: suspend (Progress) -> Unit = {},
-    ): Progress = coroutineScope {
+        folderByLinkId: Map<String, String>,
+        onSaved: (String) -> Unit,
+        onProgress: suspend (DownloadPhotosUseCase.Progress) -> Unit,
+    ): DownloadPhotosUseCase.Progress = coroutineScope {
         val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(0)
         val gate = Semaphore(DOWNLOAD_PARALLELISM)
-        fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), photos.size, failed.get(), skipped.get())
+        fun snapshot() = DownloadPhotosUseCase.Progress(done.get() + skipped.get() + failed.get(), photos.size, failed.get(), skipped.get())
         // Batch-prefetch the redundant per-file link details for the whole set in 50-chunks
         // BEFORE the fan-out, so each photo's download skips its own one-element batch round-trip.
         // Any entry missing here falls back to the per-file fetch inside the downloader, so the
@@ -208,14 +207,14 @@ class DownloadPhotosUseCase @Inject constructor(
      *  - **done**    — actually downloaded this run.
      *  - **failed**  — fetch/decrypt error.
      */
-    suspend fun downloadGalleryItems(
+    override suspend fun downloadGalleryItems(
         userId: UserId,
         items: List<GalleryItem>,
-        folderName: String = "",
-        folderByLinkId: Map<String, String> = emptyMap(),
-        onSaved: (String) -> Unit = {},
-        onProgress: suspend (Progress) -> Unit = {},
-    ): Progress = coroutineScope {
+        folderName: String,
+        folderByLinkId: Map<String, String>,
+        onSaved: (String) -> Unit,
+        onProgress: suspend (DownloadPhotosUseCase.Progress) -> Unit,
+    ): DownloadPhotosUseCase.Progress = coroutineScope {
         val cloudItems = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud }
         val alreadyOnDevice = items.count { it !is GalleryItem.CloudOnly }
         // CloudOnly items have no local twin by definition (the gallery merge would have paired
@@ -223,7 +222,7 @@ class DownloadPhotosUseCase @Inject constructor(
         // pre-check like the album path.
         val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(alreadyOnDevice)
         val gate = Semaphore(DOWNLOAD_PARALLELISM)
-        fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), items.size, failed.get(), skipped.get())
+        fun snapshot() = DownloadPhotosUseCase.Progress(done.get() + skipped.get() + failed.get(), items.size, failed.get(), skipped.get())
         onProgress(snapshot())
 
         // Same batch-prefetch as the album path: resolve link details for the whole multi-select
@@ -387,7 +386,7 @@ class DownloadPhotosUseCase @Inject constructor(
      * failure logs and returns null rather than failing the download.
      */
     private suspend fun resolveGpsForExif(userId: UserId, photo: CloudPhoto): Pair<Double, Double>? {
-        if (!isExifWritableImageMime(photo.mimeType)) return null
+        if (!WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(photo.mimeType)) return null
         val located = runCatching { locationResolver.resolve(userId, photo.linkId) }
             .getOrElse { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -430,14 +429,14 @@ class DownloadPhotosUseCase @Inject constructor(
         // limited to formats ExifInterface can write; any failure leaves the column write as the
         // fallback. Changing the bytes is dedup-safe because the download pairs by cloud id
         // (linkSyncState -> reconcile byId), not by content hash.
-        if (shouldStampExifDate(mimeType, captureTimeSeconds)) {
+        if (DownloadPhotosUseCase.shouldStampExifDate(mimeType, captureTimeSeconds)) {
             ExifHelper.stampDateTakenIfMissing(file, captureTimeSeconds * 1000L)
         }
         // Carry the photo's known location onto the exported file, alongside the date stamp and BEFORE
         // MediaStore publishes it, for the same writable image formats. [gps] is null whenever the app
         // holds no coordinates for this photo (a photo uploaded with GPS stripped has none), so a
         // location is never invented; best-effort, so a failed write still leaves a valid file.
-        if (shouldWriteExifGps(mimeType, gps != null)) {
+        if (DownloadPhotosUseCase.shouldWriteExifGps(mimeType, gps != null)) {
             gps?.let { ExifHelper.writeGpsLocation(file, it.first, it.second) }
         }
         // Same problem for videos: MediaStore derives DATE_TAKEN from the mp4 mvhd on scan, and a
@@ -492,8 +491,8 @@ class DownloadPhotosUseCase @Inject constructor(
         } else {
             0L
         }
-        val dateTakenMs: Long? = dateTakenColumnMs(effectiveCaptureSeconds)
-        val dateModifiedMs = downloadTimestampMs(captureTimeSeconds, file.lastModified())
+        val dateTakenMs: Long? = DownloadPhotosUseCase.dateTakenColumnMs(effectiveCaptureSeconds)
+        val dateModifiedMs = DownloadPhotosUseCase.downloadTimestampMs(captureTimeSeconds, file.lastModified())
             .takeIf { it > 0L } ?: System.currentTimeMillis()
 
         // Privacy-safe breadcrumb (no name, path, or actual date) so a shared diagnostics log shows why
@@ -501,7 +500,7 @@ class DownloadPhotosUseCase @Inject constructor(
         eu.akoos.photos.util.SyncDiagnostics.log(
             "download save mime=${mimeType.substringBefore(';')} " +
                 "capture=${if (captureTimeSeconds > 0L) "known" else "none"} video=$isVideo " +
-                "exifStampable=${isExifWritableImageMime(mimeType)} " +
+                "exifStampable=${WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(mimeType)} " +
                 "dateTakenCol=${if (dateTakenMs != null) "set" else "omitted"}"
         )
 
@@ -598,35 +597,4 @@ class DownloadPhotosUseCase @Inject constructor(
         }
     }
 
-    companion object {
-        /**
-         * The DATE_TAKEN / DATE_MODIFIED timestamp (ms) a download stamps: the real capture time when
-         * known ([captureTimeSeconds] > 0, promoted from seconds), else the file's last-modified time
-         * ([fileLastModifiedMs], the decrypt-time stamp on disk). Returns a non-positive value only when
-         * both inputs are non-positive, which the caller maps to "now". Pure, so a plain JVM test pins it.
-         */
-        internal fun downloadTimestampMs(captureTimeSeconds: Long, fileLastModifiedMs: Long): Long =
-            if (captureTimeSeconds > 0L) captureTimeSeconds * 1000L else fileLastModifiedMs
-
-        /**
-         * The value to put in the DATE_TAKEN column, or null to leave the column UNSET. Only a known
-         * capture time (> 0) is written; when it is unknown the column is omitted so the media scanner
-         * derives DATE_TAKEN from the file's embedded EXIF / mvhd date instead. Forcing the column to the
-         * download moment (as a fallback) overrides that embedded date on scanners that treat the column
-         * as authoritative (stock AOSP, e.g. Pixel / GrapheneOS), which is what lands a downloaded photo
-         * at "today" there while it looks correct on OEM builds that re-read the file. Pure, JVM-testable.
-         */
-        internal fun dateTakenColumnMs(captureTimeSeconds: Long): Long? =
-            if (captureTimeSeconds > 0L) captureTimeSeconds * 1000L else null
-
-        /** True when the capture-date EXIF stamp applies: a real capture time on a writable image mime.
-         *  A non-image / unwritable container keeps only the MediaStore column date. Pure. */
-        internal fun shouldStampExifDate(mimeType: String, captureTimeSeconds: Long): Boolean =
-            captureTimeSeconds > 0L && isExifWritableImageMime(mimeType)
-
-        /** True when GPS EXIF should be written: real coordinates exist AND the container is a writable
-         *  image mime. Never true without coordinates, so a location is never invented. Pure. */
-        internal fun shouldWriteExifGps(mimeType: String, hasCoordinates: Boolean): Boolean =
-            hasCoordinates && isExifWritableImageMime(mimeType)
-    }
 }

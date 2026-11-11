@@ -183,6 +183,7 @@ import eu.akoos.photos.data.image.decodeUltraHdr
 import eu.akoos.photos.data.ocr.OcrModelPreparation
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.LocalVideoThumb
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail

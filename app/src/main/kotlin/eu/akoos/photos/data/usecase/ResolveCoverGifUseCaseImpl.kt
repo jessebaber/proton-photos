@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,6 +34,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.PhotoDownloadService
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.usecase.ResolveCoverGifUseCase
 import eu.akoos.photos.util.NetworkObserver
 import javax.inject.Inject
 
@@ -47,13 +48,13 @@ import javax.inject.Inject
  * Never throws: every failure resolves to null. Cloud only: a signed-out session cannot fetch the
  * original and always resolves to null, leaving covers static.
  */
-class ResolveCoverGifUseCase @Inject constructor(
+class ResolveCoverGifUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val photoListingDao: PhotoListingDao,
     private val driveRepo: DrivePhotoRepository,
     private val networkObserver: NetworkObserver,
-) {
-    suspend fun resolve(userId: UserId, coverLinkId: String): String? {
+) : ResolveCoverGifUseCase {
+    override suspend fun resolve(userId: UserId, coverLinkId: String): String? {
         if (coverLinkId.isBlank()) return null
         return withContext(Dispatchers.IO) {
             runCatching {
