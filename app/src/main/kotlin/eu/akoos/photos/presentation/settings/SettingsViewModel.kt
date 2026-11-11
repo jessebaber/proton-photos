@@ -118,6 +118,7 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.model.PersonSummary
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
@@ -173,7 +174,7 @@ internal fun faceScanPausedRow(pauseSwitchOn: Boolean, state: FaceIndexingState)
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val workManager: WorkManager,
-    private val freeUpSpace: FreeUpSpaceUseCase,
+    private val freeUpSpace: FreeUpSpaceUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,

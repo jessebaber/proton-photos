@@ -22,9 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
-import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.pendingDeleteEntryIsStale
-import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.pendingDeleteProbe
-import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.trimPendingDeleteQueue
+import eu.akoos.photos.domain.usecase.PendingDeleteProbe
+import eu.akoos.photos.domain.usecase.pendingDeleteEntryIsStale
+import eu.akoos.photos.domain.usecase.pendingDeleteProbe
+import eu.akoos.photos.domain.usecase.trimPendingDeleteQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

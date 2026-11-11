@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -286,7 +289,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val getUser: GetUser,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
-    private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase,
+    private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase<PendingIntent>,
     private val getGalleryItems: eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val offlineStore: eu.akoos.photos.data.offline.OfflineStorageManager,
@@ -987,7 +990,7 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
-    private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
     private var pendingDeleteLinkIds: List<String> = emptyList()
     private var pendingDeleteFromCloud: Boolean = false
 
@@ -1022,7 +1025,7 @@ class AlbumDetailViewModel @Inject constructor(
                     return@launch
                 }
             when (result) {
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.Success -> {
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.Success -> {
                     // No system-trash dialog was needed, so device copies were untouched or removed
                     // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
                     buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
@@ -1034,13 +1037,13 @@ class AlbumDetailViewModel @Inject constructor(
                         _uiState.update { it.copy(error = context.getString(R.string.album_delete_photos_failed)) }
                     }
                 }
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                     pendingPermissionResult = result
                     pendingDeleteLinkIds = linkIds
                     pendingDeleteFromCloud = deleteFromCloud
                     _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = result.pendingIntent) }
                 }
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.CloudDeleteFailed ->
                     _uiState.update { it.copy(isDeletingPhotos = false, error = context.getString(R.string.album_delete_photos_failed)) }
             }
         }
@@ -1196,7 +1199,7 @@ class AlbumDetailViewModel @Inject constructor(
                 return@launch
             }
             when (result) {
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.Success -> {
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.Success -> {
                     HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                     // Snapshot both halves before commitPendingHide() clears the pending list, so
                     // Undo reverses exactly the hide that just landed.
@@ -1208,14 +1211,14 @@ class AlbumDetailViewModel @Inject constructor(
                     reportHideFailures()
                     finishHide(hiddenLinkIds)
                 }
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                     HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
                     pendingPermissionResult = result
                     pendingDeleteLinkIds = hiddenLinkIds
                     pendingDeleteFromCloud = false
                     _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = result.pendingIntent) }
                 }
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.CloudDeleteFailed -> {
                     failHide(context.getString(R.string.gallery_move_to_hidden_failed))
                 }
             }
@@ -1280,7 +1283,7 @@ class AlbumDetailViewModel @Inject constructor(
             val cloudResult = if (userId != null) runCatching {
                 deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
             }.getOrNull() else null
-            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission) {
+            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>) {
                 // The next chunk of a delete too large for one request, launched like the first.
                 pendingPermissionResult = cloudResult
                 pendingDeleteLinkIds = linkIds
@@ -1288,15 +1291,15 @@ class AlbumDetailViewModel @Inject constructor(
                 _uiState.update { it.copy(pendingDeleteIntent = cloudResult.pendingIntent) }
                 return@launch
             }
-            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.CloudDeleteFailed) {
+            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoResult.CloudDeleteFailed) {
                 _uiState.update { it.copy(error = context.getString(R.string.viewer_delete_drive_failed)) }
             }
             val leftOver = when (cloudResult) {
-                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.Success -> cloudResult.keptOnDevice
+                is eu.akoos.photos.domain.usecase.DeletePhotoResult.Success -> cloudResult.keptOnDevice
                 // A failed Drive half ends the delete, so any later chunk was never asked about.
                 else -> pending.remaining
             }
-            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.Success &&
+            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoResult.Success &&
                 leftOver.isNotEmpty() && !pending.hide
             ) {
                 _uiState.update { it.copy(error = context.getString(R.string.album_delete_photos_failed)) }
@@ -1311,7 +1314,7 @@ class AlbumDetailViewModel @Inject constructor(
      * items it did not reach, stay in view.
      */
     private suspend fun finishConfirmedDelete(
-        pending: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission,
+        pending: eu.akoos.photos.domain.usecase.DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>,
         carriedOut: List<GalleryItem>,
         leftOver: List<GalleryItem>,
         linkIds: List<String>,

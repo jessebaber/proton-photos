@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.app.PendingIntent
+import eu.akoos.photos.data.usecase.FreeUpSpaceUseCaseImpl
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
@@ -58,7 +60,7 @@ class FreeUpSpaceProgressTest {
     private lateinit var repo: SyncStateRepository
     private lateinit var context: Context
     private lateinit var resolver: ContentResolver
-    private lateinit var useCase: FreeUpSpaceUseCase
+    private lateinit var useCase: FreeUpSpaceUseCase<PendingIntent>
 
     /** Eligible by [FreeUpSpaceUseCase.isEligibleForReclamation]: SYNCED with a real stamp. */
     private fun eligible(i: Int) = SyncState(
@@ -83,7 +85,7 @@ class FreeUpSpaceProgressTest {
         repo = mockk(relaxed = true)
         // The reclaim path exercised here never touches the cloud collaborators; the manual verify
         // path is covered in FreeUpSpaceVerifyTest, so relaxed stand-ins are enough for construction.
-        useCase = FreeUpSpaceUseCase(context, repo, mockk(relaxed = true), mockk(relaxed = true))
+        useCase = FreeUpSpaceUseCaseImpl(context, repo, mockk(relaxed = true), mockk(relaxed = true))
     }
 
     @Test
@@ -96,7 +98,7 @@ class FreeUpSpaceProgressTest {
         val result = useCase(userId, Long.MAX_VALUE)
 
         assertEquals(rows.map { it.localUri }, listed.map { it.localUri })
-        assertEquals(rows.size, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(rows.size, (result as FreeUpResult.Done).freed)
         // Every listed photo, and nothing else, had its row moved off the device.
         for (row in listed) {
             coVerify(exactly = 1) {
@@ -139,6 +141,6 @@ class FreeUpSpaceProgressTest {
         // On a JVM unit test Build.VERSION.SDK_INT reads 0, so the consent branch is skipped and the
         // run reports Done with zero freed. The invariant that matters either way is that a refused
         // photo is never counted.
-        if (result is FreeUpSpaceUseCase.FreeUpResult.Done) assertEquals(0, result.freed)
+        if (result is FreeUpResult.Done) assertEquals(0, result.freed)
     }
 }

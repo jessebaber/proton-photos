@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.folders
 
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -92,6 +94,7 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -116,7 +119,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val hiddenVaultRestorer: HiddenVaultRestorer,
@@ -865,7 +868,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
 
     /** Deferred cloud-delete work, held while the system trash dialog is up. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
      *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
@@ -1011,7 +1014,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
             _isDeleting.value = true
             try {
                 when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
                         buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
@@ -1024,14 +1027,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
                             _folderDeleted.value = true
                         }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         pendingFolderDelete = wholeFolder
                         _pendingDeleteIntent.value = result.pendingIntent
                     }
                     // Nothing was deleted: the request could not be built, or Drive refused before the
                     // device was touched. Said the way the confirmed path below says it.
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    is DeletePhotoResult.CloudDeleteFailed ->
                         _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
                 }
             } finally {
@@ -1195,7 +1198,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         // false). Pass the nullable userId through instead of aborting a guest hide here.
         val userId = accountManager.getPrimaryUserId().first()
         when (val result = deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
-            is DeletePhotoUseCase.Result.Success -> {
+            is DeletePhotoResult.Success -> {
                 HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                 // Snapshot both halves before commitPendingHide() clears the pending list, so Undo
                 // reverses exactly the hide that just landed.
@@ -1207,12 +1210,12 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 reportHideFailures()
                 selection.clear()
             }
-            is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+            is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                 HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
                 pendingPermissionResult = result
                 _pendingDeleteIntent.value = result.pendingIntent
             }
-            is DeletePhotoUseCase.Result.CloudDeleteFailed -> rollbackPendingHide()
+            is DeletePhotoResult.CloudDeleteFailed -> rollbackPendingHide()
         }
     }
 
@@ -1292,18 +1295,18 @@ class DeviceFolderDetailViewModel @Inject constructor(
             // being dropped: the device file had gone, the Drive copy had not, and the
             // screen said nothing at all. The timeline surface already reports this.
             val result = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
-            if (result is DeletePhotoUseCase.Result.NeedsMediaWritePermission) {
+            if (result is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>) {
                 // The next chunk of a delete too large for one request, launched like the first.
                 pendingPermissionResult = result
                 pendingFolderDelete = wholeFolder
                 _pendingDeleteIntent.value = result.pendingIntent
                 return@launch
             }
-            if (result is DeletePhotoUseCase.Result.CloudDeleteFailed) {
+            if (result is DeletePhotoResult.CloudDeleteFailed) {
                 _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
             }
             val leftOnDevice = when (result) {
-                is DeletePhotoUseCase.Result.Success -> result.keptOnDevice.also {
+                is DeletePhotoResult.Success -> result.keptOnDevice.also {
                     if (it.isNotEmpty() && !pending.hide) {
                         _hideFailure.tryEmit(context.getString(R.string.album_delete_photos_failed))
                     }
@@ -1318,7 +1321,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Settle a delete or hide whose system dialog was confirmed, for the [carriedOut] items it took. */
     private suspend fun finishConfirmedDelete(
-        pending: DeletePhotoUseCase.Result.NeedsMediaWritePermission,
+        pending: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>,
         carriedOut: List<GalleryItem>,
         folderGone: Boolean,
     ) {

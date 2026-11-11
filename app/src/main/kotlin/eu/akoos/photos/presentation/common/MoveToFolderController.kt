@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.common
 
+import eu.akoos.photos.domain.usecase.MoveToFolderResult
+
 import android.content.Context
 import android.content.IntentSender
 import androidx.datastore.preferences.core.edit
@@ -60,7 +62,7 @@ import javax.inject.Inject
  */
 class MoveToFolderController @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val moveToFolder: MoveToFolderUseCase,
+    private val moveToFolder: MoveToFolderUseCase<IntentSender>,
     private val localMediaRepo: LocalMediaRepository,
 ) {
 
@@ -154,24 +156,24 @@ class MoveToFolderController @Inject constructor(
     }
 
     private suspend fun handleMoveResult(
-        result: MoveToFolderUseCase.Result,
+        result: MoveToFolderResult<IntentSender>,
         folderName: String,
         onMoved: (String) -> Unit,
     ) {
         when (result) {
-            is MoveToFolderUseCase.Result.Moved -> {
+            is MoveToFolderResult.Moved -> {
                 stashedMove = null
                 stashedOnMoved = null
                 _pendingMoveIntent.value = null
                 onMoved(folderName)
             }
-            is MoveToFolderUseCase.Result.NeedsPermission -> {
+            is MoveToFolderResult.NeedsPermission<IntentSender> -> {
                 stashedMove = result.pending
                 stashedOnMoved = onMoved
                 _pendingMoveIntent.value = result.intentSender
             }
-            is MoveToFolderUseCase.Result.Failed,
-            MoveToFolderUseCase.Result.NothingToDo -> {
+            is MoveToFolderResult.Failed,
+            MoveToFolderResult.NothingToDo -> {
                 stashedMove = null
                 stashedOnMoved = null
                 _pendingMoveIntent.value = null

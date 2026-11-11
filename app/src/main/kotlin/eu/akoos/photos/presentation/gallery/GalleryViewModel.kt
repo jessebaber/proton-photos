@@ -24,6 +24,10 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.domain.usecase.MoveToFolderResult
+
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
 import eu.akoos.photos.presentation.common.StripOutcome
@@ -100,6 +104,7 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.domain.usecase.CategorizeItem
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -242,7 +247,7 @@ class GalleryViewModel @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val accountManager: AccountManager,
     private val observeUser: ObserveUser,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val downloadPhotos: DownloadPhotosUseCase,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,
@@ -266,7 +271,7 @@ class GalleryViewModel @Inject constructor(
     private val cryptoServiceClient: eu.akoos.photos.crypto.CryptoServiceClient,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
-    private val moveToFolder: MoveToFolderUseCase,
+    private val moveToFolder: MoveToFolderUseCase<IntentSender>,
     private val folderDelete: eu.akoos.photos.presentation.folders.DeviceFolderDeleteController,
 ) : ViewModel() {
 
@@ -1559,20 +1564,20 @@ class GalleryViewModel @Inject constructor(
         _pendingMoveIntent.value = null
     }
 
-    private suspend fun handleMoveResult(result: MoveToFolderUseCase.Result, folderName: String) {
+    private suspend fun handleMoveResult(result: MoveToFolderResult<IntentSender>, folderName: String) {
         when (result) {
-            is MoveToFolderUseCase.Result.Moved -> {
+            is MoveToFolderResult.Moved -> {
                 stashedMove = null
                 _pendingMoveIntent.value = null
                 _uiState.update { it.copy(selectedItems = emptySet()) }
                 _moveConfirmation.emit(folderName)
             }
-            is MoveToFolderUseCase.Result.NeedsPermission -> {
+            is MoveToFolderResult.NeedsPermission<IntentSender> -> {
                 stashedMove = result.pending
                 _pendingMoveIntent.value = result.intentSender
             }
-            is MoveToFolderUseCase.Result.Failed,
-            MoveToFolderUseCase.Result.NothingToDo -> {
+            is MoveToFolderResult.Failed,
+            MoveToFolderResult.NothingToDo -> {
                 stashedMove = null
                 _pendingMoveIntent.value = null
             }
@@ -1599,7 +1604,7 @@ class GalleryViewModel @Inject constructor(
 
     /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
      *  system trash dialog. Cleared on commit OR on cancel. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         runDelete(_uiState.value.selectedItems.toList(), freeUpSpace, deleteFromCloud)
@@ -1622,7 +1627,7 @@ class GalleryViewModel @Inject constructor(
                 deleteFromCloud = deleteFromCloud,
             )
             when (result) {
-                is DeletePhotoUseCase.Result.Success -> {
+                is DeletePhotoResult.Success -> {
                     // No system-trash dialog was needed, so any device copies were either untouched or
                     // removed permanently (pre-R). Only a cloud trash is reversible, so the undo carries
                     // no local URIs: localRecoverable = false.
@@ -1633,9 +1638,9 @@ class GalleryViewModel @Inject constructor(
                         multiDeleteState = deleteOutcome(result),
                     ) }
                 }
-                is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                is DeletePhotoResult.CloudDeleteFailed ->
                     _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))) }
-                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                     pendingPermissionResult = result
                     _uiState.update { it.copy(
                         multiDeleteState    = MultiDeleteState.Idle,
@@ -1658,14 +1663,14 @@ class GalleryViewModel @Inject constructor(
         // A later chunk of a large delete was declined. The chunks before it already went, so they
         // finish as a landed delete, whose hide commit keeps every photo still on the device in view.
         if (pending != null && pending.done.isNotEmpty()) {
-            viewModelScope.launch { finishConfirmedDelete(pending, pending.done, DeletePhotoUseCase.Result.Success()) }
+            viewModelScope.launch { finishConfirmedDelete(pending, pending.done, DeletePhotoResult.Success()) }
             return
         }
         rollbackPendingHide()
     }
 
     /** "Couldn't delete the photos" when [result] left device files in place, else done. */
-    private fun deleteOutcome(result: DeletePhotoUseCase.Result.Success): MultiDeleteState =
+    private fun deleteOutcome(result: DeletePhotoResult.Success): MultiDeleteState =
         if (result.keptOnDevice.isEmpty()) MultiDeleteState.Done
         else MultiDeleteState.Failed(context.getString(R.string.album_delete_photos_failed))
 
@@ -1680,18 +1685,18 @@ class GalleryViewModel @Inject constructor(
                 // branch, returning CloudDeleteFailed only when there are cloud links and no session.
                 val userId = accountManager.getPrimaryUserId().first()
                 deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
-            } else DeletePhotoUseCase.Result.Success()
+            } else DeletePhotoResult.Success()
             when (cloudResult) {
-                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                     // The next chunk of a delete too large for one request, launched like the first.
                     pendingPermissionResult = cloudResult
                     _uiState.update { it.copy(pendingDeleteIntent = cloudResult.pendingIntent) }
                 }
-                is DeletePhotoUseCase.Result.CloudDeleteFailed -> _uiState.update { it.copy(
+                is DeletePhotoResult.CloudDeleteFailed -> _uiState.update { it.copy(
                     multiDeleteState    = MultiDeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed)),
                     pendingDeleteIntent = null,
                 ) }
-                is DeletePhotoUseCase.Result.Success ->
+                is DeletePhotoResult.Success ->
                     finishConfirmedDelete(pending, pending?.confirmedItems.orEmpty(), cloudResult)
             }
         }
@@ -1699,9 +1704,9 @@ class GalleryViewModel @Inject constructor(
 
     /** Settle a delete or hide whose system dialog was confirmed, for the [carriedOut] items it took. */
     private fun finishConfirmedDelete(
-        pending: DeletePhotoUseCase.Result.NeedsMediaWritePermission?,
+        pending: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>?,
         carriedOut: List<GalleryItem>,
-        result: DeletePhotoUseCase.Result.Success,
+        result: DeletePhotoResult.Success,
     ) {
         // If a multi-hide flow was waiting on this permission, commit the private URIs now
         // so the photos start appearing in the Hidden album. No-op if no hide was pending.
@@ -1902,7 +1907,7 @@ class GalleryViewModel @Inject constructor(
             hide            = true,
         )
         when (result) {
-            is DeletePhotoUseCase.Result.Success -> {
+            is DeletePhotoResult.Success -> {
                 HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                 // Snapshot both halves before commitPendingHide() clears the pending list, so Undo
                 // reverses exactly the hide that just landed.
@@ -1916,7 +1921,7 @@ class GalleryViewModel @Inject constructor(
                     multiHideState         = MultiDeleteState.Done,
                 ) }
             }
-            is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+            is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                 HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
                 // Stash both the delete intent AND the hide-private URIs — onHidePermissionGranted
                 // commits them once the user confirms the system dialog.
@@ -1926,7 +1931,7 @@ class GalleryViewModel @Inject constructor(
                     pendingDeleteIntent = result.pendingIntent,
                 ) }
             }
-            is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+            is DeletePhotoResult.CloudDeleteFailed -> {
                 // Shouldn't happen with deleteFromCloud=false — undo the hide if it does.
                 rollbackPendingHide()
                 _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_move_to_hidden_failed))) }

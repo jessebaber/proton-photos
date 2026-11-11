@@ -62,7 +62,7 @@ apksigner verify --print-certs photosforproton-arm64-v8a-release.apk
 
 ## Architecture
 
-Clean architecture in a single module, with strict one-way layer dependencies:
+Clean architecture across two Gradle modules (`:app` and a pure Kotlin `:domain`), with strict one-way layer dependencies:
 
 | Layer | Holds | Depends on |
 |---|---|---|
@@ -75,6 +75,7 @@ Hilt binds the Data implementations to the Domain interfaces; every Proton Drive
 ## Project structure
 
 ```
+domain/               Pure Kotlin domain module (entities, repository interfaces, pure use cases)
 app/src/main/kotlin/eu/akoos/photos/
 ├── presentation/     UI: Composables + ViewModels
 │   ├── auth/         Sign-in
