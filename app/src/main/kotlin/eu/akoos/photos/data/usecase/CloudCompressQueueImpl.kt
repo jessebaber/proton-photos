@@ -20,7 +20,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.CloudCompressQueue
+import eu.akoos.photos.domain.usecase.compressibleLinkIds
+import eu.akoos.photos.domain.usecase.wifiOnlySetting
 
 import android.content.Context
 import androidx.work.WorkManager
@@ -30,7 +35,6 @@ import eu.akoos.photos.data.db.entity.PendingCloudCompressEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.di.AppScope
-import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.worker.CloudCompressWorker
 import javax.inject.Inject
@@ -47,24 +51,24 @@ import me.proton.core.accountmanager.domain.AccountManager
  * screen nor dies with it.
  */
 @Singleton
-class CloudCompressQueue @Inject constructor(
+class CloudCompressQueueImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: PendingCloudCompressDao,
     private val accountManager: AccountManager,
     @AppScope private val appScope: CoroutineScope,
     private val network: NetworkObserver,
-) {
+) : CloudCompressQueue {
     /** True when a start right now would wait: the back-up is set to Wi-Fi only and the phone is not on
      *  an unmetered network. */
-    suspend fun waitsForWifi(): Boolean =
+    override suspend fun waitsForWifi(): Boolean =
         wifiOnlySetting(context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY]) && !network.isUnmetered.value
 
     /** How many photos are waiting or being compressed. */
-    val pending: Flow<Int> = dao.observeCount()
+    override val pending: Flow<Int> = dao.observeCount()
 
     /** Queues the Drive-only photos and videos among [items] and returns how many that is. A photo that is
      *  also on this phone, or one of someone else's albums, is not offered and is left out here too. */
-    fun enqueue(items: List<GalleryItem>): Int {
+    override fun enqueue(items: List<GalleryItem>): Int {
         val linkIds = compressibleLinkIds(items)
         if (linkIds.isEmpty()) return 0
         appScope.launch {
@@ -87,7 +91,7 @@ class CloudCompressQueue @Inject constructor(
      * so no photo is left on Drive twice. A running drain sees the stop before each next photo; a drain only
      * waiting for its turn is called off.
      */
-    fun cancel() {
+    override fun cancel() {
         val cancelledAt = System.currentTimeMillis()
         CloudCompressWorker.stopRequestedAt.value = cancelledAt
         appScope.launch {
@@ -101,7 +105,7 @@ class CloudCompressQueue @Inject constructor(
     }
 
     /** Picks up photos still queued from an earlier session (a run the system stopped, a reboot). */
-    fun resumeIfPending() {
+    override fun resumeIfPending() {
         appScope.launch { if (dao.count() > 0) start() }
     }
 
@@ -114,15 +118,3 @@ class CloudCompressQueue @Inject constructor(
         const val CHUNK = 500
     }
 }
-
-/** The back-up's Wi-Fi only switch as stored: on until the user turns it off, as Settings shows it. Pure. */
-internal fun wifiOnlySetting(stored: Boolean?): Boolean = stored != false
-
-/** The link of every photo or video in [items] that lives only on Drive: the ones compression in place
- *  applies to, newest first as the timeline shows them, whatever order the screen's selection holds. Pure. */
-internal fun compressibleLinkIds(items: List<GalleryItem>): List<String> = items
-    .filterIsInstance<GalleryItem.CloudOnly>()
-    .filter { val mime = it.cloud.mimeType.lowercase(); mime.startsWith("image/") || mime.startsWith("video/") }
-    .sortedByDescending { it.captureTimeMs }
-    .map { it.cloud.linkId }
-    .distinct()

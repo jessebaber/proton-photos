@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CloudPhotoExifRewriterImpl
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri

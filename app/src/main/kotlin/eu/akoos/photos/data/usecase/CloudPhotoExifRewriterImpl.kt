@@ -20,7 +20,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.ExifAsciiText
+import eu.akoos.photos.domain.usecase.LocationEdit
+import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 
 import android.content.Context
 import android.graphics.BitmapFactory

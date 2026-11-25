@@ -20,7 +20,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
+import eu.akoos.photos.domain.usecase.CloudSavePhase
+import eu.akoos.photos.domain.usecase.CloudWorkItem
 
 import android.content.Context
 import androidx.work.WorkInfo
@@ -28,7 +32,6 @@ import androidx.work.WorkManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.entity.PendingMetadataEditEntity
-import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.worker.MetadataEditWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,22 +46,6 @@ import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** One resolved metadata replacement: [photo] rewritten with [newCaptureMs] (null leaves the date as it
- *  is), [location] (leave / clear / set), and the descriptive text tags [description] / [artist] /
- *  [copyright] (null leaves that tag unchanged, an empty string clears it). Resolved when the editor
- *  action fires, run on confirm. [deviceUri] is set for a SYNCED photo (a device file exists): the
- *  replacement uploads that already edited device file and re-pairs its sync row, rather than downloading
- *  the cloud original. Null means a cloud-only photo. */
-data class CloudWorkItem(
-    val photo: CloudPhoto,
-    val newCaptureMs: Long?,
-    val location: LocationEdit,
-    val deviceUri: String? = null,
-    val description: String? = null,
-    val artist: String? = null,
-    val copyright: String? = null,
-)
-
 /**
  * App-scoped owner of the cloud metadata save batch. The editor snapshots its staged edits and hands
  * them here; this persists them to the [PendingMetadataEditDao] queue and kicks [MetadataEditWorker],
@@ -69,19 +56,12 @@ data class CloudWorkItem(
  * [WorkInfo]; dismissing it hides the drawer without stopping the work.
  */
 @Singleton
-class CloudMetadataSaveController @Inject constructor(
+class CloudMetadataSaveControllerImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: PendingMetadataEditDao,
     private val accountManager: AccountManager,
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
-) {
-
-    /** What a progress surface shows for the current batch. Null (see [ui]) means nothing to show,
-     *  either never started or dismissed. */
-    sealed interface SaveUi {
-        data class Running(val done: Int, val total: Int, val failed: Int, val phase: CloudSavePhase) : SaveUi
-        data class Done(val updated: Int, val failed: Int) : SaveUi
-    }
+) : CloudMetadataSaveController {
 
     // Flipped by dismiss()/cancel() so a batch the user sent to the background never reappears when it
     // later reaches its Done state; reset by the next start(). Held in a flow so flipping it re-derives
@@ -103,7 +83,7 @@ class CloudMetadataSaveController @Inject constructor(
         .getWorkInfosForUniqueWorkFlow(MetadataEditWorker.UNIQUE_NAME)
 
     /** The drawer's live view, derived from the worker's [WorkInfo] and the queue's outstanding count. */
-    val ui: StateFlow<SaveUi?> =
+    override val ui: StateFlow<CloudMetadataSaveController.SaveUi?> =
         combine(workInfoFlow, dao.observeCount(), dismissedFlow) { infos, pending, dismissed ->
             deriveUi(infos, pending, lastLocalUpdated, dismissed)
         }.stateIn(appScope, SharingStarted.WhileSubscribed(5000), null)
@@ -116,7 +96,7 @@ class CloudMetadataSaveController @Inject constructor(
         pendingCount: Int,
         localUpdated: Int,
         dismissed: Boolean,
-    ): SaveUi? {
+    ): CloudMetadataSaveController.SaveUi? {
         if (dismissed) return null
         // Prefer an active run over a finished one: APPEND_OR_REPLACE can leave a terminal entry beside a
         // fresh running one, and the drawer should follow the live work, not a stale result.
@@ -134,14 +114,14 @@ class CloudMetadataSaveController @Inject constructor(
         return when (info.state) {
             WorkInfo.State.SUCCEEDED ->
                 if (idKey !in seenActiveRunIds) null
-                else SaveUi.Done(
+                else CloudMetadataSaveController.SaveUi.Done(
                     updated = localUpdated + info.outputData.getInt(MetadataEditWorker.KEY_RESULT_UPDATED, 0),
                     failed = info.outputData.getInt(MetadataEditWorker.KEY_RESULT_FAILED, 0),
                 )
             // A failed run carries no counts, so the outstanding queue is reported as failed, best-effort.
             WorkInfo.State.FAILED ->
                 if (idKey !in seenActiveRunIds) null
-                else SaveUi.Done(updated = localUpdated, failed = pendingCount)
+                else CloudMetadataSaveController.SaveUi.Done(updated = localUpdated, failed = pendingCount)
             WorkInfo.State.CANCELLED -> null
             WorkInfo.State.RUNNING -> {
                 val progress = info.progress
@@ -153,7 +133,7 @@ class CloudMetadataSaveController @Inject constructor(
                 val phase = runCatching {
                     CloudSavePhase.valueOf(progress.getString(MetadataEditWorker.KEY_PHASE) ?: "")
                 }.getOrDefault(CloudSavePhase.FINISHING)
-                SaveUi.Running(
+                CloudMetadataSaveController.SaveUi.Running(
                     done = localUpdated + done,
                     total = localUpdated + total,
                     failed = 0,
@@ -162,7 +142,7 @@ class CloudMetadataSaveController @Inject constructor(
             }
             // Queued but not yet running: show the device edits already done against the queued total.
             WorkInfo.State.ENQUEUED,
-            WorkInfo.State.BLOCKED -> SaveUi.Running(
+            WorkInfo.State.BLOCKED -> CloudMetadataSaveController.SaveUi.Running(
                 done = localUpdated,
                 total = localUpdated + pendingCount,
                 failed = 0,
@@ -175,7 +155,7 @@ class CloudMetadataSaveController @Inject constructor(
      *  uploading after the editor closes and survive a process kill. Persisting BEFORE the enqueue
      *  guarantees the worker finds its rows. [localUpdated] counts device edits already written in place,
      *  folded into the drawer's totals through [ui]. */
-    fun start(work: List<CloudWorkItem>, localUpdated: Int = 0) {
+    override fun start(work: List<CloudWorkItem>, localUpdated: Int) {
         if (work.isEmpty()) return
         dismissedFlow.value = false
         lastLocalUpdated = localUpdated
@@ -192,7 +172,7 @@ class CloudMetadataSaveController @Inject constructor(
 
     /** Hides the progress surface. The worker keeps draining the queue and the Activity transfer UI
      *  still tracks it; this clears only the drawer's own view. */
-    fun dismiss() {
+    override fun dismiss() {
         dismissedFlow.value = true
     }
 
@@ -200,7 +180,7 @@ class CloudMetadataSaveController @Inject constructor(
      *  corrected copy are dropped, so a later enqueue never resumes them. An edit whose copy is already
      *  in Drive is finished by a fresh drain (album re-add, then the original trashed), since dropping it
      *  would leave the original and its copy both in Drive. */
-    fun cancel() {
+    override fun cancel() {
         dismissedFlow.value = true
         val cancelledAt = System.currentTimeMillis()
         WorkManager.getInstance(context).cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)

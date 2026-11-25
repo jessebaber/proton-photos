@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CompressCloudPhotoUseCase
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.domain.entity.CloudPhoto
 import io.mockk.mockk
