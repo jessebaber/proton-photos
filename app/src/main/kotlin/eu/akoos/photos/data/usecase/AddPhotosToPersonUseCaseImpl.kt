@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase
 
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import eu.akoos.photos.data.face.FaceCurationLog
@@ -40,15 +42,15 @@ import javax.inject.Inject
  * NAME, which survives a clustering rebuild, so the person must be named first; a call for an unnamed
  * person is a no-op. [photoKeys] are item stableIds, the same keyspace the face index and library use.
  */
-class AddPhotosToPersonUseCase @Inject constructor(
+class AddPhotosToPersonUseCaseImpl @Inject constructor(
     private val accountManager: AccountManager,
     private val personDao: PersonDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val faceDao: FaceDao,
     private val faceCurationTimeDao: FaceCurationTimeDao,
     private val faceEdits: FaceEditCounter,
-) {
-    suspend operator fun invoke(personId: Long, photoKeys: Collection<String>) {
+) : AddPhotosToPersonUseCase {
+    override suspend operator fun invoke(personId: Long, photoKeys: Collection<String>) {
         if (photoKeys.isEmpty()) return
         // Runs on-device, so a guest attaches under the local partition, the same key its faces and
         // person rows already use; a non-null account collapses this back to userId.id.

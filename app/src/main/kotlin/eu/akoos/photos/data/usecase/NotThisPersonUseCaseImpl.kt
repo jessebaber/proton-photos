@@ -20,7 +20,15 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.PersonNameSpelling
+
+import eu.akoos.photos.domain.usecase.personNameKey
+
+import eu.akoos.photos.domain.usecase.samePersonName
+
+import eu.akoos.photos.domain.usecase.NotThisPersonUseCase
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.db.AppDatabase
@@ -35,7 +43,7 @@ import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.presentation.person.personPhotoCount
+import eu.akoos.photos.domain.usecase.personPhotoCount
 import me.proton.core.accountmanager.domain.AccountManager
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -50,7 +58,7 @@ import javax.inject.Inject
  * Shared by the person page's "Remove from person" and the viewer's face tag, so both keep the same
  * bookkeeping. A nameless person records no rejection, as the mark is keyed by name.
  */
-class NotThisPersonUseCase @Inject constructor(
+class NotThisPersonUseCaseImpl @Inject constructor(
     private val accountManager: AccountManager,
     private val faceDao: FaceDao,
     private val personDao: PersonDao,
@@ -62,8 +70,8 @@ class NotThisPersonUseCase @Inject constructor(
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val appDatabase: AppDatabase,
     private val faceEdits: FaceEditCounter,
-) {
-    suspend operator fun invoke(account: String, personId: Long, faceIds: List<String>, photoKeys: Collection<String>) {
+) : NotThisPersonUseCase {
+    override suspend operator fun invoke(account: String, personId: Long, faceIds: List<String>, photoKeys: Collection<String>) {
         faceEdits.edit {
             appDatabase.withTransaction { record(account, personId, faceIds, photoKeys) }
         }

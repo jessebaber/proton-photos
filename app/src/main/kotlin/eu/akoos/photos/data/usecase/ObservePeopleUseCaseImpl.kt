@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -45,7 +47,6 @@ import eu.akoos.photos.util.FaceDiagnostics
 import eu.akoos.photos.util.retryOnDbTear
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
-
 /** Mirrors the face indexer's power-of-two downsample so a stored box maps back to fractions. MUST
  *  equal `FaceIndexingScheduler.SOURCE_MAX_EDGE`: the detector runs on the bitmap bounded to that edge
  *  and stores the box in its pixel space, so reconstructing the bounded size with a different bound
@@ -72,21 +73,21 @@ private const val FACE_SOURCE_MAX_EDGE = 1600
  * would never deliver a list at all. After each build it rests in proportion to what the build cost, so a
  * library that keeps changing (a sync, a grouping under way) never has the list rebuilt back to back.
  */
-class ObservePeopleUseCase @Inject constructor(
+class ObservePeopleUseCaseImpl @Inject constructor(
     private val personDao: PersonDao,
     private val faceDao: FaceDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
-) {
+) : ObservePeopleUseCase {
 
     /**
      * The account's people as summaries; [namedOnly] reads only the people carrying a name
      * ([PersonDao.observeNamedPeopleForUser]), for a surface that keeps no other, with the same people in the
      * same order once the caller has dropped the blank names. The copied diagnostics time the full builds only.
      */
-    operator fun invoke(
+    override operator fun invoke(
         userId: UserId?,
         items: Flow<List<GalleryItem>>,
-        namedOnly: Boolean = false,
+        namedOnly: Boolean ,
     ): Flow<List<PersonSummary>> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val keysMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)

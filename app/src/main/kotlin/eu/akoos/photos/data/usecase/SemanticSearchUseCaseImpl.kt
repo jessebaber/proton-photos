@@ -20,7 +20,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.SemanticHit
+import eu.akoos.photos.domain.usecase.SemanticSearchUseCase
+import eu.akoos.photos.domain.usecase.cosineSimilarity
 
 import android.content.Context
 import android.os.SystemClock
@@ -48,16 +52,12 @@ import javax.inject.Singleton
 
 /** One search result: the photo's [ImageEmbeddingDao] key, joinable straight back to the timeline, and
  *  its cosine [score] against the query (higher is closer). */
-data class SemanticHit(val photoKey: String, val score: Float)
-
 /** Photos scored per page against the query, so a large library streams through a bounded heap rather
  *  than loading every stored embedding at once. */
 private const val PAGE_SIZE = 2000
 
 /** Most matches a search returns, the top-K cap. Two hundred is more than a result grid ever shows at
  *  once yet keeps the returned list and its sort cheap. */
-private const val DEFAULT_LIMIT = 200
-
 /** Cosine floor a photo must clear to be a match, calibrated on device for this model (DataComp
  *  ViT-B/16): its cosines sit in a compressed band. A handful of "busy" photos weakly match many
  *  unrelated queries in a false-positive cluster around 0.22; weak-but-real matches begin just above it
@@ -86,10 +86,10 @@ private const val MIN_SCORE = 0.225f
  * neither is safe for concurrent calls.
  */
 @Singleton
-class SemanticSearchUseCase @Inject constructor(
+class SemanticSearchUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val imageEmbeddingDao: ImageEmbeddingDao,
-) {
+) : SemanticSearchUseCase {
     private val modelManager by lazy { SemanticModelManager(context) }
 
     /** Serialises query embedding, so the shared tokenizer and text session are never entered
@@ -105,7 +105,7 @@ class SemanticSearchUseCase @Inject constructor(
      * [MIN_SCORE]. Empty for a blank query, when the text model is not on the device, or when nothing is
      * indexed for the account.
      */
-    suspend fun search(query: String, userId: UserId?, limit: Int = DEFAULT_LIMIT): List<SemanticHit> {
+    override suspend fun search(query: String, userId: UserId?, limit: Int ): List<SemanticHit> {
         if (query.isBlank()) return emptyList()
         return withContext(Dispatchers.Default) {
             try {
@@ -131,7 +131,7 @@ class SemanticSearchUseCase @Inject constructor(
     }
 
     /** [search] returning just the photo keys, for a caller that only needs the ranking. */
-    suspend fun searchKeys(query: String, userId: UserId?, limit: Int = DEFAULT_LIMIT): List<String> =
+    override suspend fun searchKeys(query: String, userId: UserId?, limit: Int ): List<String> =
         search(query, userId, limit).map { it.photoKey }
 
     /**

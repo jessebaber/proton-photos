@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import eu.akoos.photos.data.usecase.clusterLogLine
 
 /**
  * The copied diagnostics log is pasted into public issues, so the line written for a rebuilt cluster

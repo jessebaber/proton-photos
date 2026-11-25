@@ -52,6 +52,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.NotThisPersonUseCaseImpl
 
 /** The shared "this isn't them" bookkeeping, run against an in-memory database. */
 @RunWith(RobolectricTestRunner::class)
@@ -77,7 +78,7 @@ class NotThisPersonUseCaseTest {
     @After
     fun tearDown() = db.close()
 
-    private fun useCase(personDao: PersonDao = db.personDao()) = NotThisPersonUseCase(
+    private fun useCase(personDao: PersonDao = db.personDao()) = NotThisPersonUseCaseImpl(
         accounts, db.faceDao(), personDao, db.personManualPhotoDao(), db.notPersonDao(), db.personCoverDao(),
         db.faceCurationTimeDao(), db.clusterSummaryDao(), scheduler, db, edits,
     )

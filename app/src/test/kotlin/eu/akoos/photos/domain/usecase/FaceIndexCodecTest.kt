@@ -32,6 +32,24 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.util.Base64
+import eu.akoos.photos.data.usecase.FACE_INDEX_MAGIC
+import eu.akoos.photos.data.usecase.FACE_INDEX_VERSION_V1
+import eu.akoos.photos.data.usecase.FACE_INDEX_VERSION_V2
+import eu.akoos.photos.data.usecase.FACE_INDEX_VERSION_V3
+import eu.akoos.photos.data.usecase.FaceIndexDecrypt
+import eu.akoos.photos.data.usecase.FaceIndexRead
+import eu.akoos.photos.data.usecase.MAX_FACE_INDEX_CIPHER_BYTES
+import eu.akoos.photos.data.usecase.ParsedFace
+import eu.akoos.photos.data.usecase.ParsedPerson
+import eu.akoos.photos.data.usecase.accountTag
+import eu.akoos.photos.data.usecase.isImportLabelable
+import eu.akoos.photos.data.usecase.isPortableFaceKey
+import eu.akoos.photos.data.usecase.mergeImportedRejected
+import eu.akoos.photos.data.usecase.modelCompatible
+import eu.akoos.photos.data.usecase.readBody
+import eu.akoos.photos.data.usecase.readFaceIndex
+import eu.akoos.photos.data.usecase.writeBody
+import eu.akoos.photos.data.usecase.writeFaceIndexEnvelope
 
 /**
  * Coverage for the portable face-index codec: the pure body serialiser, the encrypted v3 envelope, the

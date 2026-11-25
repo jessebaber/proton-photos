@@ -48,6 +48,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 
 /**
  * Orchestration + safety test for [WriteCloudPhotoMetadataUseCase]. The pipeline TRASHES the cloud

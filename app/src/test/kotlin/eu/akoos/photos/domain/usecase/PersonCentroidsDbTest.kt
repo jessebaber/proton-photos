@@ -40,6 +40,7 @@ import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.random.Random
+import eu.akoos.photos.data.usecase.PersonCentroidsImpl
 
 /**
  * Runs the person page's centroid source against a real database: a person whose cached centroid still
@@ -63,7 +64,7 @@ class PersonCentroidsDbTest {
             .allowMainThreadQueries()
             .setQueryExecutor { it.run() }
             .build()
-        centroids = PersonCentroids(db.faceDao(), db.clusterSummaryDao())
+        centroids = PersonCentroidsImpl(db.faceDao(), db.clusterSummaryDao())
     }
 
     @After

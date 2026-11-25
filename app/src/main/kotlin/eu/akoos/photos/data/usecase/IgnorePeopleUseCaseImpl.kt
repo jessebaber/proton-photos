@@ -19,7 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.IgnorePeopleUseCase
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.db.AppDatabase
@@ -32,6 +34,8 @@ import eu.akoos.photos.data.face.refreshPeopleAfterFaceLoss
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import eu.akoos.photos.domain.usecase.samePersonName
+import eu.akoos.photos.domain.usecase.unpackEmbedding
 
 /**
  * "This is not a person" for whole groups (a statue, a poster, a repeated false detection): every face of
@@ -42,15 +46,15 @@ import javax.inject.Inject
  * way leaves the people as they were. Shared by the person page and the review screen. Returns how many
  * look-alikes were removed besides the people's own faces.
  */
-class IgnorePeopleUseCase @Inject constructor(
+class IgnorePeopleUseCaseImpl @Inject constructor(
     private val faceDao: FaceDao,
     private val personDao: PersonDao,
     private val clusterSummaryDao: ClusterSummaryDao,
     private val appDatabase: AppDatabase,
     private val hideSimilarFaces: HideSimilarFacesUseCase,
     private val faceEdits: FaceEditCounter,
-) {
-    suspend operator fun invoke(account: String, personIds: Collection<Long>): Int = withContext(Dispatchers.IO) {
+) : IgnorePeopleUseCase {
+    override suspend operator fun invoke(account: String, personIds: Collection<Long>): Int = withContext(Dispatchers.IO) {
         val dismissed = personIds.toSet()
         if (dismissed.isEmpty()) return@withContext 0
         val lookAlikes = LinkedHashSet<String>()

@@ -20,7 +20,37 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.unpackEmbedding
+
+import eu.akoos.photos.domain.usecase.splitOutUnclaimedNames
+
+import eu.akoos.photos.domain.usecase.resolveClusterNames
+
+import eu.akoos.photos.domain.usecase.normalize
+
+import eu.akoos.photos.domain.usecase.mergeWasSkipped
+
+import eu.akoos.photos.domain.usecase.incrementalCentroid
+
+import eu.akoos.photos.domain.usecase.cosineSimilarity
+
+import eu.akoos.photos.domain.usecase.clusterFaces
+
+import eu.akoos.photos.domain.usecase.attractToNamedClusters
+
+import eu.akoos.photos.domain.usecase.assignIncremental
+
+import eu.akoos.photos.domain.usecase.MERGE_MAX_CLUSTERS
+
+import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+
+import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+
+import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
+
+import eu.akoos.photos.domain.usecase.FACE_CLUSTER_MERGE_THRESHOLD
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +80,8 @@ import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.isConfidentFace
 import eu.akoos.photos.data.face.sidewaysFromEncoded
 import javax.inject.Inject
+import eu.akoos.photos.domain.usecase.CentroidSum
+import eu.akoos.photos.domain.usecase.FaceSample
 
 /**
  * The diagnostics line for one rebuilt cluster. It takes whether the cluster is named and never the

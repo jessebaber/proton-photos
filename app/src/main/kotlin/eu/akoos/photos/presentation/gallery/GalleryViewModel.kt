@@ -24,9 +24,13 @@
 
 package eu.akoos.photos.presentation.gallery
 
+<<<<<<< HEAD
 import eu.akoos.photos.domain.usecase.MoveToFolderResult
 
 import eu.akoos.photos.domain.usecase.DeletePhotoResult
+=======
+import eu.akoos.photos.domain.usecase.SameNamedPeopleMerge
+>>>>>>> origin/feat/extract-people
 
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter

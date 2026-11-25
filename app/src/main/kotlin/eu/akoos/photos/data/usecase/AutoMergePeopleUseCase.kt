@@ -20,13 +20,18 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.domain.usecase.AUTO_MERGE_THRESHOLD
+import eu.akoos.photos.domain.usecase.AssignPersonNameUseCase
+import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+import eu.akoos.photos.domain.usecase.pickAutoMergePairs
+import eu.akoos.photos.domain.usecase.unpackEmbedding
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -35,46 +40,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
-
-/** Centroid cosine an unnamed cluster must clear to be folded into a named person with no question asked: the
- *  join floor, so an automatic fold never takes in what the grouping itself would keep apart. The looser
- *  [FACE_SUGGEST_THRESHOLD] only offers a match for the user to confirm. */
-internal const val AUTO_MERGE_THRESHOLD = FACE_CLUSTER_THRESHOLD
-
-/** One auto-merge fold: the unnamed cluster [fromClusterId] is folded into the named person [toPersonId]. */
-internal data class AutoMergePair(val fromClusterId: Long, val toPersonId: Long)
-
-/**
- * Chooses the auto-merge folds for one pass. For every NAMED person it takes its single closest UNNAMED
- * candidate cluster whose centroid cosine clears [threshold], skipping the Unsorted bucket [otherId] and any (named, candidate) pair the user
- * already rejected as "not this person". A candidate that is closest to two named people is given to the
- * nearer one, and only unnamed candidates fold, so two names the user kept apart are never silently
- * combined and no fold chains within a pass. Pure: no database, no Android, so the selection is unit-tested.
- */
-internal fun pickAutoMergePairs(
-    centroids: Map<Long, FloatArray>,
-    namedIds: Set<Long>,
-    otherId: Long,
-    rejectedPairs: Set<Pair<Long, Long>>,
-    threshold: Float,
-): List<AutoMergePair> {
-    val candidateIds = centroids.keys.filter { it != otherId && it !in namedIds }
-    if (candidateIds.isEmpty() || namedIds.isEmpty()) return emptyList()
-    // candidateId -> (nearest named person so far, its similarity), so a candidate folds into one person only.
-    val claim = HashMap<Long, Pair<Long, Float>>()
-    for (namedId in namedIds) {
-        val nc = centroids[namedId] ?: continue
-        for (cid in candidateIds) {
-            if ((namedId to cid) in rejectedPairs) continue
-            val c = centroids[cid] ?: continue
-            val s = cosineSimilarity(nc, c)
-            if (s <= threshold) continue
-            val prior = claim[cid]
-            if (prior == null || s > prior.second) claim[cid] = namedId to s
-        }
-    }
-    return claim.map { (cid, ns) -> AutoMergePair(cid, ns.first) }
-}
 
 /**
  * Applies, automatically, the closest of the merges the manual "this may be the same person" card would

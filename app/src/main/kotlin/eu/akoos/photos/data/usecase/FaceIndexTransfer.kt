@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.ReattachLabel
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
@@ -50,6 +52,8 @@ import eu.akoos.photos.data.mlsync.defaultRestoreMode
 import eu.akoos.photos.data.mlsync.restoreNeedsChoice
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
+import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -63,6 +67,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 import javax.inject.Inject
+import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
 
 /** File-format constants for the portable face index. */
 internal const val FACE_INDEX_MAGIC = "PPFACEIDX"
@@ -358,28 +363,6 @@ internal fun readFaceIndex(
     }
 }
 
-/**
- * Why an import ended, so the caller can tell the user exactly what happened. Every refusal folds in
- * no data; only [Success] has touched the account.
- */
-sealed interface FaceIndexImportOutcome {
-    /** Faces and named people were merged into the account. */
-    data class Success(val faces: Int, val people: Int) : FaceIndexImportOutcome
-
-    /** The file was built with a different embedding model, so its vectors were not imported, but the
-     *  names it carries were staged to be put back on this device's own faces as the library is scanned. */
-    data class ReattachScheduled(val people: Int) : FaceIndexImportOutcome
-
-    /** The file belongs to a different Proton account, whose link ids and key do not match here. */
-    data object WrongAccount : FaceIndexImportOutcome
-
-    /** Not a face index, an unsupported newer version, or a body that would not decrypt or parse. */
-    data object Unreadable : FaceIndexImportOutcome
-
-    /** Storage is too full to import the file; nothing was written. */
-    data object NotEnoughSpace : FaceIndexImportOutcome
-}
-
 /** Whether [source] begins with a sealed snapshot's clear-text magic. The stream is rewound either way. */
 internal fun startsWithSnapshotEnvelope(source: BufferedInputStream): Boolean {
     val magic = MlSnapshotEnvelope.MAGIC.toByteArray(Charsets.US_ASCII)
@@ -427,7 +410,7 @@ internal fun FaceSnapshotImportResult.toFaceIndexImportOutcome(): FaceIndexImpor
  * photos are not in this account's library simply never resolve to a visible person, so an inert row is
  * harmless.
  */
-class ImportFaceIndexUseCase @Inject constructor(
+class ImportFaceIndexUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val cryptoHelper: DriveCryptoHelper,
@@ -438,10 +421,12 @@ class ImportFaceIndexUseCase @Inject constructor(
     private val personCoverDao: PersonCoverDao,
     private val appDatabase: AppDatabase,
     private val faceSnapshotImporter: FaceSnapshotImporter,
-) {
+) : ImportFaceIndexUseCase {
+    override suspend operator fun invoke(input: InputStream): FaceIndexImportOutcome = invoke(input, mode = null)
+
     suspend operator fun invoke(
         input: InputStream,
-        mode: FaceSnapshotMode? = null,
+        mode: FaceSnapshotMode?,
     ): FaceIndexImportOutcome = withContext(Dispatchers.IO) {
         val userId = accountManager.getPrimaryUserId().first()
             ?: return@withContext FaceIndexImportOutcome.Unreadable
