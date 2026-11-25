@@ -20,7 +20,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.CentroidSum
+import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.domain.usecase.rankSuggestionCandidates
+import eu.akoos.photos.domain.usecase.unpackEmbedding
 
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import org.junit.Assert.assertArrayEquals
@@ -31,6 +37,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 import kotlin.random.Random
+import eu.akoos.photos.domain.usecase.normalize
 
 /**
  * Pins the person page's centroid source: when a cached centroid may stand in for a person's mean face,

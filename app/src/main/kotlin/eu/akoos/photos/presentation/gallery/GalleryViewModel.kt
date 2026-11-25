@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.domain.usecase.SameNamedPeopleMerge
+
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
 import eu.akoos.photos.presentation.common.StripOutcome

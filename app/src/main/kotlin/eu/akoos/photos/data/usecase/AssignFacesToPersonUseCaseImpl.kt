@@ -20,7 +20,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.PersonNameSpelling
+
+import eu.akoos.photos.domain.usecase.personNameKey
+
+import eu.akoos.photos.domain.usecase.samePersonName
+
+import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase
+import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase.Target
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.db.AppDatabase
@@ -58,7 +67,7 @@ import javax.inject.Inject
  * afterwards so the name pulls in the person's other faces; a caller assigning over several calls passes
  * false and requests it once itself.
  */
-class AssignFacesToPersonUseCase @Inject constructor(
+class AssignFacesToPersonUseCaseImpl @Inject constructor(
     private val faceDao: FaceDao,
     private val personDao: PersonDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
@@ -68,21 +77,14 @@ class AssignFacesToPersonUseCase @Inject constructor(
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val appDatabase: AppDatabase,
     private val faceEdits: FaceEditCounter = FaceEditCounter(),
-) {
+) : AssignFacesToPersonUseCase {
     /** The person the faces go to. */
-    sealed interface Target {
-        /** An existing person, picked by id. */
-        data class Existing(val personId: Long) : Target
 
-        /** A typed name: the person already called that, ignoring case, else a new one. */
-        data class Named(val name: String) : Target
-    }
-
-    suspend operator fun invoke(
+    override suspend operator fun invoke(
         userId: UserId?,
         faceIds: Collection<String>,
         target: Target,
-        recluster: Boolean = true,
+        recluster: Boolean ,
     ): Long = withContext(Dispatchers.IO) {
         if (faceIds.isEmpty()) return@withContext -1L
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER

@@ -22,7 +22,11 @@
 
 @file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+
+import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,6 +44,10 @@ import kotlinx.coroutines.flow.flowOn
 import me.proton.core.accountmanager.domain.AccountManager
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import eu.akoos.photos.domain.usecase.LocatedItem
+import eu.akoos.photos.domain.usecase.PlaceLabelParts
+import eu.akoos.photos.domain.usecase.PlacesData
+import eu.akoos.photos.domain.usecase.groupPlaces
 
 /**
  * Streams the account's photos grouped into countries and cities for the Places surfaces, reusing the
@@ -51,16 +59,16 @@ import javax.inject.Inject
  * so once a row is geocoded a later emit (a library or thumbnail change) reuses the label instead of
  * rescanning the dataset. A signed-out session has no location rows, so Places is simply empty.
  */
-class ObservePlacesUseCase @Inject constructor(
+class ObservePlacesUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val thumbnailUrlStore: ThumbnailUrlStore,
-) {
+) : ObservePlacesUseCase {
     private val labelCache = ConcurrentHashMap<String, PlaceLabelParts>()
 
-    operator fun invoke(): Flow<PlacesData> = accountManager.getPrimaryUserId()
+    override operator fun invoke(): Flow<PlacesData> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             // Read the local partition when signed out, so a guest's places populate too.
             val locationFlow = photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)

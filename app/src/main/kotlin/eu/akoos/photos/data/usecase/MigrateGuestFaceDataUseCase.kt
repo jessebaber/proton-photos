@@ -20,7 +20,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.guestFaceMigrationAction
+
+import eu.akoos.photos.domain.usecase.GuestFaceMigrationResult
+
+import eu.akoos.photos.domain.usecase.GuestFaceMigration
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.db.AppDatabase
@@ -34,20 +40,11 @@ import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import javax.inject.Inject
 
-/** What to do with the guest-scoped face data when a real account becomes active. */
-enum class GuestFaceMigration { NONE, ADOPT, DISCARD }
-
 /**
  * The outcome of a sign-in migration: the [action] taken and how many people and face rows it carried
  * across (ADOPT) or dropped (DISCARD), so the copyable diagnostics can show what the sign-in did. Both
  * counts are 0 for NONE.
  */
-data class GuestFaceMigrationResult(
-    val action: GuestFaceMigration,
-    val people: Int,
-    val faces: Int,
-)
-
 /**
  * Decides the fate of guest ("local") face data on sign-in. A guest scans device photos and builds
  * People + names under the `LOCAL_USER` owner; every face table keys its rows by that owner. Without
@@ -61,13 +58,6 @@ data class GuestFaceMigrationResult(
  *   already built, and the `face` table is single-row-per-photo so the two cannot be merged; drop the
  *   guest rows so stale biometric vectors do not linger under the signed-in session.
  */
-fun guestFaceMigrationAction(hasGuestData: Boolean, accountHasData: Boolean): GuestFaceMigration =
-    when {
-        !hasGuestData -> GuestFaceMigration.NONE
-        accountHasData -> GuestFaceMigration.DISCARD
-        else -> GuestFaceMigration.ADOPT
-    }
-
 class MigrateGuestFaceDataUseCase @Inject constructor(
     private val faceDao: FaceDao,
     private val faceScanDao: FaceScanDao,

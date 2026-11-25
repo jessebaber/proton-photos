@@ -19,7 +19,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.PersonNameSpelling
+
+import eu.akoos.photos.domain.usecase.personNameKey
+
+import eu.akoos.photos.domain.usecase.samePersonName
+
+import eu.akoos.photos.domain.usecase.RenamePersonUseCase
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.db.AppDatabase
@@ -41,13 +49,13 @@ import javax.inject.Inject
  * Renaming onto a name another person holds is a merge, which [AssignPersonNameUseCase] does; the caller
  * routes that case there. Returns the name the person now has.
  */
-class RenamePersonUseCase @Inject constructor(
+class RenamePersonUseCaseImpl @Inject constructor(
     private val faceDao: FaceDao,
     private val personDao: PersonDao,
     private val appDatabase: AppDatabase,
     private val faceEdits: FaceEditCounter,
-) {
-    suspend operator fun invoke(account: String, personId: Long, newName: String?): String? = withContext(Dispatchers.IO) {
+) : RenamePersonUseCase {
+    override suspend operator fun invoke(account: String, personId: Long, newName: String?): String? = withContext(Dispatchers.IO) {
         val name = newName?.trim()?.ifEmpty { null }
         faceEdits.edit {
             appDatabase.withTransaction { rename(account, personId, name) }

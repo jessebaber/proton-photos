@@ -20,7 +20,15 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.PersonNameSpelling
+
+import eu.akoos.photos.domain.usecase.personNameKey
+
+import eu.akoos.photos.domain.usecase.samePersonName
+
+import eu.akoos.photos.domain.usecase.AssignPersonNameUseCase
 
 import androidx.room.withTransaction
 import eu.akoos.photos.data.face.FaceEditCounter
@@ -45,7 +53,7 @@ import javax.inject.Inject
  * This is the one place the fold is spelled out, shared by the person page's merge, its merge
  * suggestion, and the viewer's tap-a-face-to-name, so all three keep the exact same bookkeeping.
  */
-class AssignPersonNameUseCase @Inject constructor(
+class AssignPersonNameUseCaseImpl @Inject constructor(
     private val faceDao: FaceDao,
     private val personDao: PersonDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
@@ -54,12 +62,12 @@ class AssignPersonNameUseCase @Inject constructor(
     private val clusterSummaryDao: ClusterSummaryDao,
     private val appDatabase: AppDatabase,
     private val faceEdits: FaceEditCounter = FaceEditCounter(),
-) {
+) : AssignPersonNameUseCase {
     /**
      * With [confirm] false the folded faces join the person without being confirmed under the name, so a fold
      * the app chose on its own (an auto-merge) stays open to the next rebuild instead of pinning every face.
      */
-    suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String, confirm: Boolean = true): Long =
+    override suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String, confirm: Boolean ): Long =
         withContext(Dispatchers.IO) {
             val name = rawName.trim()
             if (name.isEmpty()) return@withContext -1L

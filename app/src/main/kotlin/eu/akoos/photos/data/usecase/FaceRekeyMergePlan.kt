@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import eu.akoos.photos.data.db.dao.CuratedFace
 import eu.akoos.photos.data.db.entity.NotPersonEntity
@@ -33,6 +33,7 @@ import eu.akoos.photos.data.mlsync.matchSnapshotFaces
 import eu.akoos.photos.data.mlsync.mergeFaceCuration
 import eu.akoos.photos.data.mlsync.notPersonMarkApplies
 import eu.akoos.photos.data.mlsync.scanMarkerChange
+import eu.akoos.photos.domain.usecase.ReattachFace
 
 /**
  * How one photo's device-keyed face data folds into its cloud-keyed face data when both copies were

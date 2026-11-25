@@ -20,13 +20,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.person
+package eu.akoos.photos.domain.usecase
 
 /**
- * A person's photo tally: the photos their faces appear in unioned with any manually attached photos,
- * counted once each. The two key lists overlap when a manual add lands on a photo a face already
- * covers, so the union is de-duplicated. Shared by the detail screen's curation paths and the
- * find-more sweep, so every path that refreshes the cached count reports the same figure.
+ * Folds, once per account, the people an older build kept apart because their names differed only in case,
+ * as the desktop always did, each into the one with the most faces under its spelling.
  */
-internal fun personPhotoCount(faceKeys: List<String>, manualKeys: List<String>): Int =
-    (faceKeys + manualKeys).toHashSet().size
+interface SameNamedPeopleMerge {
+    suspend fun runOnce(account: String)
+}

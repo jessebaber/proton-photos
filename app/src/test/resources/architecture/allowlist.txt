@@ -23,24 +23,6 @@ domain-location eu/akoos/photos/domain/usecase/ResolveCoverGifUseCase.kt
 domain-location eu/akoos/photos/domain/usecase/WriteLocalPhotoMetadataUseCase.kt
 
 # stream: feat/extract-people
-domain-location eu/akoos/photos/domain/usecase/AddPhotosToPersonUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/AssignFacesToPersonUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/AssignPersonNameUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/AutoMergePeopleUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/ClusterFacesUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/FaceIndexTransfer.kt
-domain-location eu/akoos/photos/domain/usecase/FaceRekeyMergePlan.kt
-domain-location eu/akoos/photos/domain/usecase/HideSimilarFacesUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/IgnorePeopleUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/MigrateGuestFaceDataUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/NotThisPersonUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/ObservePeopleUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/ObservePlacesUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/PersonCentroids.kt
-domain-location eu/akoos/photos/domain/usecase/PersonNames.kt
-domain-location eu/akoos/photos/domain/usecase/RekeyPhotoFacesUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/RenamePersonUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/SemanticSearchUseCase.kt
 
 # stream: feat/extract-sync
 domain-location eu/akoos/photos/domain/usecase/DrivePairLookup.kt

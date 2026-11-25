@@ -52,6 +52,7 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.security.MessageDigest
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 
 /**
  * Orchestration + safety test for [WriteSyncedPhotoMetadataUseCase]. A Synced edit replaces the cloud

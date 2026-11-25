@@ -19,7 +19,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PersonDao
@@ -28,6 +28,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.coroutines.coroutineContext
+import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+import eu.akoos.photos.domain.usecase.cosineSimilarity
+import eu.akoos.photos.domain.usecase.normalize
+import eu.akoos.photos.domain.usecase.unpackEmbedding
 
 /** Cosine-similarity floor for a stored face to count as another sighting of a dismissed cluster. Held
  *  at the same-identity range so a different real person who merely sits near the junk is never swept in;
