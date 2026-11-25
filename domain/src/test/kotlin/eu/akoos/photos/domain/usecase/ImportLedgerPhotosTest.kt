@@ -22,15 +22,14 @@
 
 package eu.akoos.photos.domain.usecase
 
-import eu.akoos.photos.data.db.entity.ImportUploadedEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** The history detail counts a Live Photo once, as the history row and the Done card do. */
 class ImportLedgerPhotosTest {
 
-    private fun row(name: String, link: String, dateMs: Long? = 1_000L, already: Boolean = false) =
-        ImportUploadedEntity(runId = "r", linkId = link, sha1 = link, name = name, dateMs = dateMs, alreadyInDrive = already)
+    private fun row(name: String, link: String, already: Boolean = false) =
+        ImportLedgerRow(linkId = link, name = name, alreadyInDrive = already)
 
     @Test
     fun `a Live Photo and a photo count as two`() {
@@ -40,7 +39,7 @@ class ImportLedgerPhotosTest {
 
     @Test
     fun `a Live Photo whose halves carry different dates still counts once`() {
-        val rows = listOf(row("IMG_1.jpg", "s", dateMs = 1_000L), row("IMG_1.mp4", "v", dateMs = 780_000L))
+        val rows = listOf(row("IMG_1.jpg", "s"), row("IMG_1.mp4", "v"))
         assertEquals(listOf("s"), ledgerPhotos(rows).map { it.linkId })
     }
 

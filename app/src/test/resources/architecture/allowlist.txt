@@ -72,9 +72,8 @@ domain-location eu/akoos/photos/domain/usecase/WriteCloudPhotoMetadataUseCase.kt
 domain-location eu/akoos/photos/domain/usecase/WriteSyncedPhotoMetadataUseCase.kt
 
 # stream: feat/extract-import
-domain-location eu/akoos/photos/domain/usecase/ImportTakeoutUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/StageImportUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/UndoImportUseCase.kt
+data-presentation eu/akoos/photos/data/usecase/ImportTakeoutUseCase.kt
+data-presentation eu/akoos/photos/data/usecase/StageImportUseCase.kt
 
 # stream: feat/presentation-settings
 presentation-data eu/akoos/photos/presentation/settings/AccountScreen.kt

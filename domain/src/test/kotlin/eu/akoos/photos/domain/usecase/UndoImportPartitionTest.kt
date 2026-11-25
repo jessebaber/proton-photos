@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.domain.usecase
 
-import eu.akoos.photos.data.db.entity.ImportUploadedEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -34,13 +33,10 @@ import org.junit.Test
  */
 class UndoImportPartitionTest {
 
-    private fun row(linkId: String) =
-        ImportUploadedEntity(runId = "run", linkId = linkId, sha1 = "sha-$linkId")
-
     @Test
     fun `an unchanged photo (expected equals current) is cleared for trashing`() {
         val plan = planImportUndo(
-            rows = listOf(row("a")),
+            linkIds = listOf("a"),
             expectedByLink = mapOf("a" to "hash-a"),
             currentByLink = mapOf("a" to "hash-a"),
         )
@@ -52,7 +48,7 @@ class UndoImportPartitionTest {
     @Test
     fun `a photo whose current hash differs is kept as changed`() {
         val plan = planImportUndo(
-            rows = listOf(row("a")),
+            linkIds = listOf("a"),
             expectedByLink = mapOf("a" to "hash-a"),
             currentByLink = mapOf("a" to "hash-a-replaced"),
         )
@@ -64,7 +60,7 @@ class UndoImportPartitionTest {
     @Test
     fun `a link with no current detail is treated as gone and left out of every bucket`() {
         val plan = planImportUndo(
-            rows = listOf(row("a")),
+            linkIds = listOf("a"),
             expectedByLink = mapOf("a" to "hash-a"),
             currentByLink = emptyMap(),
         )
@@ -76,7 +72,7 @@ class UndoImportPartitionTest {
     @Test
     fun `a null expected hash is never equal to a current hash so the photo is kept`() {
         val plan = planImportUndo(
-            rows = listOf(row("a")),
+            linkIds = listOf("a"),
             expectedByLink = mapOf("a" to null),
             currentByLink = mapOf("a" to "hash-a"),
         )
@@ -88,7 +84,7 @@ class UndoImportPartitionTest {
     @Test
     fun `a resolved link carrying a null current hash is kept as unverifiable`() {
         val plan = planImportUndo(
-            rows = listOf(row("a")),
+            linkIds = listOf("a"),
             expectedByLink = mapOf("a" to "hash-a"),
             currentByLink = mapOf("a" to null),
         )
@@ -99,15 +95,8 @@ class UndoImportPartitionTest {
 
     @Test
     fun `a mixed run trashes only the exact matches and keeps the rest`() {
-        val rows = listOf(
-            row("match"),
-            row("edited"),
-            row("gone"),
-            row("nullExpected"),
-            row("nullCurrent"),
-        )
         val plan = planImportUndo(
-            rows = rows,
+            linkIds = listOf("match", "edited", "gone", "nullExpected", "nullCurrent"),
             expectedByLink = mapOf(
                 "match" to "h1",
                 "edited" to "h2",

@@ -56,9 +56,9 @@ import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.util.ImportDiagnostics
 import eu.akoos.photos.util.ImportEventLog
-import eu.akoos.photos.domain.usecase.ImportProgress
-import eu.akoos.photos.domain.usecase.ImportSummary
-import eu.akoos.photos.domain.usecase.ImportTakeoutUseCase
+import eu.akoos.photos.data.usecase.ImportProgress
+import eu.akoos.photos.data.usecase.ImportSummary
+import eu.akoos.photos.data.usecase.ImportTakeoutUseCase
 import java.util.UUID
 
 /**

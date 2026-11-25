@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ImportTakeoutUseCase
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.presentation.metadata.FilenameDate
 import org.junit.Assert.assertEquals
