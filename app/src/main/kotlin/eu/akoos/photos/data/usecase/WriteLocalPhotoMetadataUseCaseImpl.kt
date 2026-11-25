@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import android.app.RecoverableSecurityException
 import android.content.ContentValues
@@ -33,12 +33,15 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.upload.LocalOverwriteGuard
+import eu.akoos.photos.domain.usecase.ExifAsciiText
+import eu.akoos.photos.domain.usecase.MetadataWriteResult
+import eu.akoos.photos.domain.usecase.TextTagEdit
+import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.StripResult
-import eu.akoos.photos.util.isExifWritableImageMime as isExifWritableImageMimeShared
 import eu.akoos.photos.util.mimeFromPath
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -51,36 +54,6 @@ import javax.inject.Singleton
 
 private const val TAG = "WriteLocalMetadata"
 
-/** Video containers built on the ISO base media format, so they carry an mvhd box whose creation time
- *  MediaStore re-derives DATE_TAKEN from. Anything else (Matroska, WebM, AVI) has no such box and keeps
- *  only the MediaStore column. */
-private val MVHD_STAMPABLE_MIMES = setOf("video/mp4", "video/quicktime", "video/3gpp", "video/3gpp2")
-
-/** The outcome of a metadata write against a local (device) photo. */
-sealed interface MetadataWriteResult {
-    data object Success : MetadataWriteResult
-
-    /** A non-app-owned file on Android 10+ needs one-shot user consent; the caller launches this
-     *  [intentSender] and, on approval, retries the same call. */
-    data class NeedsPermission(val intentSender: IntentSender) : MetadataWriteResult
-
-    data class Failed(val reason: String) : MetadataWriteResult
-}
-
-/**
- * How one descriptive EXIF text tag takes part in a write. Every tag defaults to [Unchanged], so a
- * caller that edits a single field cannot blank the others by omission; [SetTo] with a blank value is
- * the one way to remove a tag.
- */
-sealed interface TextTagEdit {
-
-    /** The tag is not addressed at all and keeps whatever the file already holds. */
-    data object Unchanged : TextTagEdit
-
-    /** The tag takes [value]; a value that reduces to nothing removes the tag. */
-    data class SetTo(val value: String) : TextTagEdit
-}
-
 /**
  * Writes edited capture-date and location metadata back onto a LOCAL (device / MediaStore) photo. GPS
  * lives in EXIF; the capture date is written to both the MediaStore DATE_TAKEN column (the fast index
@@ -89,13 +62,13 @@ sealed interface TextTagEdit {
  * drifting apart on the next scan.
  *
  * On Android 10+ a write against a file the app does not own raises a recoverable [SecurityException];
- * the write then returns [MetadataWriteResult.NeedsPermission] carrying the system consent request the
+ * the write then returns [MetadataWriteResult.NeedsPermission<IntentSender>] carrying the system consent request the
  * caller launches before retrying. Every write runs on [Dispatchers.IO].
  */
 @Singleton
-class WriteLocalPhotoMetadataUseCase @Inject constructor(
+class WriteLocalPhotoMetadataUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : WriteLocalPhotoMetadataUseCase<IntentSender> {
 
     /**
      * Sets the capture date to [newDateTakenMs]. Updates the MediaStore DATE_TAKEN column for any photo
@@ -108,7 +81,7 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * decides such a photo's date, the caller performs it on a landed write, and a container with
      * nothing to stamp inside it still lands: the date has somewhere to go either way.
      */
-    suspend fun writeCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult =
+    override suspend fun writeCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult<IntentSender> =
         withContext(Dispatchers.IO) {
             val parsed = Uri.parse(uri)
             val mime = resolveMime(parsed)
@@ -117,8 +90,8 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
             // MP4-family video. The column write below keeps the fast index in step at once. HEIC and
             // the containers with neither leg keep the column value only.
             val inFile = when {
-                isExifWritableImageMime(mime) -> writeExifCaptureDate(uri, newDateTakenMs)
-                isMvhdStampableMime(mime) -> stampVideoCaptureDate(uri, newDateTakenMs)
+                WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(mime) -> writeExifCaptureDate(uri, newDateTakenMs)
+                WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(mime) -> stampVideoCaptureDate(uri, newDateTakenMs)
                 else -> null
             }
             if (inFile != null && inFile !is MetadataWriteResult.Success) return@withContext inFile
@@ -142,7 +115,7 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * The sub-second tags are cleared rather than rewritten, because a date picked by hand has no
      * sub-second part and any surviving digits would describe the previous capture.
      */
-    private fun writeExifCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult {
+    private fun writeExifCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult<IntentSender> {
         val zone = ZoneId.systemDefault()
         val stamp = ExifDateFormat.toExifLocal(newDateTakenMs, zone)
         val offset = ExifDateFormat.toExifOffset(newDateTakenMs, zone)
@@ -167,7 +140,7 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * container it cannot patch leaves the file untouched and the column value stands, which is the
      * behaviour of a container with no mvhd at all.
      */
-    private fun stampVideoCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult =
+    private fun stampVideoCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult<IntentSender> =
         try {
             val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                 ?: return MetadataWriteResult.Failed("could not open $uri")
@@ -185,9 +158,9 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
 
     /** Writes [latitude] / [longitude] into the photo's GPS EXIF. Image-only: a video returns
      *  [MetadataWriteResult.Failed] because it carries no EXIF GPS block. */
-    suspend fun writeLocation(uri: String, latitude: Double, longitude: Double): MetadataWriteResult =
+    override suspend fun writeLocation(uri: String, latitude: Double, longitude: Double): MetadataWriteResult<IntentSender> =
         withContext(Dispatchers.IO) {
-            if (isVideoMime(resolveMime(Uri.parse(uri)))) {
+            if (WriteLocalPhotoMetadataUseCase.isVideoMime(resolveMime(Uri.parse(uri)))) {
                 return@withContext MetadataWriteResult.Failed(LOCATION_IMAGE_ONLY)
             }
             // setLatLong sets the coordinate plus its N/S and E/W reference tags, matching
@@ -198,9 +171,9 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
 
     /** Removes the GPS EXIF block. Image-only, mirroring [writeLocation]. Reuses the audited GPS tag
      *  set from [ExifHelper.stripFieldsInPlace] so no location tag is left behind. */
-    suspend fun clearLocation(uri: String): MetadataWriteResult =
+    override suspend fun clearLocation(uri: String): MetadataWriteResult<IntentSender> =
         withContext(Dispatchers.IO) {
-            if (isVideoMime(resolveMime(Uri.parse(uri)))) {
+            if (WriteLocalPhotoMetadataUseCase.isVideoMime(resolveMime(Uri.parse(uri)))) {
                 return@withContext MetadataWriteResult.Failed(LOCATION_IMAGE_ONLY)
             }
             when (ExifHelper.stripFieldsInPlace(context, uri, MetadataStripConfig(stripGps = true))) {
@@ -224,17 +197,17 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * Narrower than [writeLocation]: the container must be one ExifInterface can write (see
      * [isExifWritableImageMime]), so a video or a HEIC returns [MetadataWriteResult.Failed].
      */
-    suspend fun writeDescriptiveText(
+    override suspend fun writeDescriptiveText(
         uri: String,
-        description: TextTagEdit = TextTagEdit.Unchanged,
-        artist: TextTagEdit = TextTagEdit.Unchanged,
-        copyright: TextTagEdit = TextTagEdit.Unchanged,
-    ): MetadataWriteResult =
+        description: TextTagEdit,
+        artist: TextTagEdit,
+        copyright: TextTagEdit,
+    ): MetadataWriteResult<IntentSender> =
         withContext(Dispatchers.IO) {
-            if (!isExifWritableImageMime(resolveMime(Uri.parse(uri)))) {
+            if (!WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(resolveMime(Uri.parse(uri)))) {
                 return@withContext MetadataWriteResult.Failed(TEXT_TAGS_EXIF_ONLY)
             }
-            val writes = textTagWrites(
+            val writes = WriteLocalPhotoMetadataUseCase.textTagWrites(
                 listOf(
                     ExifInterface.TAG_IMAGE_DESCRIPTION to description,
                     ExifInterface.TAG_ARTIST to artist,
@@ -250,7 +223,7 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
         }
 
     /** Writes the DATE_TAKEN column (ms). GPS is never touched here; location is EXIF-only. */
-    private fun updateDateTakenColumn(uri: Uri, dateTakenMs: Long): MetadataWriteResult =
+    private fun updateDateTakenColumn(uri: Uri, dateTakenMs: Long): MetadataWriteResult<IntentSender> =
         try {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DATE_TAKEN, dateTakenMs)
@@ -268,10 +241,10 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
 
     /**
      * Opens a "rw" descriptor on [uri], runs [mutate] against its [ExifInterface], and saves. Maps a
-     * recoverable [SecurityException] to [MetadataWriteResult.NeedsPermission]; rethrows cancellation
+     * recoverable [SecurityException] to [MetadataWriteResult.NeedsPermission<IntentSender>]; rethrows cancellation
      * before any other handling so a cancelled write never reports Failed.
      */
-    private fun editExifViaFd(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
+    private fun editExifViaFd(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult<IntentSender> =
         try {
             val parsed = Uri.parse(uri)
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
@@ -299,14 +272,14 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * [MediaStore.createWriteRequest] covers the item; on Android 10 the recoverable exception ([cause])
      * carries its own action. Returns [MetadataWriteResult.Failed] when neither is available.
      */
-    private fun needsPermissionFor(uri: String, cause: SecurityException?): MetadataWriteResult {
+    private fun needsPermissionFor(uri: String, cause: SecurityException?): MetadataWriteResult<IntentSender> {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val sender = runCatching {
                 MediaStore.createWriteRequest(context.contentResolver, listOf(Uri.parse(uri))).intentSender
             }.getOrNull()
-            if (sender != null) return MetadataWriteResult.NeedsPermission(sender)
+            if (sender != null) return MetadataWriteResult.NeedsPermission<IntentSender>(sender)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && cause is RecoverableSecurityException) {
-            return MetadataWriteResult.NeedsPermission(cause.userAction.actionIntent.intentSender)
+            return MetadataWriteResult.NeedsPermission<IntentSender>(cause.userAction.actionIntent.intentSender)
         }
         return MetadataWriteResult.Failed(cause?.message ?: "write permission required")
     }
@@ -340,96 +313,10 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
     }
 
     companion object {
-        private const val LOCATION_IMAGE_ONLY = "location edit is image-only"
-        private const val TEXT_TAGS_EXIF_ONLY = "text metadata edit needs a JPEG, PNG or WebP"
-
-        /** True when [uri] names a plain file rather than a provider row. Answers the resolver
-         *  question only: it says nothing about who owns the file, which [isAppOwnedFile] decides. */
+        /** True when [uri] names a plain file rather than a provider row. */
         internal fun isPrivateFile(uri: Uri): Boolean = uri.scheme == "file"
 
-        /**
-         * Turns the caller's per-tag intent into the writes one EXIF pass performs. A tag left
-         * [TextTagEdit.Unchanged] drops out of the result, so the pass never addresses it and its
-         * stored value stands. A [TextTagEdit.SetTo] carries its transliterated value, or null when
-         * nothing survives transliteration: only null removes a tag, an empty string writes an empty
-         * one. Pure.
-         */
-        internal fun textTagWrites(edits: List<Pair<String, TextTagEdit>>): List<Pair<String, String?>> =
-            edits.mapNotNull { (tag, edit) ->
-                if (edit !is TextTagEdit.SetTo) return@mapNotNull null
-                tag to ExifAsciiText.transliterate(edit.value).takeIf { it.isNotEmpty() }
-            }
-
-        /** True when [mimeType] is a video container. Case- and parameter-insensitive. Pure. */
-        internal fun isVideoMime(mimeType: String): Boolean =
-            normalizeMime(mimeType).startsWith("video/")
-
-        /** True when [mimeType] is an image container ExifInterface can WRITE. Case- and
-         *  parameter-insensitive, so `image/JPEG` and `image/jpeg; codecs=…` normalise. Pure. */
-        internal fun isExifWritableImageMime(mimeType: String): Boolean =
-            isExifWritableImageMimeShared(mimeType)
-
-        /** True when [mimeType] is a video container that carries an mvhd box (see
-         *  [MVHD_STAMPABLE_MIMES]). Case- and parameter-insensitive. Pure. */
-        internal fun isMvhdStampableMime(mimeType: String): Boolean =
-            normalizeMime(mimeType) in MVHD_STAMPABLE_MIMES
-
-        /** True when a capture date written to a [mimeType] file reaches only the MediaStore column: the
-         *  container has neither an EXIF block ExifInterface can save nor an mvhd to stamp (HEIC, GIF, RAW,
-         *  a Matroska video). A media scan re-derives the column from the file, so such a date holds only
-         *  once the app also records it as a capture-date override. Pure. */
-        internal fun dateLivesOnlyInColumn(mimeType: String): Boolean =
-            !isExifWritableImageMime(mimeType) && !isMvhdStampableMime(mimeType)
-
-        private fun normalizeMime(mimeType: String): String =
-            mimeType.substringBefore(';').trim().lowercase(Locale.ROOT)
+        private const val LOCATION_IMAGE_ONLY = "location edit is image-only"
+        private const val TEXT_TAGS_EXIF_ONLY = "text metadata edit needs a JPEG, PNG or WebP"
     }
-}
-
-/**
- * Reduces free text to the printable ASCII an EXIF text field holds, keeping the letters readable
- * instead of losing them. EXIF defines ImageDescription, Artist and Copyright as ASCII fields and
- * ExifInterface encodes them as US-ASCII, where every unmappable character becomes a question mark, so
- * a plain write of "Nyaralás" stores "Nyaral?s". Transliterating first stores "Nyaralas".
- *
- * The steps run in a fixed order, so one input always yields one result: NFD normalisation, then
- * removal of the nonspacing marks NFD splits off (this is what maps á to a, ő to o and ű to u, and it
- * covers every Hungarian accent), then folding every whitespace form to a single space, then removal
- * of whatever is still outside printable ASCII, then a second collapse and a trim, then the
- * [MAX_LENGTH] cap. Whitespace is folded before the filter rather than after it because a line break
- * and a tab are themselves outside printable ASCII, so filtering first would join the words around
- * them into one.
- *
- * A character with no ASCII base of its own survives none of those steps, so text built only from such
- * characters (emoji, or a script with no Latin base letters) transliterates to an empty string. The
- * caller decides what an empty result means; the metadata write reads it as "remove this tag".
- *
- * Pure and Android-free, so the mapping is unit-tested on the JVM.
- */
-object ExifAsciiText {
-
-    /** Longest text kept for one tag. The three tags together stay near 1.5 KB of the 64 KB an APP1
-     *  segment holds, so this is a sanity bound on a caption, a name and a copyright notice rather than
-     *  the format's own limit. */
-    const val MAX_LENGTH = 512
-
-    private val NONSPACING_MARKS = Regex("\\p{Mn}+")
-    private val WHITESPACE_RUN = Regex("\\s+")
-    private val PRINTABLE_ASCII = 0x20..0x7E
-
-    /** [value] reduced to printable ASCII by the ordered steps above. */
-    fun transliterate(value: String): String =
-        Normalizer.normalize(value, Normalizer.Form.NFD)
-            .replace(NONSPACING_MARKS, "")
-            // Fold every whitespace form to a space BEFORE the printable filter: a line break and a
-            // tab both sit outside printable ASCII, so filtering first would drop them and run the
-            // words on either side together.
-            .replace(WHITESPACE_RUN, " ")
-            .filter { it.code in PRINTABLE_ASCII }
-            // Collapse again, since dropping an unrepresentable character can leave a space either
-            // side of it.
-            .replace(WHITESPACE_RUN, " ")
-            .trim()
-            .take(MAX_LENGTH)
-            .trimEnd()
 }

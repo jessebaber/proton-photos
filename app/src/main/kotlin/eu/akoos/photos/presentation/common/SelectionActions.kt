@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.common
 
 import eu.akoos.photos.domain.entity.GalleryItem
+import android.content.IntentSender
 import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 
 /**

@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.app.PendingIntent
+import eu.akoos.photos.data.usecase.FreeUpSpaceUseCaseImpl
 import android.content.Context
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
@@ -48,7 +50,7 @@ import java.io.IOException
  * whole volume; [FreeUpSpaceUseCase.verifyActiveBackups] instead checks the on-device candidates'
  * links in one batched call and keeps only the ones the server returns at State == 1.
  *
- * The invariant is stricter than the [FreeUpSpaceUseCaseTest] eligibility gate: a candidate is kept
+ * The invariant is stricter than the [FreeUpSpaceUseCase<PendingIntent>Test] eligibility gate: a candidate is kept
  * ONLY on a live State == 1 answer, and dropped (left on the device) when its link is trashed, absent
  * from the answer, or has no cloudFileId to check. A transient lookup failure must PROPAGATE so the
  * caller aborts and nothing is deleted against an unconfirmed batch. No Android, no network: a mocked
@@ -60,7 +62,7 @@ class FreeUpSpaceVerifyTest {
     private val volumeId = "vol-1"
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var linkDetailHelpers: LinkDetailHelpers
-    private lateinit var useCase: FreeUpSpaceUseCase
+    private lateinit var useCase: FreeUpSpaceUseCase<PendingIntent>
 
     /** A SYNCED, backed-up candidate carrying [linkId] as its cloud link (null = never paired). */
     private fun candidate(linkId: String?) = SyncState(
@@ -85,7 +87,7 @@ class FreeUpSpaceVerifyTest {
         linkDetailHelpers = mockk(relaxed = true)
         val context = mockk<Context>(relaxed = true)
         val syncStateRepo = mockk<SyncStateRepository>(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, syncStateRepo, cloudRepo, linkDetailHelpers)
+        useCase = FreeUpSpaceUseCaseImpl(context, syncStateRepo, cloudRepo, linkDetailHelpers)
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
     }
 

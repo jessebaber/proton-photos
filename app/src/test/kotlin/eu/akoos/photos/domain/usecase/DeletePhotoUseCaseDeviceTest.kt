@@ -28,6 +28,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.repository.drive.CloudTrashOutcome
+import eu.akoos.photos.data.usecase.DeletePhotoUseCaseImpl
+import eu.akoos.photos.data.usecase.DeviceMediaDeletes
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -109,11 +111,11 @@ class DeletePhotoUseCaseDeviceTest {
     fun `a refused device file keeps its row and is reported back`() = runTest {
         val refusedItem = synced("content://media/3", "link-3")
         val items = listOf(localOnly("content://media/1"), synced("content://media/2", "link-2"), refusedItem)
-        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, FakeDevice(asksConsent = false, refused = setOf("content://media/3")))
+        val useCase = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, FakeDevice(asksConsent = false, refused = setOf("content://media/3")))
 
         val result = useCase(userId, items, freeUpSpace = true, deleteFromCloud = false)
 
-        assertEquals(DeletePhotoUseCase.Result.Success(keptOnDevice = listOf(refusedItem)), result)
+        assertEquals(DeletePhotoResult.Success(keptOnDevice = listOf(refusedItem)), result)
         coVerify(exactly = 1) { syncRepo.updateStatusAndDeleteLocal("content://media/1", SyncStatus.LOCAL_ONLY) }
         coVerify(exactly = 1) { syncRepo.updateStatusAndDeleteLocal("content://media/2", SyncStatus.CLOUD_ONLY) }
         coVerify(exactly = 0) { syncRepo.updateStatusAndDeleteLocal("content://media/3", any()) }
@@ -127,11 +129,11 @@ class DeletePhotoUseCaseDeviceTest {
             synced("content://media/3", "link-3"),
             GalleryItem.CloudOnly(cloud("link-4")),
         )
-        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, FakeDevice(asksConsent = false, refused = setOf("content://media/3")))
+        val useCase = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, FakeDevice(asksConsent = false, refused = setOf("content://media/3")))
 
         val result = useCase(userId, items, freeUpSpace = true, deleteFromCloud = true)
 
-        assertEquals(listOf(items[1]), (result as DeletePhotoUseCase.Result.Success).keptOnDevice)
+        assertEquals(listOf(items[1]), (result as DeletePhotoResult.Success).keptOnDevice)
         coVerify(exactly = 1) { cloudRepo.deleteFiles(userId, listOf("link-2", "link-4")) }
         coVerify(exactly = 0) { syncRepo.updateStatusAndDeleteLocal("content://media/3", any()) }
     }
@@ -140,9 +142,9 @@ class DeletePhotoUseCaseDeviceTest {
     fun `every file deleted reports nothing kept and settles every row`() = runTest {
         val items = listOf(localOnly("content://media/1"), synced("content://media/2", "link-2"))
         val device = FakeDevice(asksConsent = false)
-        val result = DeletePhotoUseCase(syncRepo, cloudRepo, device)(userId, items, freeUpSpace = true, deleteFromCloud = false)
+        val result = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, device)(userId, items, freeUpSpace = true, deleteFromCloud = false)
 
-        assertEquals(DeletePhotoUseCase.Result.Success(), result)
+        assertEquals(DeletePhotoResult.Success(), result)
         assertEquals(listOf("content://media/1", "content://media/2"), device.deleted)
         coVerify(exactly = 2) { syncRepo.updateStatusAndDeleteLocal(any(), any()) }
     }
@@ -154,10 +156,10 @@ class DeletePhotoUseCaseDeviceTest {
         val onDevice = (1..2_500).map { localOnly("content://media/$it") }
         val cloudOnly = GalleryItem.CloudOnly(cloud("link-cloud"))
         val device = FakeDevice(asksConsent = true)
-        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, device)
+        val useCase = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, device)
 
         val first = useCase(userId, onDevice + cloudOnly, freeUpSpace = true, deleteFromCloud = true)
-            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+            as DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>
         assertEquals(listOf(1_000), device.requests.map { it.size })
         // The photo with no device file rides with the first chunk, so its Drive half waits on that dialog.
         assertEquals(listOf("link-cloud"), first.cloudLinkIds)
@@ -168,7 +170,7 @@ class DeletePhotoUseCaseDeviceTest {
         coVerify(exactly = 0) { cloudRepo.deleteFiles(any(), any()) }
 
         val second = useCase.completeAfterPermissionGranted(userId, first)
-            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+            as DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>
         assertEquals(listOf(1_000, 1_000), device.requests.map { it.size })
         assertEquals(1_001, second.done.size)
         assertEquals(500, second.remaining.size)
@@ -179,14 +181,14 @@ class DeletePhotoUseCaseDeviceTest {
         coVerify(exactly = 1) { cloudRepo.deleteFiles(userId, listOf("link-cloud")) }
 
         val third = useCase.completeAfterPermissionGranted(userId, second)
-            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+            as DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>
         assertEquals(listOf(1_000, 1_000, 500), device.requests.map { it.size })
         assertTrue(third.remaining.isEmpty())
         assertEquals((onDevice + cloudOnly).toSet(), third.confirmedItems.toSet())
         assertEquals(onDevice.size + 1, third.confirmedItems.size)
 
         val last = useCase.completeAfterPermissionGranted(userId, third)
-        assertEquals(DeletePhotoUseCase.Result.Success(), last)
+        assertEquals(DeletePhotoResult.Success(), last)
         assertEquals(3, device.requests.size)
         coVerify(exactly = 2_500) { syncRepo.updateStatusAndDeleteLocal(any(), SyncStatus.LOCAL_ONLY) }
     }
@@ -194,11 +196,11 @@ class DeletePhotoUseCaseDeviceTest {
     @Test
     fun `a confirmed removal leaves the device list at once, and only the files it removed`() = runTest {
         val localRepo = mockk<eu.akoos.photos.domain.repository.LocalMediaRepository>(relaxed = true)
-        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, FakeDevice(asksConsent = true), localRepo)
+        val useCase = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, FakeDevice(asksConsent = true), localRepo)
         val items = listOf(synced("content://media/1", "link-1"), GalleryItem.CloudOnly(cloud("link-2")))
 
         val asked = useCase(userId, items, freeUpSpace = true, deleteFromCloud = false)
-            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+            as DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>
         coVerify(exactly = 0) { localRepo.forgetRemoved(any()) }
         useCase.completeAfterPermissionGranted(userId, asked)
 
@@ -211,7 +213,7 @@ class DeletePhotoUseCaseDeviceTest {
         val device = FakeDevice(asksConsent = false, refused = setOf("content://media/2"))
         val items = listOf(localOnly("content://media/1"), localOnly("content://media/2"))
 
-        DeletePhotoUseCase(syncRepo, cloudRepo, device, localRepo)(userId, items, freeUpSpace = true, deleteFromCloud = false)
+        DeletePhotoUseCaseImpl(syncRepo, cloudRepo, device, localRepo)(userId, items, freeUpSpace = true, deleteFromCloud = false)
 
         coVerify(exactly = 1) { localRepo.forgetRemoved(setOf("content://media/1")) }
     }
@@ -219,13 +221,13 @@ class DeletePhotoUseCaseDeviceTest {
     @Test
     fun `a delete that fits one request asks once`() = runTest {
         val device = FakeDevice(asksConsent = true)
-        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, device)
+        val useCase = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, device)
         val items = (1..DEVICE_REQUEST_CHUNK).map { localOnly("content://media/$it") }
 
         val only = useCase(userId, items, freeUpSpace = true, deleteFromCloud = false)
-            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+            as DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>
         assertTrue(only.remaining.isEmpty())
-        assertEquals(DeletePhotoUseCase.Result.Success(), useCase.completeAfterPermissionGranted(userId, only))
+        assertEquals(DeletePhotoResult.Success(), useCase.completeAfterPermissionGranted(userId, only))
         assertEquals(1, device.requests.size)
     }
 
@@ -233,13 +235,13 @@ class DeletePhotoUseCaseDeviceTest {
     fun `a next request that cannot be built ends the delete and names what it left`() = runTest {
         val items = (1..1_200).map { localOnly("content://media/$it") }
         val device = FakeDevice(asksConsent = true, failFromRequest = 2)
-        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, device)
+        val useCase = DeletePhotoUseCaseImpl(syncRepo, cloudRepo, device)
 
         val first = useCase(userId, items, freeUpSpace = true, deleteFromCloud = false)
-            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+            as DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>
         val result = useCase.completeAfterPermissionGranted(userId, first)
 
-        assertEquals(DeletePhotoUseCase.Result.Success(keptOnDevice = items.drop(1_000)), result)
+        assertEquals(DeletePhotoResult.Success(keptOnDevice = items.drop(1_000)), result)
         coVerify(exactly = 1_000) { syncRepo.updateStatusAndDeleteLocal(any(), any()) }
     }
 
