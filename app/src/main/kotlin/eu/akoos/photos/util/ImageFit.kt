@@ -24,11 +24,8 @@ package eu.akoos.photos.util
 
 import kotlin.math.min
 
-/** A point in either image space or screen space, whichever the surrounding call says. */
-data class FitPoint(val x: Float, val y: Float)
-
-/** An axis-aligned rectangle in either image space or screen space. */
-data class FitBox(val left: Float, val top: Float, val right: Float, val bottom: Float)
+typealias FitPoint = eu.akoos.photos.domain.geometry.FitPoint
+typealias FitBox = eu.akoos.photos.domain.geometry.FitBox
 
 /**
  * The uniform scale plus letterbox offsets that centre a W×H image inside a box — the same

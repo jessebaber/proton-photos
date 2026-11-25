@@ -20,7 +20,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.gifmaker
+package eu.akoos.photos.domain.gif
+
+/** Longest-edge tier (px) for the standard GIF canvas. */
+const val GIF_EDGE_STANDARD = 480
 
 /**
  * Framing of the exported GIF: [ORIGINAL] keeps the source's aspect ratio, [SQUARE] renders into a 1:1

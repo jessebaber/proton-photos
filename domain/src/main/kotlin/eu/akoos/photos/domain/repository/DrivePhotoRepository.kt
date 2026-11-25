@@ -154,7 +154,6 @@ interface DrivePhotoRepository {
     suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
-        preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): File
     /**
@@ -173,10 +172,9 @@ interface DrivePhotoRepository {
         uploadUri: String = item.uri,
         // Source-derived Camera/Location + rotation-corrected dimensions for the photo xAttr,
         // already gated against the strip config by the caller (see UploadPendingUseCase).
-        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata =
-            eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(),
+        xAttrMetadata: UploadXAttrMetadata = UploadXAttrMetadata(),
         onProgress: ((
-            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            phase: UploadPhase,
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)? = null,
@@ -192,12 +190,11 @@ interface DrivePhotoRepository {
         item: LocalMediaItem,
         sha1HexContentDigest: String,
         uploadUri: String = item.uri,
-        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata =
-            eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(),
+        xAttrMetadata: UploadXAttrMetadata = UploadXAttrMetadata(),
         mainPhotoLinkId: String? = null,
         extraTags: Set<Int> = emptySet(),
         onProgress: ((
-            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            phase: UploadPhase,
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)? = null,
@@ -232,7 +229,7 @@ interface DrivePhotoRepository {
     suspend fun deleteFiles(
         userId: UserId,
         linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudTrashOutcome
+    ): CloudTrashOutcome
 
     /**
      * Builds a second cloud photo from [photo]'s bytes under [newName], by downloading the full-res
@@ -311,13 +308,13 @@ interface DrivePhotoRepository {
     suspend fun restoreFromCloudTrash(
         userId: UserId,
         linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudRestoreOutcome
+    ): CloudRestoreOutcome
     /** Permanently removes photos from the server (cannot be undone). Returns the
      *  per-link outcome so callers can keep rejected items selected. */
     suspend fun deleteFromCloudForever(
         userId: UserId,
         linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome
+    ): CloudDeleteOutcome
     /** Creates a public share link for an album; returns the public URL and its share id. */
     suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): AlbumShareLink
 

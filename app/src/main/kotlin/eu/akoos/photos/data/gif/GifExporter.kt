@@ -37,9 +37,9 @@ import android.provider.MediaStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.presentation.gifmaker.GifAspect
-import eu.akoos.photos.presentation.gifmaker.gifCanvasFor
-import eu.akoos.photos.presentation.gifmaker.gifFraming
+import eu.akoos.photos.domain.gif.GifAspect
+import eu.akoos.photos.domain.gif.gifCanvasFor
+import eu.akoos.photos.domain.gif.gifFraming
 import eu.akoos.photos.util.GifEncoder
 import eu.akoos.photos.util.ProtonPhotosStorage
 import kotlinx.coroutines.Dispatchers
