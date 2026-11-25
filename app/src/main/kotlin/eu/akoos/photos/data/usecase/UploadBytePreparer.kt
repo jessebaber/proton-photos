@@ -20,7 +20,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.UploadFormatNaming
+import eu.akoos.photos.domain.usecase.UploadPendingUseCase
+import eu.akoos.photos.domain.usecase.UploadProgress
+import eu.akoos.photos.domain.usecase.UploadStatus
 
 import android.content.Context
 import android.net.Uri

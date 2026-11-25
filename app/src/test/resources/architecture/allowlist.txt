@@ -50,16 +50,6 @@ domain-location eu/akoos/photos/domain/usecase/ReconcileSyncStateUseCase.kt
 # stream: feat/presentation-facades
 
 # stream: feat/extract-upload
-domain-location eu/akoos/photos/domain/usecase/BucketAlbumMirror.kt
-domain-location eu/akoos/photos/domain/usecase/FolderAlbumBackfill.kt
-domain-location eu/akoos/photos/domain/usecase/FolderMoveAlbumFollow.kt
-domain-location eu/akoos/photos/domain/usecase/ForceUploadLocalUrisUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/InvalidateStrippedLocationsUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/QueuedAlbumJoiner.kt
-domain-location eu/akoos/photos/domain/usecase/UploadBatchSupport.kt
-domain-location eu/akoos/photos/domain/usecase/UploadBytePreparer.kt
-domain-location eu/akoos/photos/domain/usecase/UploadPendingUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/UploadStructuralStripper.kt
 
 # stream: feat/extract-metadata
 domain-location eu/akoos/photos/domain/usecase/CarryOverToReplacement.kt

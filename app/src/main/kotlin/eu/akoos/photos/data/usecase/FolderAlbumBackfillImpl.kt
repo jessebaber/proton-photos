@@ -20,7 +20,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.DrivePairLookup
+import eu.akoos.photos.domain.usecase.FolderAlbumBackfill
+import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -38,14 +42,14 @@ import javax.inject.Singleton
  * screen can close long before a big folder is done; a guest has no Drive and nothing to join.
  */
 @Singleton
-class FolderAlbumBackfill @Inject constructor(
+class FolderAlbumBackfillImpl @Inject constructor(
     private val accountManager: AccountManager,
     private val upload: UploadPendingUseCase,
     private val localRepo: LocalMediaRepository,
     private val drivePairs: DrivePairLookup,
     @AppScope private val appScope: CoroutineScope,
-) {
-    fun onAlbumTurnedOn(bucketName: String) {
+) : FolderAlbumBackfill {
+    override fun onAlbumTurnedOn(bucketName: String) {
         if (bucketName.isEmpty()) return
         appScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch

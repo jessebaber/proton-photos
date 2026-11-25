@@ -22,6 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ForceUploadLocalUrisUseCaseImpl
+import eu.akoos.photos.data.usecase.UploadPendingUseCaseImpl
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
+
 import android.content.Context
 import android.content.ContentResolver
 import android.net.Uri
@@ -179,7 +183,7 @@ class UploadPendingUseCaseTest {
         every { mockPrefs[SettingsKeys.pairingSettledKey(userId.id)] } returns true
 
         videoCompression = mockk(relaxed = true)
-        useCase = UploadPendingUseCase(
+        useCase = UploadPendingUseCaseImpl(
             syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver,
             mockk(relaxed = true), uploadAlbumTargetDao, mockk(relaxed = true), mockk(relaxed = true),
             UploadStructuralStripper(context), UploadCompressionStep(context, UploadStructuralStripper(context), videoCompression), context,

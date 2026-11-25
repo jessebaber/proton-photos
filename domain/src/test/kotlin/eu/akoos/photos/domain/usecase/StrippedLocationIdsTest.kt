@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.domain.usecase
 
-import eu.akoos.photos.util.MetadataStripConfig
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -38,7 +37,7 @@ class StrippedLocationIdsTest {
 
     @Test
     fun `a GPS strip invalidates every file it landed on`() {
-        val ids = strippedLocationIds(MetadataStripConfig(stripGps = true), listOf(URI_A, URI_B))
+        val ids = strippedLocationIds(stripGps = true, listOf(URI_A, URI_B))
 
         assertEquals(listOf(URI_A, URI_B), ids)
     }
@@ -46,29 +45,20 @@ class StrippedLocationIdsTest {
     @Test
     fun `a timestamp only strip invalidates nothing`() {
         // The coordinates are still in the file, so the row still describes it and has to stand.
-        val ids = strippedLocationIds(MetadataStripConfig(stripTimestamp = true), listOf(URI_A, URI_B))
+        val ids = strippedLocationIds(stripGps = false, listOf(URI_A, URI_B))
 
         assertEquals(emptyList<String>(), ids)
     }
 
     @Test
     fun `every strip that spares GPS invalidates nothing`() {
-        val config = MetadataStripConfig(
-            stripCameraInfo = true,
-            stripTimestamp = true,
-            stripSoftwareInfo = true,
-            stripAuthorship = true,
-        )
-
-        assertEquals(emptyList<String>(), strippedLocationIds(config, listOf(URI_A, URI_B, URI_C)))
+        assertEquals(emptyList<String>(), strippedLocationIds(stripGps = false, listOf(URI_A, URI_B, URI_C)))
     }
 
     @Test
     fun `a GPS strip alongside other fields still invalidates`() {
         // The other flags are irrelevant to the decision; only stripGps is.
-        val config = MetadataStripConfig(stripGps = true, stripCameraInfo = true, stripTimestamp = true)
-
-        assertEquals(listOf(URI_A), strippedLocationIds(config, listOf(URI_A)))
+        assertEquals(listOf(URI_A), strippedLocationIds(stripGps = true, listOf(URI_A)))
     }
 
     @Test
@@ -76,19 +66,19 @@ class StrippedLocationIdsTest {
         // Every file was refused or deferred to the consent retry, so no stored fix went stale here.
         assertEquals(
             emptyList<String>(),
-            strippedLocationIds(MetadataStripConfig(stripGps = true), emptyList()),
+            strippedLocationIds(stripGps = true, emptyList()),
         )
     }
 
     @Test
     fun `an empty config invalidates nothing`() {
-        assertEquals(emptyList<String>(), strippedLocationIds(MetadataStripConfig(), listOf(URI_A)))
+        assertEquals(emptyList<String>(), strippedLocationIds(stripGps = false, listOf(URI_A)))
     }
 
     @Test
     fun `one file listed twice yields its id once`() {
         // A selection can carry the same device file twice; the delete takes one id for it.
-        val ids = strippedLocationIds(MetadataStripConfig(stripGps = true), listOf(URI_A, URI_B, URI_A))
+        val ids = strippedLocationIds(stripGps = true, listOf(URI_A, URI_B, URI_A))
 
         assertEquals(listOf(URI_A, URI_B), ids)
     }

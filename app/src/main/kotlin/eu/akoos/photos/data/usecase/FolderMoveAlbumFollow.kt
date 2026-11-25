@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.DrivePairLookup
 
 import eu.akoos.photos.data.preferences.AlbumMirrorFolders
 import eu.akoos.photos.di.AppScope
@@ -123,7 +125,7 @@ internal fun folderAlbumToRename(
 @Singleton
 class FolderMoveAlbumFollow @Inject constructor(
     private val accountManager: AccountManager,
-    private val upload: UploadPendingUseCase,
+    private val upload: UploadPendingUseCaseImpl,
     private val drivePairs: DrivePairLookup,
     private val localRepo: eu.akoos.photos.domain.repository.LocalMediaRepository,
     @AppScope private val appScope: CoroutineScope,

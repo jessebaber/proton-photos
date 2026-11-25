@@ -25,7 +25,7 @@ package eu.akoos.photos.data.upload
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import eu.akoos.photos.domain.usecase.UPLOAD_TAG
+import eu.akoos.photos.data.usecase.UPLOAD_TAG
 import java.io.File
 import java.security.MessageDigest
 

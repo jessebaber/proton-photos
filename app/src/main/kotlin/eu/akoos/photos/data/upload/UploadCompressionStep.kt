@@ -29,7 +29,7 @@ import eu.akoos.photos.domain.entity.compression.CompressionOutcome
 import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
 import eu.akoos.photos.domain.entity.compression.VideoCompressionPlan
-import eu.akoos.photos.domain.usecase.UploadStructuralStripper
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
 import eu.akoos.photos.util.MetadataStripConfig
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
