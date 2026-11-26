@@ -22,6 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.domain.usecase.withLiveNewest
+
+import eu.akoos.photos.data.usecase.GetGalleryItemsUseCaseImpl
+
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -52,14 +56,14 @@ import org.junit.Test
 
 class GetGalleryItemsUseCaseTest {
 
-    private lateinit var useCase: GetGalleryItemsUseCase
+    private lateinit var useCase: GetGalleryItemsUseCaseImpl
 
     @Before
     fun setUp() {
         // merge() is pure (it never touches the repos or scope for the inputs used here), so plain
         // mocks and a throwaway scope suffice. The tests call merge() directly rather than the flow
         // pipeline, which runs on Dispatchers.Default + sample() and cannot be driven by virtual time.
-        useCase = GetGalleryItemsUseCase(
+        useCase = GetGalleryItemsUseCaseImpl(
             mockk<LocalMediaRepository>(),
             mockk<DrivePhotoRepository>(),
             mockk<SyncStateSnapshot>(),
@@ -407,11 +411,11 @@ class GetGalleryItemsUseCaseTest {
     @Test
     fun `isInHiddenAlbum matches cloud and synced items but never local-only`() {
         val hidden = setOf("h1")
-        assertTrue(useCase.isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("h1")), hidden))
-        assertTrue(useCase.isInHiddenAlbum(GalleryItem.Synced(cloudPhoto("h1"), localItem("uri://x")), hidden))
-        assertFalse(useCase.isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("other")), hidden))
-        assertFalse(useCase.isInHiddenAlbum(GalleryItem.LocalOnly(localItem("uri://y")), hidden))
-        assertFalse("an empty hidden set hides nothing", useCase.isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("h1")), emptySet()))
+        assertTrue(isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("h1")), hidden))
+        assertTrue(isInHiddenAlbum(GalleryItem.Synced(cloudPhoto("h1"), localItem("uri://x")), hidden))
+        assertFalse(isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("other")), hidden))
+        assertFalse(isInHiddenAlbum(GalleryItem.LocalOnly(localItem("uri://y")), hidden))
+        assertFalse("an empty hidden set hides nothing", isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("h1")), emptySet()))
     }
 
     // ─── session-free local-only feed ─────────────────────────────────────────
@@ -426,7 +430,7 @@ class GetGalleryItemsUseCaseTest {
         every { localRepo.observeLocalMedia() } returns flowOf(local)
         val cloudRepo = mockk<DrivePhotoRepository>()
         val syncSnapshot = mockk<SyncStateSnapshot>()
-        val localOnlyUseCase = GetGalleryItemsUseCase(
+        val localOnlyUseCase = GetGalleryItemsUseCaseImpl(
             localRepo,
             cloudRepo,
             syncSnapshot,
@@ -453,11 +457,11 @@ class GetGalleryItemsUseCaseTest {
     private fun quickStartUseCase(
         lastKnown: List<LocalMediaItem>? = null,
         newest: suspend () -> List<LocalMediaItem>,
-    ): GetGalleryItemsUseCase {
+    ): GetGalleryItemsUseCaseImpl {
         val localRepo = mockk<LocalMediaRepository>()
         coEvery { localRepo.newestMedia(any()) } coAnswers { newest() }
         coEvery { localRepo.lastKnownMedia() } returns lastKnown
-        return GetGalleryItemsUseCase(
+        return GetGalleryItemsUseCaseImpl(
             localRepo,
             mockk<DrivePhotoRepository>(),
             mockk<SyncStateSnapshot>(),
@@ -649,10 +653,10 @@ class GetGalleryItemsUseCaseTest {
     private val fixtureAlbumHidden = setOf("c-album-hidden", "c-album-hidden-pair")
 
     /** A use case whose Drive stand-in answers the content-hash conversion, which the hash path needs. */
-    private fun hashingUseCase(): GetGalleryItemsUseCase {
+    private fun hashingUseCase(): GetGalleryItemsUseCaseImpl {
         val cloudRepo = mockk<DrivePhotoRepository>()
         every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
-        return GetGalleryItemsUseCase(
+        return GetGalleryItemsUseCaseImpl(
             mockk<LocalMediaRepository>(),
             cloudRepo,
             mockk<SyncStateSnapshot>(),
