@@ -30,21 +30,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pure-value coverage for the three gates the automatic free-up sweep runs behind, extracted from
+ * Pure-value coverage for the gates the automatic free-up sweep runs behind, extracted from
  * [FreeUpSpaceWorker.isUsableInterval], [FreeUpSpaceWorker.isCloudStateFreshEnough] and
  * [FreeUpSpaceWorker.sweepConstraints].
  *
  * The interval gate is the dangerous one: it decides whether a sweep request states a real minimum
  * age at all. An interval of zero puts the cutoff at "now", which matches every backed-up photo, so
- * a gate that admits it reclaims the device copy of an entire library in one sweep. The values fed
- * to it are [FreeUpInterval.ms], so the accepted cases read from that enum and this test fails if an
- * interval of zero is ever offered.
+ * a gate that admits it would verify (and later permanently delete via the finisher) an entire
+ * library. The values fed to it are [FreeUpInterval.ms], so the accepted cases read from that enum
+ * and this test fails if an interval of zero is ever offered.
  *
- * The constraint assertions are a tripwire: they fail loudly if a network constraint is re-added.
- * The scheduled reclaim path is local - [eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.invoke]
- * selects backed-up rows from Room and deletes their device copies with no network call - so a
- * network constraint fetches nothing and only stops the sweep running offline. (The manual button
- * adds a cloud verification step, but the scheduled worker never runs it.)
+ * The constraint assertions are a tripwire: scheduled verify talks to Drive, so the sweep must keep
+ * [NetworkType.CONNECTED] (not NOT_REQUIRED). Battery-not-low stays.
  *
  * No Android, no Robolectric, no WorkManager runtime: plain JVM assertions on the inputs.
  */
@@ -141,9 +138,9 @@ class FreeUpSpaceWorkerTest {
     }
 
     @Test
-    fun `the sweep requires no network`() {
+    fun `the sweep requires a connected network for Drive verify`() {
         assertEquals(
-            NetworkType.NOT_REQUIRED,
+            NetworkType.CONNECTED,
             FreeUpSpaceWorker.sweepConstraints().requiredNetworkType,
         )
     }

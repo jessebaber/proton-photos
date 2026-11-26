@@ -51,6 +51,9 @@ fun deriveFreeUpSpaceState(
     freeing -> FreeUpSpacePhase.Freeing
     doneMessage -> FreeUpSpacePhase.Done
     workRunning -> FreeUpSpacePhase.Checking
-    workSucceeded && readyCount > 0 -> FreeUpSpacePhase.Ready
+    // Ready set may come from manual verify SUCCEEDED or from the scheduled worker's persisted
+    // chunks — do not require workSucceeded so auto free-up can finish when the screen opens.
+    readyCount > 0 -> FreeUpSpacePhase.Ready
+    workSucceeded -> FreeUpSpacePhase.Idle
     else -> FreeUpSpacePhase.Idle
 }

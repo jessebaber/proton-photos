@@ -62,6 +62,21 @@ class FreeUpSpaceDeriveStateTest {
     }
 
     @Test
+    fun `ready from scheduled verify without manual work SUCCEEDED`() {
+        assertEquals(
+            FreeUpSpacePhase.Ready,
+            deriveFreeUpSpaceState(
+                workRunning = false,
+                workSucceeded = false,
+                workFailed = false,
+                readyCount = 2,
+                freeing = false,
+                doneMessage = false,
+            ),
+        )
+    }
+
+    @Test
     fun `freeing while the foreground finisher runs`() {
         assertEquals(
             FreeUpSpacePhase.Freeing,
