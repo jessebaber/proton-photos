@@ -24,6 +24,11 @@
 
 package eu.akoos.photos.presentation.gifmaker
 
+import eu.akoos.photos.domain.gif.GIF_EDGE_STANDARD
+import eu.akoos.photos.domain.gif.gifFraming
+import eu.akoos.photos.domain.gif.gifCanvasFor
+import eu.akoos.photos.domain.gif.GifAspect
+
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.LayoutInflater

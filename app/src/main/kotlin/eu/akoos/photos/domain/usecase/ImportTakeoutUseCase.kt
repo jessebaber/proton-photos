@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.IntentSender
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -55,7 +56,7 @@ import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.presentation.metadata.FilenameDate
+import eu.akoos.photos.domain.metadata.FilenameDate
 import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.ImportDiagnostics
 import eu.akoos.photos.util.MetadataStripConfig
@@ -184,7 +185,7 @@ internal fun importTally(
 class ImportTakeoutUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val drivePhotoRepository: DrivePhotoRepository,
-    private val writeLocalPhotoMetadataUseCase: WriteLocalPhotoMetadataUseCase,
+    private val writeLocalPhotoMetadataUseCase: WriteLocalPhotoMetadataUseCase<IntentSender>,
     private val importStagedDao: ImportStagedDao,
     private val importHistoryDao: ImportHistoryDao,
     private val importUploadedDao: ImportUploadedDao,

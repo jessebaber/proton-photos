@@ -38,6 +38,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.AssignPersonNameUseCaseImpl
 
 /**
  * The cluster-summary bookkeeping a merge and a stray orphan must leave behind: a merge drops both the
@@ -59,7 +60,7 @@ class FaceCurationConsistencyDbTest {
             .allowMainThreadQueries()
             .setQueryExecutor { it.run() }
             .build()
-        assign = AssignPersonNameUseCase(
+        assign = AssignPersonNameUseCaseImpl(
             db.faceDao(), db.personDao(), db.personManualPhotoDao(),
             db.notPersonDao(), db.personCoverDao(), db.clusterSummaryDao(), db,
         )

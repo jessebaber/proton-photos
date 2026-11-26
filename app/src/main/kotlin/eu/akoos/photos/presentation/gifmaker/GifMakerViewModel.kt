@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.gifmaker
 
+import eu.akoos.photos.domain.gif.GIF_EDGE_STANDARD
+import eu.akoos.photos.domain.gif.GifAspect
+
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -35,7 +38,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.service.GifExportService
+import eu.akoos.photos.domain.work.BackgroundWork
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,7 +68,6 @@ private const val GIF_MAX_ZOOM = 6f
  * frame whatever the size, so a larger edge buys sharpness, not colour depth, at a steep file-size cost:
  * [GIF_EDGE_MAX] can run to tens of megabytes for a full 10s clip.
  */
-const val GIF_EDGE_STANDARD = 480
 const val GIF_EDGE_HIGH = 720
 const val GIF_EDGE_MAX = 1080
 
@@ -124,6 +126,7 @@ class GifMakerViewModel @Inject constructor(
     // turn a cloud-only video into an on-disk file the local GIF pipeline can read.
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
+    private val backgroundWork: BackgroundWork,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(GifMakerUiState())
@@ -363,12 +366,11 @@ class GifMakerViewModel @Inject constructor(
         // A brief, non-blocking hint that the save continues after the screen closes; the foreground service's
         // notification and the avatar ring carry the rest. save() is a UI callback, so this shows on the main thread.
         Toast.makeText(context, context.getString(R.string.gif_maker_progress), Toast.LENGTH_SHORT).show()
-        GifExportService.start(
-            context,
+        backgroundWork.startGifExport(
             sourceUri = sourceUriStr,
             startMs = startMs,
             endMs = endMs,
-            aspect = aspect,
+            aspect = aspect.name,
             zoom = zoom,
             panX = panX,
             panY = panY,

@@ -34,8 +34,8 @@ import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.domain.usecase.GuestFaceMigration
-import eu.akoos.photos.domain.usecase.MigrateGuestFaceDataUseCase
-import eu.akoos.photos.domain.usecase.RekeyPhotoFacesUseCase
+import eu.akoos.photos.data.usecase.MigrateGuestFaceDataUseCase
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After

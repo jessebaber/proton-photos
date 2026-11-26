@@ -25,6 +25,8 @@ package eu.akoos.photos.domain.usecase
 import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import eu.akoos.photos.data.usecase.backupRekeyPairs
+import eu.akoos.photos.data.usecase.rekeyCurationTimes
 
 class RekeyPhotoFacesTest {
 

@@ -31,7 +31,7 @@ import eu.akoos.photos.domain.usecase.REATTACH_MIN_IOU
 import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.ReattachLabel
 import eu.akoos.photos.domain.usecase.boxIou
-import eu.akoos.photos.domain.usecase.isPortableFaceKey
+import eu.akoos.photos.data.usecase.isPortableFaceKey
 import eu.akoos.photos.domain.usecase.matchReattachLabels
 
 /*

@@ -22,12 +22,9 @@
 
 package eu.akoos.photos.presentation.common
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
-import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.presentation.gallery.isItemFavorite
@@ -105,13 +102,12 @@ sealed class FavoriteActionState {
  */
 @Singleton
 class FavoriteWriter @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
     private val driveRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
 ) {
     /** The device-side favourite set, for a surface that has to decide which way its button goes. */
-    val favoriteIds: Flow<Set<String>> = context.settingsDataStore.data
-        .map { it[SettingsKeys.FAVORITE_IDS] ?: emptySet() }
+    val favoriteIds: Flow<Set<String>> = settingsStore.observe(Settings.FAVORITE_IDS)
         .distinctUntilChanged()
 
     /**
@@ -131,7 +127,7 @@ class FavoriteWriter @Inject constructor(
         onProgress: (done: Int) -> Unit = {},
         onSettled: (GalleryItem) -> Unit = {},
     ): FavoriteOutcome {
-        val current = context.settingsDataStore.data.first()[SettingsKeys.FAVORITE_IDS] ?: emptySet()
+        val current = settingsStore.get(Settings.FAVORITE_IDS)
         val targets = items.filter { isItemFavorite(it, current) != favorite }
         if (targets.isEmpty()) return favoriteOutcome(changed = 0, failed = 0)
 
@@ -165,12 +161,10 @@ class FavoriteWriter @Inject constructor(
             onProgress(++done)
         }
         if (settled.isNotEmpty()) {
-            context.settingsDataStore.edit { prefs ->
-                val stored = prefs[SettingsKeys.FAVORITE_IDS] ?: emptySet()
-                val next = settled.fold(stored) { acc, item ->
+            settingsStore.update(Settings.FAVORITE_IDS) { stored ->
+                settled.fold(stored) { acc, item ->
                     favoriteIdsAfterToggle(item, acc, favorite)
                 }
-                if (next != stored) prefs[SettingsKeys.FAVORITE_IDS] = next
             }
         }
         return favoriteOutcome(changed = settled.size, failed = failed)

@@ -74,7 +74,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.ocr.OnnxTextRecognizer
+import android.graphics.Bitmap
+import eu.akoos.photos.di.mediaPresentationEntryPoint
+import eu.akoos.photos.domain.ocr.TextRecognizer
 import eu.akoos.photos.domain.ocr.RecognizedTextBlock
 import eu.akoos.photos.domain.ocr.TextReadStage
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -177,9 +179,11 @@ fun viewerTextTap(selectionActive: Boolean): ViewerTextTap =
  * screen goes away.
  */
 @Composable
-fun rememberTextRecognizer(): OnnxTextRecognizer {
+fun rememberTextRecognizer(): TextRecognizer<Bitmap> {
     val context = LocalContext.current.applicationContext
-    val recognizer = remember(context) { OnnxTextRecognizer(context) }
+    val recognizer = remember(context) {
+        mediaPresentationEntryPoint(context).textRecognizerFactory().create<Bitmap>()
+    }
     DisposableEffect(recognizer) { onDispose { recognizer.close() } }
     return recognizer
 }

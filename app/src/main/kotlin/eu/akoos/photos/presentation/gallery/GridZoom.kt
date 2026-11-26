@@ -35,10 +35,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import eu.akoos.photos.data.preferences.AlbumGridPrefsBoot
-import eu.akoos.photos.data.preferences.SeamlessGridPrefsBoot
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.mediaPresentationEntryPoint
+import eu.akoos.photos.domain.settings.Settings
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -89,8 +87,9 @@ object GridZoom {
 @Composable
 fun rememberDefaultGridColumns(): Int {
     val context = LocalContext.current
-    val cols by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: GridZoom.DEFAULT_COLUMNS }
+    val store = remember(context) { mediaPresentationEntryPoint(context).settingsStore() }
+    val cols by remember(store) {
+        store.observe(Settings.GRID_DEFAULT_COLUMNS)
     }.collectAsStateWithLifecycle(initialValue = GridZoom.DEFAULT_COLUMNS)
     return cols
 }
@@ -109,12 +108,12 @@ fun rememberDefaultGridColumns(): Int {
 @Composable
 fun rememberSeamlessGrid(): Boolean {
     val context = LocalContext.current
-    val initial = remember { SeamlessGridPrefsBoot.read(context) }
-    val seamless by remember {
-        context.settingsDataStore.data
-            .map { it[SettingsKeys.SEAMLESS_GRID] ?: false }
+    val entry = remember(context) { mediaPresentationEntryPoint(context) }
+    val initial = remember(entry) { entry.bootPreferences().seamlessGrid() }
+    val seamless by remember(entry) {
+        entry.settingsStore().observe(Settings.SEAMLESS_GRID)
             .distinctUntilChanged()
-            .onEach { SeamlessGridPrefsBoot.write(context, it) }
+            .onEach { entry.bootPreferences().writeSeamlessGrid(it) }
     }.collectAsStateWithLifecycle(initialValue = initial)
     return seamless
 }
@@ -128,12 +127,12 @@ fun rememberSeamlessGrid(): Boolean {
 @Composable
 fun rememberAlbumColumns(): Int {
     val context = LocalContext.current
-    val initial = remember { AlbumGridPrefsBoot.read(context) }
-    val columns by remember {
-        context.settingsDataStore.data
-            .map { it[SettingsKeys.ALBUM_GRID_COLUMNS] ?: 2 }
+    val entry = remember(context) { mediaPresentationEntryPoint(context) }
+    val initial = remember(entry) { entry.bootPreferences().albumGridColumns() }
+    val columns by remember(entry) {
+        entry.settingsStore().observe(Settings.ALBUM_GRID_COLUMNS)
             .distinctUntilChanged()
-            .onEach { AlbumGridPrefsBoot.write(context, it) }
+            .onEach { entry.bootPreferences().writeAlbumGridColumns(it) }
     }.collectAsStateWithLifecycle(initialValue = initial)
     return columns
 }
@@ -147,12 +146,12 @@ fun rememberAlbumColumns(): Int {
 @Composable
 fun rememberAlbumsShowCollection(): Boolean {
     val context = LocalContext.current
-    val initial = remember { AlbumGridPrefsBoot.readShowCollection(context) }
-    val shown by remember {
-        context.settingsDataStore.data
-            .map { it[SettingsKeys.ALBUMS_SHOW_COLLECTION] ?: true }
+    val entry = remember(context) { mediaPresentationEntryPoint(context) }
+    val initial = remember(entry) { entry.bootPreferences().albumShowCollection() }
+    val shown by remember(entry) {
+        entry.settingsStore().observe(Settings.ALBUMS_SHOW_COLLECTION)
             .distinctUntilChanged()
-            .onEach { AlbumGridPrefsBoot.writeShowCollection(context, it) }
+            .onEach { entry.bootPreferences().writeAlbumShowCollection(it) }
     }.collectAsStateWithLifecycle(initialValue = initial)
     return shown
 }
@@ -166,12 +165,15 @@ fun rememberAlbumsShowCollection(): Boolean {
 @Composable
 fun rememberAlbumsViewMode(): AlbumsViewMode {
     val context = LocalContext.current
-    val initial = remember { AlbumsViewMode.fromOrdinal(AlbumGridPrefsBoot.readViewMode(context)) }
-    val mode by remember {
-        context.settingsDataStore.data
-            .map { AlbumsViewMode.fromOrdinal(it[SettingsKeys.ALBUMS_VIEW_MODE]) }
+    val entry = remember(context) { mediaPresentationEntryPoint(context) }
+    val initial = remember(entry) {
+        AlbumsViewMode.fromOrdinal(entry.bootPreferences().albumsViewMode())
+    }
+    val mode by remember(entry) {
+        entry.settingsStore().observe(Settings.ALBUMS_VIEW_MODE)
+            .map { AlbumsViewMode.fromOrdinal(it) }
             .distinctUntilChanged()
-            .onEach { AlbumGridPrefsBoot.writeViewMode(context, it.ordinal) }
+            .onEach { entry.bootPreferences().writeAlbumsViewMode(it.ordinal) }
     }.collectAsStateWithLifecycle(initialValue = initial)
     return mode
 }

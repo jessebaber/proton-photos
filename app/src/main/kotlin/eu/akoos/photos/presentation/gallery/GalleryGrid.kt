@@ -27,8 +27,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -70,6 +68,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import eu.akoos.photos.di.mediaPresentationEntryPoint
+import eu.akoos.photos.domain.settings.Settings
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -163,20 +163,20 @@ internal fun PhotoGrid(
     val context = LocalContext.current
     // User can hide the memories carousel from the timeline filter; default on.
     val showOnThisDay by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.SHOW_ON_THIS_DAY] ?: true }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.SHOW_ON_THIS_DAY)
     }.collectAsState(initial = true)
     // Opt-in floating month/year label while scrolling; default off.
     val showScrollDate by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.SHOW_SCROLL_DATE)
     }.collectAsState(initial = false)
     // Opt-in reversed chronology: oldest at the top, newest at the bottom; default off.
     val reverseOrder by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.REVERSE_TIMELINE_ORDER)
     }.collectAsState(initial = false)
     // Opt-in staggered (masonry) layout; default off. When off, the fixed square grid below is
     // rendered exactly as before.
     val mosaicGrid by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.MOSAIC_GRID)
     }.collectAsState(initial = false)
     // Opt-in edge-to-edge (seamless) layout; default off. When off, the padded, rounded tiles below
     // are rendered exactly as before. Drives the outer side padding, corner rounding, and gap on both

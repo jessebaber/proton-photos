@@ -25,8 +25,8 @@ package eu.akoos.photos.data.face
 import android.content.Context
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.preferences.InMemoryPreferencesDataStore
-import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
-import eu.akoos.photos.domain.usecase.IncrementalBatch
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
+import eu.akoos.photos.data.usecase.IncrementalBatch
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.HealthVerdict
 import eu.akoos.photos.util.NetworkObserver

@@ -41,6 +41,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
 
 /**
  * Merges pairs of clusters of a stored face library while the people table is being read the way the People
@@ -173,7 +174,7 @@ class PeopleTornReadTest {
             assertTrue("no faces stored", account != null)
             account!!
             val personDao = db.personDao()
-            val cluster = eu.akoos.photos.domain.usecase.ClusterFacesUseCase(
+            val cluster = eu.akoos.photos.data.usecase.ClusterFacesUseCase(
                 db.faceDao(), personDao, db.personManualPhotoDao(), db.notPersonDao(),
                 db.personCoverDao(), db.clusterSummaryDao(), db,
             )

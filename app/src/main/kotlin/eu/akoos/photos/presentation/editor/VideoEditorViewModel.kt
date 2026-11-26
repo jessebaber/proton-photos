@@ -22,6 +22,12 @@
 
 package eu.akoos.photos.presentation.editor
 
+import eu.akoos.photos.domain.notification.EditUploadNotifier
+import eu.akoos.photos.domain.upload.LocalOverwrite
+import eu.akoos.photos.domain.transfer.TransferKind
+import eu.akoos.photos.domain.transfer.Transfers
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -38,8 +44,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.entity.TimestampSanity
@@ -57,7 +61,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -582,7 +585,9 @@ class VideoEditorViewModel @Inject constructor(
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     // Reports the background edit-upload to the Activity monitor + avatar ring, the same surface the
     // photo editor's edit-upload uses. The upload itself is unchanged; this only tracks it.
-    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    private val transferCenter: Transfers,
+    private val localOverwrite: LocalOverwrite,
+    private val settingsStore: SettingsStore,
     // Application-lifetime scope for the cloud re-upload that outlives the editor: it must keep
     // running after save() returns and the screen navigates away (viewModelScope is cancelled then).
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
@@ -590,7 +595,7 @@ class VideoEditorViewModel @Inject constructor(
     // instead of re-encoding and starting an upload that hangs on a connected-but-dead network.
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     // Tells the user when the upload of a cloud-only edit fails after the editor already closed.
-    private val editUploadNotifier: eu.akoos.photos.data.notification.EditUploadFailedNotifier,
+    private val editUploadNotifier: EditUploadNotifier,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VideoEditorUiState())
@@ -1856,12 +1861,12 @@ class VideoEditorViewModel @Inject constructor(
                         // the muxed temp file's URI is the row's video-frame thumbnail. finish() runs in
                         // the finally so the ring clears whether the upload succeeds, fails, or cancels.
                         val uploadUri = Uri.fromFile(cloudTempFile).toString()
-                        val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(uploadUri))
+                        val tid = transferCenter.start(TransferKind.UPLOAD, total = 1, items = listOf(uploadUri))
                         try {
                             uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudCaptureMs, cloudTempFile, userId)
                             transferCenter.progress(tid, 1)
                             transferCenter.log(
-                                TransferCenter.Kind.UPLOAD, count = 1,
+                                TransferKind.UPLOAD, count = 1,
                                 name = context.getString(R.string.activity_hist_edited), uris = listOf(uploadUri),
                             )
                         } catch (t: Throwable) {
@@ -1962,7 +1967,7 @@ class VideoEditorViewModel @Inject constructor(
                             // Track the replacement upload on the Activity monitor + avatar ring for its
                             // duration; the saved device copy's URI is the row's video-frame thumbnail.
                             // finish() runs in the finally so the ring clears on success, failure, or cancel.
-                            val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(savedUriStr))
+                            val tid = transferCenter.start(TransferKind.UPLOAD, total = 1, items = listOf(savedUriStr))
                             try {
                                 val newLinkId = uploadExistingFileToCloud(
                                     s, counterpart, editTimestampMs, syncedTempFile,
@@ -1970,7 +1975,7 @@ class VideoEditorViewModel @Inject constructor(
                                 )
                                 transferCenter.progress(tid, 1)
                                 transferCenter.log(
-                                    TransferCenter.Kind.UPLOAD, count = 1,
+                                    TransferKind.UPLOAD, count = 1,
                                     name = context.getString(R.string.activity_hist_edited), uris = listOf(savedUriStr),
                                 )
                                 runCatching {
@@ -2202,8 +2207,8 @@ class VideoEditorViewModel @Inject constructor(
                 // mystery "0% sit then 100% race" cycle that happened to share a label.
                 val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
                 val newStage = when (phase) {
-                    eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
-                    eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
+                    eu.akoos.photos.domain.repository.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
+                    eu.akoos.photos.domain.repository.UploadPhase.Uploading -> VideoSaveStage.Uploading
                 }
                 _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
             }
@@ -2898,10 +2903,9 @@ class VideoEditorViewModel @Inject constructor(
      */
     private suspend fun stripCopyForCloudUpload(tempFile: File, originalCaptureMs: Long): Pair<File, Long> =
         withContext(Dispatchers.IO) {
-            val prefs = runCatching { context.settingsDataStore.data.first() }.getOrNull()
-            val stripOnUpload = prefs?.get(SettingsKeys.STRIP_ON_UPLOAD) ?: false
-            val stripGps = stripOnUpload && (prefs?.get(SettingsKeys.STRIP_GPS) ?: false)
-            val stripTimestamp = stripOnUpload && (prefs?.get(SettingsKeys.STRIP_TIMESTAMP) ?: false)
+            val stripOnUpload = runCatching { settingsStore.get(Settings.STRIP_ON_UPLOAD) }.getOrDefault(false)
+            val stripGps = stripOnUpload && runCatching { settingsStore.get(Settings.STRIP_GPS) }.getOrDefault(false)
+            val stripTimestamp = stripOnUpload && runCatching { settingsStore.get(Settings.STRIP_TIMESTAMP) }.getOrDefault(false)
             if (!stripGps && !stripTimestamp) return@withContext tempFile to originalCaptureMs
             val captureMs = if (stripTimestamp) System.currentTimeMillis() else originalCaptureMs
             val out = createTempMuxFile()
@@ -2928,13 +2932,11 @@ class VideoEditorViewModel @Inject constructor(
      */
     private suspend fun mirrorStripVideoLocal(file: File, originalCaptureMs: Long) =
         withContext(Dispatchers.IO) {
-            val prefs = runCatching { context.settingsDataStore.data.first() }.getOrNull()
-                ?: return@withContext
-            val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
-            val mirror = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
+            val stripOnUpload = runCatching { settingsStore.get(Settings.STRIP_ON_UPLOAD) }.getOrDefault(false)
+            val mirror = runCatching { settingsStore.get(Settings.MIRROR_STRIP_TO_LOCAL) }.getOrDefault(false)
             if (!stripOnUpload || !mirror) return@withContext
-            val stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false
-            val stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false
+            val stripGps = runCatching { settingsStore.get(Settings.STRIP_GPS) }.getOrDefault(false)
+            val stripTimestamp = runCatching { settingsStore.get(Settings.STRIP_TIMESTAMP) }.getOrDefault(false)
             if (!stripGps && !stripTimestamp) return@withContext
             if (stripGps) {
                 val tmp = createTempMuxFile()

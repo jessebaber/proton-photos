@@ -42,8 +42,8 @@ import eu.akoos.photos.data.gif.GifExporter
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.transfer.TransferCenter
-import eu.akoos.photos.presentation.gifmaker.GIF_EDGE_STANDARD
-import eu.akoos.photos.presentation.gifmaker.GifAspect
+import eu.akoos.photos.domain.gif.GIF_EDGE_STANDARD
+import eu.akoos.photos.domain.gif.GifAspect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -241,11 +241,42 @@ class GifExportService : Service() {
             dateTakenMs: Long,
             displayName: String,
         ) {
+            start(
+                context = context,
+                sourceUri = sourceUri,
+                startMs = startMs,
+                endMs = endMs,
+                aspectName = aspect.name,
+                zoom = zoom,
+                panX = panX,
+                panY = panY,
+                maxEdgePx = maxEdgePx,
+                isCloud = isCloud,
+                dateTakenMs = dateTakenMs,
+                displayName = displayName,
+            )
+        }
+
+        /** Domain-facade entry that takes the aspect as its enum name so data need not import presentation. */
+        fun start(
+            context: Context,
+            sourceUri: String,
+            startMs: Long,
+            endMs: Long,
+            aspectName: String,
+            zoom: Float,
+            panX: Float,
+            panY: Float,
+            maxEdgePx: Int,
+            isCloud: Boolean,
+            dateTakenMs: Long,
+            displayName: String,
+        ) {
             val intent = Intent(context, GifExportService::class.java)
                 .putExtra(EXTRA_SOURCE_URI, sourceUri)
                 .putExtra(EXTRA_START_MS, startMs)
                 .putExtra(EXTRA_END_MS, endMs)
-                .putExtra(EXTRA_ASPECT, aspect.name)
+                .putExtra(EXTRA_ASPECT, aspectName)
                 .putExtra(EXTRA_ZOOM, zoom)
                 .putExtra(EXTRA_PAN_X, panX)
                 .putExtra(EXTRA_PAN_Y, panY)

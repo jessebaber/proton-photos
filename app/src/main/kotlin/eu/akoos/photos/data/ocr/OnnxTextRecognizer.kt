@@ -34,7 +34,11 @@
 
 package eu.akoos.photos.data.ocr
 
+import eu.akoos.photos.domain.ml.OcrModelPreparation
+
 import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
 import android.graphics.Bitmap
 import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -55,19 +59,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** Whether the text reader can run right now, and what stands in the way when it cannot. */
-sealed interface OcrModelPreparation {
-
-    /** The models are on this device and a read can start. */
-    data object Ready : OcrModelPreparation
-
-    /** Nothing is on disk yet and the user has not agreed to the download. */
-    data object NeedsConsent : OcrModelPreparation
-
-    /** The download was attempted and did not produce usable models. */
-    data object Failed : OcrModelPreparation
-}
-
 /**
  * Reads the text in a photo with the on-device models.
  *
@@ -86,7 +77,9 @@ sealed interface OcrModelPreparation {
  * owns this instance calls when it leaves the screen. [close] terminates a run that is already inside
  * the runtime before it releases anything, so a native session is never freed underneath one.
  */
-class OnnxTextRecognizer(context: Context) : TextRecognizer {
+class OnnxTextRecognizer @Inject constructor(
+    @ApplicationContext context: Context,
+) : TextRecognizer<Bitmap> {
 
     private val appContext = context.applicationContext
     private val models = OcrModelManager(appContext)
@@ -120,7 +113,7 @@ class OnnxTextRecognizer(context: Context) : TextRecognizer {
      * as the download takes, so a caller shows progress around it; [onDownloadStart] fires just
      * before the first byte moves so that wait can be labelled as the download it is.
      */
-    suspend fun prepare(onDownloadStart: () -> Unit = {}): OcrModelPreparation {
+    override suspend fun prepare(onDownloadStart: () -> Unit): OcrModelPreparation {
         if (closed) return OcrModelPreparation.Failed
         if (COMPONENTS.all { models.onDisk(it) != null }) return OcrModelPreparation.Ready
         if (!downloadAccepted()) return OcrModelPreparation.NeedsConsent
@@ -133,7 +126,7 @@ class OnnxTextRecognizer(context: Context) : TextRecognizer {
     }
 
     /** Records that the user agreed to fetch the models. Takes effect immediately and is remembered. */
-    fun allowModelDownload() {
+    override fun allowModelDownload() {
         downloadAccepted = true
         background.launch {
             appContext.settingsDataStore.edit { it[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] = true }
@@ -141,13 +134,11 @@ class OnnxTextRecognizer(context: Context) : TextRecognizer {
     }
 
     /** How many bytes accepting the prompt fetches. */
-    val downloadBytes: Long get() = OcrModelAssets.TOTAL_DOWNLOAD_BYTES
-
-    override suspend fun recognize(bitmap: Bitmap): List<RecognizedTextBlock> = recognize(bitmap) {}
+    override val downloadBytes: Long get() = OcrModelAssets.TOTAL_DOWNLOAD_BYTES
 
     /** As [recognize], reporting which stage the read has reached so a caller can say so on screen. */
-    suspend fun recognize(
-        bitmap: Bitmap,
+    override suspend fun recognize(
+        frame: Bitmap,
         onStage: (TextReadStage) -> Unit,
     ): List<RecognizedTextBlock> = withContext(Dispatchers.IO) {
         // Reached only after prepare() reported Ready. Resolving again rather than trusting that is
@@ -165,13 +156,13 @@ class OnnxTextRecognizer(context: Context) : TextRecognizer {
             sessionGate.withLock {
                 if (closed) return@withLock emptyList()
                 onStage(TextReadStage.Detecting)
-                val found = openDetector(detection).detect(bitmap, run)
+                val found = openDetector(detection).detect(frame, run)
                 // The reading half is opened only once there is something to read: a photo with no
                 // text on it should not pay for a seventeen megabyte model it will not run.
                 if (found.isEmpty()) return@withLock emptyList()
                 onStage(TextReadStage.Reading)
                 openReader(recognition)
-                readBlocks(bitmap, capped(found), run)
+                readBlocks(frame, capped(found), run)
             }
         } finally {
             cancelHandle.dispose()
@@ -287,7 +278,7 @@ class OnnxTextRecognizer(context: Context) : TextRecognizer {
      * release itself waits for that run to unwind, because closing a session under one is a native
      * crash rather than an exception.
      */
-    fun close() {
+    override fun close() {
         if (closed) return
         closed = true
         activeRun?.cancel()
