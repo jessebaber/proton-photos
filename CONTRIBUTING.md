@@ -123,13 +123,13 @@ Review the diff so only the changed dependency's hashes move. A verification fai
 
 | Layer | Paths | Must not reference |
 |---|---|---|
-| Domain (interim in `:app`) | `domain/**` | No new files here unless allowlisted; new domain code goes in `:domain` |
+| Domain (`:domain`) | `domain/**` | Android or `:app` (compiler-enforced: neither is on the classpath) |
 | Presentation-side | `presentation/**`, `navigation/**`, `widget/**` | `eu.akoos.photos.{data,worker,service,crypto}` |
 | Data-side | `data/**`, `worker/**`, `service/**`, `crypto/**` | `eu.akoos.photos.{presentation,navigation,widget}` |
 | Shared helpers | `util/**` | data-side and presentation-side packages |
 | Composition root | `App.kt`, `MainActivity.kt`, `di/**` | no rule |
 
-`ArchitectureBoundaryTest` enforces these with a ratcheting allowlist under `app/src/test/resources/architecture/allowlist.txt`. The allowlist only shrinks. Pure domain types and use cases belong in the `:domain` module; `:domain` has no Android or `:app` on its classpath.
+`:domain` purity is enforced by the compiler. `ArchitectureBoundaryTest` enforces the other rows against an empty allowlist under `app/src/test/resources/architecture/allowlist.txt` — the allowlist only shrinks and must stay empty. When presentation consumes a use case, put an interface in `:domain` and the `Impl` in data (bound with Hilt). Upload and cloud-metadata changes that touch EXIF/GPS stripping need the instrumented strip checks before merge.
 
 ## Commit messages
 
