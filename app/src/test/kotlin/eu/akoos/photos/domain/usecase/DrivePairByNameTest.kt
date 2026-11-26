@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.pairByUniqueName
+
 import eu.akoos.photos.data.db.entity.LinkIdName
 import org.junit.Assert.assertEquals
 import org.junit.Test

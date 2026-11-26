@@ -15,15 +15,17 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
 package eu.akoos.photos.presentation.albums
 
-import android.content.Context
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 /**
  * A choice kept per album or folder, as the entries "ordinal:id" of a string set. Only the items whose
@@ -80,55 +82,66 @@ data class PhotoViewChoices(
         PerItemChoice.of(folderGrouping, folderName)?.let { AlbumPhotoGrouping.fromOrdinal(it) } ?: folderGroupingDefault
 
     companion object {
-        fun from(prefs: Preferences) = PhotoViewChoices(
-            albumSort = prefs[SettingsKeys.ALBUM_PHOTO_SORT_OVERRIDES] ?: emptySet(),
-            albumSortDefault = AlbumPhotoSortMode.fromOrdinal(prefs[SettingsKeys.ALBUM_PHOTO_SORT_MODE]),
-            albumGrouping = prefs[SettingsKeys.ALBUM_PHOTO_GROUPING_OVERRIDES] ?: emptySet(),
-            albumGroupingDefault = AlbumPhotoGrouping.fromOrdinal(prefs[SettingsKeys.ALBUM_PHOTO_GROUPING]),
-            folderSort = prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_OVERRIDES] ?: emptySet(),
-            folderSortDefault = AlbumPhotoSortMode.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE]),
-            folderGrouping = prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES] ?: emptySet(),
-            folderGroupingDefault = AlbumPhotoGrouping.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING]),
-        )
+        fun observe(store: SettingsStore): Flow<PhotoViewChoices> = combine(
+            store.observe(Settings.ALBUM_PHOTO_SORT_OVERRIDES),
+            store.observe(Settings.ALBUM_PHOTO_SORT_MODE),
+            store.observe(Settings.ALBUM_PHOTO_GROUPING_OVERRIDES),
+            store.observe(Settings.ALBUM_PHOTO_GROUPING),
+            store.observe(Settings.DEVICE_FOLDER_PHOTO_SORT_OVERRIDES),
+            store.observe(Settings.DEVICE_FOLDER_PHOTO_SORT_MODE),
+            store.observe(Settings.DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES),
+            store.observe(Settings.DEVICE_FOLDER_PHOTO_GROUPING),
+        ) { values ->
+            PhotoViewChoices(
+                albumSort = values[0] as Set<String>,
+                albumSortDefault = AlbumPhotoSortMode.fromOrdinal(values[1] as Int),
+                albumGrouping = values[2] as Set<String>,
+                albumGroupingDefault = AlbumPhotoGrouping.fromOrdinal(values[3] as Int),
+                folderSort = values[4] as Set<String>,
+                folderSortDefault = AlbumPhotoSortMode.fromOrdinal(values[5] as Int),
+                folderGrouping = values[6] as Set<String>,
+                folderGroupingDefault = AlbumPhotoGrouping.fromOrdinal(values[7] as Int),
+            )
+        }
     }
 }
 
 /** Writes one album's or one folder's choice, leaving every other album and folder as it was. */
 internal object PhotoViewChoiceStore {
 
-    suspend fun setAlbumSort(context: Context, albumLinkId: String, mode: AlbumPhotoSortMode) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[SettingsKeys.ALBUM_PHOTO_SORT_OVERRIDES] = PerItemChoice.with(
-                prefs[SettingsKeys.ALBUM_PHOTO_SORT_OVERRIDES] ?: emptySet(), albumLinkId, mode.ordinal,
-                AlbumPhotoSortMode.fromOrdinal(prefs[SettingsKeys.ALBUM_PHOTO_SORT_MODE]).ordinal,
-            )
-        }
+    suspend fun setAlbumSort(store: SettingsStore, albumLinkId: String, mode: AlbumPhotoSortMode) {
+        val overrides = store.get(Settings.ALBUM_PHOTO_SORT_OVERRIDES)
+        val defaultOrdinal = AlbumPhotoSortMode.fromOrdinal(store.get(Settings.ALBUM_PHOTO_SORT_MODE)).ordinal
+        store.set(
+            Settings.ALBUM_PHOTO_SORT_OVERRIDES,
+            PerItemChoice.with(overrides, albumLinkId, mode.ordinal, defaultOrdinal),
+        )
     }
 
-    suspend fun setAlbumGrouping(context: Context, albumLinkId: String, grouping: AlbumPhotoGrouping) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[SettingsKeys.ALBUM_PHOTO_GROUPING_OVERRIDES] = PerItemChoice.with(
-                prefs[SettingsKeys.ALBUM_PHOTO_GROUPING_OVERRIDES] ?: emptySet(), albumLinkId, grouping.ordinal,
-                AlbumPhotoGrouping.fromOrdinal(prefs[SettingsKeys.ALBUM_PHOTO_GROUPING]).ordinal,
-            )
-        }
+    suspend fun setAlbumGrouping(store: SettingsStore, albumLinkId: String, grouping: AlbumPhotoGrouping) {
+        val overrides = store.get(Settings.ALBUM_PHOTO_GROUPING_OVERRIDES)
+        val defaultOrdinal = AlbumPhotoGrouping.fromOrdinal(store.get(Settings.ALBUM_PHOTO_GROUPING)).ordinal
+        store.set(
+            Settings.ALBUM_PHOTO_GROUPING_OVERRIDES,
+            PerItemChoice.with(overrides, albumLinkId, grouping.ordinal, defaultOrdinal),
+        )
     }
 
-    suspend fun setFolderSort(context: Context, folderName: String, mode: AlbumPhotoSortMode) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_OVERRIDES] = PerItemChoice.with(
-                prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_OVERRIDES] ?: emptySet(), folderName, mode.ordinal,
-                AlbumPhotoSortMode.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE]).ordinal,
-            )
-        }
+    suspend fun setFolderSort(store: SettingsStore, folderName: String, mode: AlbumPhotoSortMode) {
+        val overrides = store.get(Settings.DEVICE_FOLDER_PHOTO_SORT_OVERRIDES)
+        val defaultOrdinal = AlbumPhotoSortMode.fromOrdinal(store.get(Settings.DEVICE_FOLDER_PHOTO_SORT_MODE)).ordinal
+        store.set(
+            Settings.DEVICE_FOLDER_PHOTO_SORT_OVERRIDES,
+            PerItemChoice.with(overrides, folderName, mode.ordinal, defaultOrdinal),
+        )
     }
 
-    suspend fun setFolderGrouping(context: Context, folderName: String, grouping: AlbumPhotoGrouping) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES] = PerItemChoice.with(
-                prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES] ?: emptySet(), folderName, grouping.ordinal,
-                AlbumPhotoGrouping.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING]).ordinal,
-            )
-        }
+    suspend fun setFolderGrouping(store: SettingsStore, folderName: String, grouping: AlbumPhotoGrouping) {
+        val overrides = store.get(Settings.DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES)
+        val defaultOrdinal = AlbumPhotoGrouping.fromOrdinal(store.get(Settings.DEVICE_FOLDER_PHOTO_GROUPING)).ordinal
+        store.set(
+            Settings.DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES,
+            PerItemChoice.with(overrides, folderName, grouping.ordinal, defaultOrdinal),
+        )
     }
 }

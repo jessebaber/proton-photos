@@ -34,24 +34,19 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.ImportAlbumCount
-import eu.akoos.photos.data.db.dao.ImportAlbumMemberDao
-import eu.akoos.photos.data.db.dao.ImportHistoryDao
-import eu.akoos.photos.data.db.dao.ImportStagedDao
-import eu.akoos.photos.data.db.dao.ImportUploadedDao
-import eu.akoos.photos.data.db.entity.ImportHistoryEntity
-import eu.akoos.photos.data.db.entity.ImportStagedEntity
-import eu.akoos.photos.data.db.entity.ImportUploadedEntity
+import eu.akoos.photos.domain.catalog.ImportAlbumCountRecord
+import eu.akoos.photos.domain.catalog.ImportCatalog
+import eu.akoos.photos.domain.catalog.ImportHistoryRecord
+import eu.akoos.photos.domain.catalog.ImportStagedRecord
+import eu.akoos.photos.domain.catalog.ImportUploadedRecord
 import eu.akoos.photos.domain.entity.CloudPhoto
-import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.domain.importer.ImportAlbumMode
 import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.StagePhase
 import eu.akoos.photos.domain.usecase.UndoImportUseCase
 import eu.akoos.photos.domain.usecase.UndoResult
-import eu.akoos.photos.worker.ImportWorker
-import eu.akoos.photos.worker.StageImportWorker
+import eu.akoos.photos.domain.work.BackgroundWork
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -100,7 +95,7 @@ sealed interface ImportUiState {
      *  the list so they can be brought back), [includedCount] is how many would upload on confirm. */
     data class Review(
         val zipId: String,
-        val rows: List<ImportStagedEntity>,
+        val rows: List<ImportStagedRecord>,
         val includedCount: Int,
         val incomplete: ImportFailureKind? = null,
     ) : ImportUiState
@@ -143,11 +138,11 @@ sealed interface ImportUiState {
  */
 data class ImportDetailData(
     val runId: String,
-    val entry: ImportHistoryEntity?,
-    val rows: List<ImportUploadedEntity>,
+    val entry: ImportHistoryRecord?,
+    val rows: List<ImportUploadedRecord>,
     val photos: List<CloudPhoto>,
     val alreadyInDriveLinkIds: Set<String> = emptySet(),
-    val albums: List<ImportAlbumCount> = emptyList(),
+    val albums: List<ImportAlbumCountRecord> = emptyList(),
 )
 
 /**
@@ -165,10 +160,8 @@ data class ImportDetailData(
 class ImportViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
-    private val importStagedDao: ImportStagedDao,
-    private val importHistoryDao: ImportHistoryDao,
-    private val importUploadedDao: ImportUploadedDao,
-    private val importAlbumMemberDao: ImportAlbumMemberDao,
+    private val importCatalog: ImportCatalog,
+    private val backgroundWork: BackgroundWork,
     private val drivePhotoRepository: DrivePhotoRepository,
     private val undoImportUseCase: UndoImportUseCase,
 ) : ViewModel() {
@@ -178,8 +171,8 @@ class ImportViewModel @Inject constructor(
 
     // Completed import runs, newest first, for the history list under the picker. Capped so a
     // long-lived install shows a readable tail rather than the whole table.
-    val history: StateFlow<List<ImportHistoryEntity>> =
-        importHistoryDao.observeAll()
+    val history: StateFlow<List<ImportHistoryRecord>> =
+        importCatalog.observeHistory()
             .map { it.take(20) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -196,7 +189,7 @@ class ImportViewModel @Inject constructor(
                 flowOf(null)
             } else {
                 combine(
-                    importUploadedDao.observeByRun(runId),
+                    importCatalog.observeUploadedByRun(runId),
                     history,
                 ) { rows, hist -> rows to hist.firstOrNull { it.runId == runId } }
                     .flatMapLatest { (rows, entry) ->
@@ -211,7 +204,7 @@ class ImportViewModel @Inject constructor(
                             else drivePhotoRepository.observePhotosByLinkIds(shownLinks)
                         // The albums this run built, by name, loaded once per run so the detail can list
                         // them under the summary rather than only counting them.
-                        val albumsFlow = flow { emit(importAlbumMemberDao.albumCountsForRun(runId)) }
+                        val albumsFlow = flow { emit(importCatalog.albumCountsForRun(runId)) }
                         combine(photosFlow, albumsFlow) { photos, albums ->
                             ImportDetailData(runId, entry, rows, photos, alreadyIds, albums)
                         }
@@ -251,38 +244,38 @@ class ImportViewModel @Inject constructor(
     // button's headline count. Re-derives as the user excludes rows or a fresh run is picked.
     val newCount: StateFlow<Int> =
         currentZipId.flatMapLatest { zipId ->
-            if (zipId == null) flowOf(0) else importStagedDao.observeNewCount(zipId)
+            if (zipId == null) flowOf(0) else importCatalog.observeNewCount(zipId)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     // Whether the run's archive carried any album folder, so the review shows the album-mode toggle
     // only when there is an album to reconstruct.
     val hasAlbums: StateFlow<Boolean> =
         currentZipId.flatMapLatest { zipId ->
-            if (zipId == null) flowOf(false) else importStagedDao.observeHasAlbums(zipId)
+            if (zipId == null) flowOf(false) else importCatalog.observeHasAlbums(zipId)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     // How many kept rows Drive already holds, shown in the review summary so the run reports its duplicate
     // skips before uploading. Re-derives as rows are excluded or a fresh run is picked.
     val reviewAlreadyCount: StateFlow<Int> =
         currentZipId.flatMapLatest { zipId ->
-            if (zipId == null) flowOf(0) else importStagedDao.observeAlreadyCount(zipId)
+            if (zipId == null) flowOf(0) else importCatalog.observeAlreadyCount(zipId)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     // The export's albums for the review preview: each album folder the kept rows carry with its photo
     // count, so the review lists the albums a confirm would build by name. Re-derives as rows are excluded
     // or a fresh run is picked; empty when nothing is picked or the export has no album.
-    val albumSummary: StateFlow<List<ImportAlbumCount>> =
+    val albumSummary: StateFlow<List<ImportAlbumCountRecord>> =
         currentZipId.flatMapLatest { zipId ->
-            if (zipId == null) flowOf(emptyList()) else importStagedDao.observeAlbumSummary(zipId)
+            if (zipId == null) flowOf(emptyList()) else importCatalog.observeAlbumSummary(zipId)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // The finished run's albums by name, loaded once the upload reaches Done, so the Done card names the
     // albums the run built rather than only totalling them. Keyed on the Done run id; empty otherwise.
-    val doneAlbums: StateFlow<List<ImportAlbumCount>> =
+    val doneAlbums: StateFlow<List<ImportAlbumCountRecord>> =
         _uiState.map { (it as? ImportUiState.Done)?.runId?.takeIf { id -> id.isNotEmpty() } }
             .distinctUntilChanged()
             .flatMapLatest { runId ->
-                if (runId == null) flowOf(emptyList()) else flow { emit(importAlbumMemberDao.albumCountsForRun(runId)) }
+                if (runId == null) flowOf(emptyList()) else flow { emit(importCatalog.albumCountsForRun(runId)) }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -295,7 +288,7 @@ class ImportViewModel @Inject constructor(
         // Resume a review the user left without finishing (or that a process kill interrupted). Only
         // adopts a pending zip when nothing has been picked yet, so a fresh pick always wins the race.
         viewModelScope.launch {
-            val pending = importStagedDao.zipsWithPending().firstOrNull()
+            val pending = importCatalog.zipsWithPending().firstOrNull()
             if (pending != null && currentZipId.value == null) observe(pending)
         }
     }
@@ -322,10 +315,10 @@ class ImportViewModel @Inject constructor(
         if (runId != null && _detailRunId.value == runId) closeHistoryDetail()
         viewModelScope.launch(Dispatchers.IO) {
             if (runId != null) {
-                importUploadedDao.deleteRun(runId)
-                importAlbumMemberDao.clearForRun(runId)
+                importCatalog.deleteUploadedRun(runId)
+                importCatalog.clearAlbumMembersForRun(runId)
             }
-            importHistoryDao.deleteById(id)
+            importCatalog.deleteHistoryById(id)
         }
     }
 
@@ -406,7 +399,7 @@ class ImportViewModel @Inject constructor(
         // Re-picking a zip already imported once leaves that zip's previous upload work in a terminal
         // SUCCEEDED state; without clearing it, its stale WorkInfo would keep the screen on the old run's
         // Done. Cancelling the unique upload work drops it to CANCELLED so the fresh stage below wins.
-        WorkManager.getInstance(context).cancelUniqueWork(ImportWorker.uniqueName(zipUri))
+        WorkManager.getInstance(context).cancelUniqueWork(backgroundWork.importUniqueName(zipUri))
         // Optimistic scanning state so the picker button does not flash back before the worker's first
         // progress publish lands.
         _uiState.value = ImportUiState.Staging(done = 0, total = 0)
@@ -414,7 +407,7 @@ class ImportViewModel @Inject constructor(
         // mints its own rather than reusing a finished run's.
         albumMode.value = ImportAlbumMode.NONE
         activeRunId = null
-        StageImportWorker.enqueue(context, zipUri)
+        backgroundWork.enqueueStageImport(zipUri)
         observe(zipUri)
     }
 
@@ -429,7 +422,7 @@ class ImportViewModel @Inject constructor(
         val zipId = currentZipId.value ?: return
         viewModelScope.launch {
             try {
-                importStagedDao.setExcluded(zipId, entryNames, excluded)
+                importCatalog.setExcluded(zipId, entryNames, excluded)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -450,11 +443,11 @@ class ImportViewModel @Inject constructor(
         albumMode.value = ImportAlbumMode.NONE
         _uiState.value = ImportUiState.Idle
         viewModelScope.launch(Dispatchers.IO) {
-            importStagedDao.thumbPaths(zipId).forEach { path ->
+            importCatalog.thumbPaths(zipId).forEach { path ->
                 path?.let { runCatching { File(it).delete() } }
             }
-            importStagedDao.clearForZip(zipId)
-            ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME)).delete(zipId)
+            importCatalog.clearForZip(zipId)
+            importCatalog.clearScanCache(zipId)
         }
     }
 
@@ -473,7 +466,7 @@ class ImportViewModel @Inject constructor(
         // discard, or reset), so the next import gets its own.
         val runId = activeRunId ?: UUID.randomUUID().toString().also { activeRunId = it }
         _uiState.value = ImportUiState.Uploading(done = 0, total = 0)
-        ImportWorker.enqueue(context, zipId, runId, albumMode.value)
+        backgroundWork.enqueueImport(zipId, runId, albumMode.value.name)
     }
 
     /**
@@ -484,8 +477,8 @@ class ImportViewModel @Inject constructor(
     fun cancelImport() {
         val zipId = currentZipId.value ?: return
         val workManager = WorkManager.getInstance(context)
-        workManager.cancelUniqueWork(ImportWorker.uniqueName(zipId))
-        workManager.cancelUniqueWork(StageImportWorker.uniqueName(zipId))
+        workManager.cancelUniqueWork(backgroundWork.importUniqueName(zipId))
+        workManager.cancelUniqueWork(backgroundWork.stageImportUniqueName(zipId))
     }
 
     /**
@@ -500,10 +493,10 @@ class ImportViewModel @Inject constructor(
         observeJob = viewModelScope.launch {
             val workManager = WorkManager.getInstance(context)
             combine(
-                workManager.getWorkInfosForUniqueWorkFlow(ImportWorker.uniqueName(zipId)),
-                workManager.getWorkInfosForUniqueWorkFlow(StageImportWorker.uniqueName(zipId)),
-                importStagedDao.observeForZip(zipId),
-                importStagedDao.observeIncludedCount(zipId),
+                workManager.getWorkInfosForUniqueWorkFlow(backgroundWork.importUniqueName(zipId)),
+                workManager.getWorkInfosForUniqueWorkFlow(backgroundWork.stageImportUniqueName(zipId)),
+                importCatalog.observeStagedForZip(zipId),
+                importCatalog.observeIncludedCount(zipId),
             ) { uploadInfos, stageInfos, rows, included ->
                 deriveState(zipId, uploadInfos, stageInfos, rows, included, _uiState.value)
             }.collect { _uiState.value = it }
@@ -529,7 +522,7 @@ class ImportViewModel @Inject constructor(
         zipId: String,
         uploadInfos: List<WorkInfo>,
         stageInfos: List<WorkInfo>,
-        rows: List<ImportStagedEntity>,
+        rows: List<ImportStagedRecord>,
         included: Int,
         fallback: ImportUiState,
     ): ImportUiState {
@@ -541,8 +534,8 @@ class ImportViewModel @Inject constructor(
         if (activeUpload != null) {
             val p = activeUpload.progress
             return ImportUiState.Uploading(
-                done = p.getInt(ImportWorker.KEY_DONE, 0),
-                total = p.getInt(ImportWorker.KEY_TOTAL, 0),
+                done = p.getInt(BackgroundWork.ImportKeys.KEY_DONE, 0),
+                total = p.getInt(BackgroundWork.ImportKeys.KEY_TOTAL, 0),
             )
         }
 
@@ -566,14 +559,14 @@ class ImportViewModel @Inject constructor(
                     if (!hasPendingStaged && fallback !is ImportUiState.Staging) {
                         val out = terminalUpload.outputData
                         return ImportUiState.Done(
-                            total = out.getInt(ImportWorker.KEY_RESULT_TOTAL, 0),
-                            imported = out.getInt(ImportWorker.KEY_RESULT_IMPORTED, 0),
-                            alreadyInDrive = out.getInt(ImportWorker.KEY_RESULT_ALREADY, 0),
-                            skipped = out.getInt(ImportWorker.KEY_RESULT_SKIPPED, 0),
-                            failed = out.getInt(ImportWorker.KEY_RESULT_FAILED, 0),
-                            albumsCreated = out.getInt(ImportWorker.KEY_RESULT_ALBUMS, 0),
-                            photosAddedToAlbums = out.getInt(ImportWorker.KEY_RESULT_ADDED, 0),
-                            runId = out.getString(ImportWorker.KEY_RESULT_RUN_ID) ?: "",
+                            total = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_TOTAL, 0),
+                            imported = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_IMPORTED, 0),
+                            alreadyInDrive = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_ALREADY, 0),
+                            skipped = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_SKIPPED, 0),
+                            failed = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_FAILED, 0),
+                            albumsCreated = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_ALBUMS, 0),
+                            photosAddedToAlbums = out.getInt(BackgroundWork.ImportKeys.KEY_RESULT_ADDED, 0),
+                            runId = out.getString(BackgroundWork.ImportKeys.KEY_RESULT_RUN_ID) ?: "",
                         )
                     }
                 WorkInfo.State.FAILED -> return ImportUiState.Failed(failureKindOf(terminalUpload.outputData))
@@ -588,12 +581,12 @@ class ImportViewModel @Inject constructor(
         if (activeStage != null) {
             val p = activeStage.progress
             return ImportUiState.Staging(
-                done = p.getInt(StageImportWorker.KEY_DONE, 0),
-                total = p.getInt(StageImportWorker.KEY_TOTAL, 0),
-                phase = p.getString(StageImportWorker.KEY_PHASE)
+                done = p.getInt(BackgroundWork.StageImportKeys.KEY_DONE, 0),
+                total = p.getInt(BackgroundWork.StageImportKeys.KEY_TOTAL, 0),
+                phase = p.getString(BackgroundWork.StageImportKeys.KEY_PHASE)
                     ?.let { name -> StagePhase.entries.firstOrNull { it.name == name } },
-                bytesDone = p.getLong(StageImportWorker.KEY_BYTES_DONE, 0L),
-                bytesTotal = p.getLong(StageImportWorker.KEY_BYTES_TOTAL, 0L),
+                bytesDone = p.getLong(BackgroundWork.StageImportKeys.KEY_BYTES_DONE, 0L),
+                bytesTotal = p.getLong(BackgroundWork.StageImportKeys.KEY_BYTES_TOTAL, 0L),
             )
         }
         val lastStage = stageInfos.lastOrNull()
@@ -603,7 +596,7 @@ class ImportViewModel @Inject constructor(
             val incomplete = when {
                 lastStage?.state == WorkInfo.State.FAILED -> failureKindOf(lastStage?.outputData)
                 lastStage?.state == WorkInfo.State.SUCCEEDED &&
-                    lastStage?.outputData?.getBoolean(StageImportWorker.KEY_RESULT_ENDED_EARLY, false) == true ->
+                    lastStage?.outputData?.getBoolean(BackgroundWork.StageImportKeys.KEY_RESULT_ENDED_EARLY, false) == true ->
                     ImportFailureKind.ARCHIVE_DAMAGED
                 else -> null
             }
@@ -620,6 +613,6 @@ class ImportViewModel @Inject constructor(
     /** The failure kind a worker recorded on its failed result, or [ImportFailureKind.OTHER] when it did
      *  not record one (a failure from before the kind was reported). */
     private fun failureKindOf(data: androidx.work.Data?): ImportFailureKind =
-        runCatching { ImportFailureKind.valueOf(data?.getString(StageImportWorker.KEY_FAILURE_KIND).orEmpty()) }
+        runCatching { ImportFailureKind.valueOf(data?.getString(BackgroundWork.StageImportKeys.KEY_FAILURE_KIND).orEmpty()) }
             .getOrDefault(ImportFailureKind.OTHER)
 }

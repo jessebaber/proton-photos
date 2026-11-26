@@ -24,12 +24,24 @@
 
 package eu.akoos.photos.presentation.folders
 
+import eu.akoos.photos.domain.settings.ShareStripConfig
+import eu.akoos.photos.domain.vault.VaultJournalEntry
+import eu.akoos.photos.domain.vault.VaultHideSplit
+import eu.akoos.photos.domain.work.BackgroundWork
+import eu.akoos.photos.domain.settings.observeAlbumMirrorFolders
+import eu.akoos.photos.domain.settings.putAlbumMirrorFolders
+import eu.akoos.photos.domain.settings.albumMirrorFolders
+import eu.akoos.photos.domain.settings.currentShareStripConfig
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Setting
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.domain.usecase.UploadStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -51,17 +63,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.albumMirrorFolders
-import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
-import eu.akoos.photos.data.hidden.HiddenCloudPhotos
-import eu.akoos.photos.data.hidden.HiddenFolderProgress
-import eu.akoos.photos.data.hidden.HiddenFolderRecords
-import eu.akoos.photos.data.hidden.HiddenVaultDecisions
-import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
-import eu.akoos.photos.data.hidden.HiddenVaultJournal
-import eu.akoos.photos.data.hidden.HiddenVaultRecords
-import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.domain.vault.HiddenCloud
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.vault.HiddenFolderProgress
+import eu.akoos.photos.domain.vault.HiddenFolders
+import eu.akoos.photos.domain.vault.VaultDecisions
+import eu.akoos.photos.domain.vault.VaultDiagnostics
+import eu.akoos.photos.domain.vault.HiddenVaultJournalOps
+import eu.akoos.photos.domain.vault.HiddenVaultIndex
+import eu.akoos.photos.domain.vault.HiddenVaultRestore
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.util.MetadataStripConfig
@@ -86,12 +96,11 @@ import android.provider.MediaStore
 import android.os.Build
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
-import eu.akoos.photos.data.preferences.currentShareStripConfig
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -111,15 +120,21 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class DeviceFolderDetailViewModel @Inject constructor(
+    private val settingsStore: SettingsStore,
+    private val hiddenCloud: HiddenCloud,
+    private val hiddenFolders: HiddenFolders,
+    private val vaultDiagnostics: VaultDiagnostics,
+    private val hiddenVaultIndex: HiddenVaultIndex,
+    private val backgroundWork: BackgroundWork,
     @ApplicationContext private val context: Context,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
-    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
-    private val hiddenVaultJournal: HiddenVaultJournal,
-    private val hiddenVaultRestorer: HiddenVaultRestorer,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
+    private val hiddenStorage: HiddenStorage,
+    private val hiddenVaultJournal: HiddenVaultJournalOps,
+    private val hiddenVaultRestorer: HiddenVaultRestore,
     private val localMediaRepo: LocalMediaRepository,
     private val driveRepo: DrivePhotoRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
@@ -166,8 +181,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Cloud linkIds pinned for offline; drives the per-cell offline badge (a Synced folder item
      *  whose cloud twin is pinned). Backed by the same OFFLINE_PIN_IDS pref the timeline reads. */
-    val offlinePinIds: StateFlow<Set<String>> = context.settingsDataStore.data
-        .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
+    val offlinePinIds: StateFlow<Set<String>> = settingsStore.observe(Settings.OFFLINE_PIN_IDS)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** The device-side favourite set: the per-cell heart, and which way the dock's button goes. */
@@ -253,30 +267,32 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val openedFromVault = MutableStateFlow(false)
 
     /** True while this folder's photos also join a matching Drive album as they upload. */
-    val isMirroredAsAlbum: StateFlow<Boolean> = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
-        name.isNotEmpty() && name in prefs.albumMirrorFolders()
+    val isMirroredAsAlbum: StateFlow<Boolean> = combine(
+        settingsStore.observeAlbumMirrorFolders(), bucketName,
+    ) { mirror, name ->
+        name.isNotEmpty() && name in mirror
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** True while this folder is carved out of "Back up everything". */
-    val isExcludedFromBackup: StateFlow<Boolean> = folderFlag(SettingsKeys.EXCLUDED_FOLDER_NAMES)
+    val isExcludedFromBackup: StateFlow<Boolean> = folderFlag(Settings.EXCLUDED_FOLDER_NAMES)
 
     /** True while this folder's photos are kept out of the main timeline (display only). */
-    val isHiddenFromTimeline: StateFlow<Boolean> = folderFlag(SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES)
+    val isHiddenFromTimeline: StateFlow<Boolean> = folderFlag(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES)
 
     /** True while the photos this screen lists are the vault's, which is also when the drawer's hide
      *  row reveals them. False on the device side even for a folder the vault holds photos from, so
      *  a row that would put more away never shows as already done. The weaker [isHiddenFromTimeline]
      *  only keeps a folder's photos out of the main feed. */
     val isHiddenCard: StateFlow<Boolean> =
-        combine(folderFlag(SettingsKeys.HIDDEN_FOLDER_NAMES), openedFromVault) { hidden, fromVault ->
+        combine(folderFlag(Settings.HIDDEN_FOLDER_NAMES), openedFromVault) { hidden, fromVault ->
             hidden && fromVault
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Direction this folder lists its photos in, read straight from preferences so a change lands
      *  on the grid without a reload. Shares the album's type: the choice is the same two directions
      *  over the same capture time, and a second enum would fork the labels and icons with it. */
-    private val sortModeFlow = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
-        PhotoViewChoices.from(prefs).sortOfFolder(name)
+    private val sortModeFlow = combine(PhotoViewChoices.observe(settingsStore), bucketName) { choices, name ->
+        choices.sortOfFolder(name)
     }.distinctUntilChanged()
 
     /** The same value for the actions sheet, which only has to say which direction is ticked. */
@@ -286,7 +302,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Persist a direction for this folder alone. */
     fun setSortMode(mode: AlbumPhotoSortMode) {
         val name = bucketName.value
-        viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(context, name, mode) }
+        viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(settingsStore, name, mode) }
     }
 
     /** The span of dates each header on this screen gathers. Held here rather than read by the
@@ -294,24 +310,24 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  frame the headers have to be the ones it was saved under. This value outlives that trip, where
      *  a screen-level read would start again from the default. */
     val grouping: StateFlow<AlbumPhotoGrouping> =
-        combine(context.settingsDataStore.data, bucketName) { prefs, name ->
-            PhotoViewChoices.from(prefs).groupingOfFolder(name)
+        combine(PhotoViewChoices.observe(settingsStore), bucketName) { choices, name ->
+            choices.groupingOfFolder(name)
         }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPhotoGrouping.Default)
 
     /** Persist a grouping for this folder alone, the same way as [setSortMode]. */
     fun setGrouping(grouping: AlbumPhotoGrouping) {
         val name = bucketName.value
-        viewModelScope.launch { PhotoViewChoiceStore.setFolderGrouping(context, name, grouping) }
+        viewModelScope.launch { PhotoViewChoiceStore.setFolderGrouping(settingsStore, name, grouping) }
     }
 
     /** The photo this folder's cover is pinned to, or null while it follows the first photo of the
      *  current order. The hero still falls back when the pinned photo is not among the folder's
      *  current items. */
     val pinnedCoverUri: StateFlow<String?> =
-        combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+        combine(settingsStore.observe(Settings.FOLDER_COVER_URI_MAP), bucketName) { coverMap, name ->
             if (name.isEmpty()) null
-            else FolderCoverMap.parse(prefs[SettingsKeys.FOLDER_COVER_URI_MAP])[name]
+            else FolderCoverMap.parse(coverMap)[name]
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Pin the single selected photo as this folder's cover and drop the selection. Mirrors the
@@ -326,9 +342,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (name.isEmpty() || uri.isNullOrEmpty()) return
         viewModelScope.launch {
             runCatching {
-                context.settingsDataStore.edit { p ->
-                    p[SettingsKeys.FOLDER_COVER_URI_MAP] =
-                        FolderCoverMap.withCover(p[SettingsKeys.FOLDER_COVER_URI_MAP] ?: emptySet(), name, uri)
+                settingsStore.update(Settings.FOLDER_COVER_URI_MAP) { current ->
+                    FolderCoverMap.withCover(current, name, uri)
                 }
             }.onSuccess {
                 selection.clear()
@@ -340,23 +355,22 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Whether the current folder's name is in [key]'s set. Every per-folder preference keys on the
      *  bucket name, matching the Settings pickers. */
     private fun folderFlag(
-        key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>,
-    ): StateFlow<Boolean> = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
-        name.isNotEmpty() && name in (prefs[key] ?: emptySet())
+        setting: eu.akoos.photos.domain.settings.Setting<Set<String>>,
+    ): StateFlow<Boolean> = combine(settingsStore.observe(setting), bucketName) { set, name ->
+        name.isNotEmpty() && name in set
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** The one writer for this screen's per-folder preference sets. [enable] null flips the stored
      *  state; reading and writing inside the same edit keeps a flip atomic. */
     private suspend fun setFolderFlag(
-        key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>,
+        setting: eu.akoos.photos.domain.settings.Setting<Set<String>>,
         enable: Boolean?,
     ) {
         val name = bucketName.value
         if (name.isEmpty()) return
-        context.settingsDataStore.edit { p ->
-            val current = p[key] ?: emptySet()
+        settingsStore.update(setting) { current ->
             val on = enable ?: (name !in current)
-            p[key] = if (on) current + name else current - name
+            if (on) current + name else current - name
         }
     }
 
@@ -365,21 +379,20 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val name = bucketName.value
         if (name.isEmpty()) return
         viewModelScope.launch {
-            val updated = context.settingsDataStore.edit { prefs ->
-                prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(name))
-            }
-            if (name in updated.albumMirrorFolders()) folderAlbumBackfill.onAlbumTurnedOn(name)
+            val next = settingsStore.albumMirrorFolders().flipped(name)
+            settingsStore.putAlbumMirrorFolders(next)
+            if (name in next) folderAlbumBackfill.onAlbumTurnedOn(name)
         }
     }
 
     /** Carve this folder out of "Back up everything", or put it back in. */
     fun toggleExcludedFromBackup() {
         viewModelScope.launch {
-            setFolderFlag(SettingsKeys.EXCLUDED_FOLDER_NAMES, enable = null)
+            setFolderFlag(Settings.EXCLUDED_FOLDER_NAMES, enable = null)
             // Same follow-up the Settings picker runs: a fresh reconcile drops rows that just landed
             // in the excluded set before an in-flight sync pass can upload them.
-            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-            eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly)
+            val wifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY)
+            backgroundWork.runSyncNow(wifiOnly = wifiOnly)
         }
     }
 
@@ -387,7 +400,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  the gallery observes the key and re-filters on the next emission. */
     fun toggleHiddenFromTimeline() {
         viewModelScope.launch {
-            setFolderFlag(SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES, enable = null)
+            setFolderFlag(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES, enable = null)
         }
     }
 
@@ -437,7 +450,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // The targets are what this screen is showing, which on the device side is the
                 // folder's live photos: exactly the ones an earlier hide did not take. The items are
                 // already merged, so each one's own type routes it and no pairing lookup is needed.
-                val split = HiddenFolderRecords.folderHideSplit(
+                val split = hiddenFolders.folderHideSplit(
                     items = _items.value,
                     bucketName = name,
                 )
@@ -445,7 +458,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // name to show. That makes it one more thing a failed hide has to give back, so the
                 // name is held until the hide is known to have landed.
                 pendingHideFolderName = name
-                setFolderFlag(SettingsKeys.HIDDEN_FOLDER_NAMES, enable = true)
+                setFolderFlag(Settings.HIDDEN_FOLDER_NAMES, enable = true)
                 if (!split.isEmpty) runHide(split, reportProgress = true)
             } finally {
                 _folderVault.value = null
@@ -533,16 +546,27 @@ class DeviceFolderDetailViewModel @Inject constructor(
             // The current bucket name rides the records so the filter below follows it: a rename
             // relocates the photos and repoints [bucketName], and this combine re-emits with the new
             // name so the same photos stay listed rather than the screen emptying under the old one.
-            val vaultFlow = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+            val vaultFlow = combine(
+                settingsStore.observe(Settings.HIDDEN_PHOTO_URIS),
+                settingsStore.observe(Settings.HIDDEN_URI_SOURCE_FOLDER_MAP),
+                settingsStore.observe(Settings.HIDDEN_URI_ORIGINAL_NAME_MAP),
+                settingsStore.observe(Settings.HIDDEN_URI_CLOUD_ID_MAP),
+                settingsStore.observe(Settings.HIDDEN_FOLDER_NAMES),
+                bucketName,
+            ) { values ->
+                    val vaultedUris = values[0] as Set<String>
+                    val sourceFolders = values[1] as Set<String>
+                    val originalNames = values[2] as Set<String>
+                    val cloudIdMap = values[3] as Set<String>
+                    val hiddenFolders = values[4] as Set<String>
+                    val name = values[5] as String
                     VaultRecords(
                         bucketName = name,
-                        vaultedUris = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
-                        sourceFolders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet(),
-                        originalNames = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet(),
-                        pairedUris = HiddenVaultRecords.pairedUris(
-                            prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet(),
-                        ),
-                        isFolderHidden = name in (prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()),
+                        vaultedUris = vaultedUris,
+                        sourceFolders = sourceFolders,
+                        originalNames = originalNames,
+                        pairedUris = hiddenVaultIndex.pairedUris(cloudIdMap),
+                        isFolderHidden = name in hiddenFolders,
                     )
                 }
                 .distinctUntilChanged()
@@ -575,7 +599,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // a downloaded file is dated at download — so ordering on the raw device date would
                 // file such a photo under a heading it sorts nowhere near.
                 val ordered = PhotoSortOrder.ordered(
-                    HiddenFolderRecords.folderPhotos(visible, vaulted, showsVault),
+                    hiddenFolders.folderPhotos(visible, vaulted, showsVault),
                     newestFirst = sort == AlbumPhotoSortMode.NewestFirst,
                 )
                 val vaultedUris = vaulted.mapTo(mutableSetOf()) { it.local.uri }
@@ -620,7 +644,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * folder's photos.
      */
     private suspend fun vaultedItemsOf(bucketName: String, vault: VaultRecords): List<GalleryItem.LocalOnly> {
-        val uris = HiddenFolderRecords
+        val uris = hiddenFolders
             .vaultedByBucket(vault.sourceFolders, vault.vaultedUris)[bucketName]
             .orEmpty()
         if (uris.isEmpty()) return emptyList()
@@ -797,7 +821,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (items.isEmpty()) return
         viewModelScope.launch {
             // Null when strip-on-share is off, so each device URI passes through untouched below.
-            val stripConfig = currentShareStripConfig(context)
+            val stripConfig = settingsStore.currentShareStripConfig()?.toUtil()
             val parsed = items.mapNotNull { item ->
                 val local = localUriOf(item) ?: return@mapNotNull null
                 val (mime, name) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
@@ -836,7 +860,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val userId = primaryUserId ?: return
         viewModelScope.launch {
             if (asMirror) {
-                setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
+                setFolderFlag(Settings.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
                 folderAlbumBackfill.onAlbumTurnedOn(bucketName.value)
             }
             val syncedUris = _items.value
@@ -865,7 +889,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
 
     /** Deferred cloud-delete work, held while the system trash dialog is up. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
      *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
@@ -935,7 +959,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /**
      * Return every selected vaulted photo to the device.
      *
-     * [HiddenVaultRestorer] owns the round trip, so a photo revealed from inside its folder comes back
+     * [HiddenVaultRestore] owns the round trip, so a photo revealed from inside its folder comes back
      * with the same name, place and cloud pairing it would from the vault screen, and the folder stops
      * being hidden once the vault holds nothing more of it.
      */
@@ -1011,7 +1035,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
             _isDeleting.value = true
             try {
                 when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
                         buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
@@ -1024,14 +1048,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
                             _folderDeleted.value = true
                         }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         pendingFolderDelete = wholeFolder
                         _pendingDeleteIntent.value = result.pendingIntent
                     }
                     // Nothing was deleted: the request could not be built, or Drive refused before the
                     // device was touched. Said the way the confirmed path below says it.
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    is DeletePhotoResult.CloudDeleteFailed ->
                         _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
                 }
             } finally {
@@ -1049,7 +1073,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * never touched either way.
      *
      * The intent is journalled BEFORE that delete and confirmed after it, so an interruption between
-     * the two leaves a repairable record instead of bytes nothing refers to — see [HiddenVaultJournal].
+     * the two leaves a repairable record instead of bytes nothing refers to — see [HiddenVaultJournalOps].
      * A selection is short enough to watch behind the blocking sheet, so it reports no progress of
      * its own; [toggleHiddenCard] runs the same body with progress for a whole folder.
      */
@@ -1059,7 +1083,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _isDeleting.value = true
             try {
-                runHide(HiddenFolderRecords.hideSplit(items), reportProgress = false)
+                runHide(hiddenFolders.hideSplit(items), reportProgress = false)
             } finally {
                 _isDeleting.value = false
             }
@@ -1072,8 +1096,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * The very split [hideSelected] runs on, read from the same selection, so the sheet describes
      * exactly what the Hide button is about to do rather than what hiding does in general.
      */
-    fun hideSplitForSelection(): HiddenFolderRecords.HideSplit =
-        HiddenFolderRecords.hideSplit(selectedGalleryItems())
+    fun hideSplitForSelection(): VaultHideSplit =
+        hiddenFolders.hideSplit(selectedGalleryItems())
 
     /**
      * The same two halves for a hide of the whole folder, for the confirmation the folder drawer's
@@ -1083,7 +1107,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * from the vault side is being unhidden rather than hidden, so the drawer asks this only on the
      * device side.
      */
-    fun folderHideSplitPreview(): HiddenFolderRecords.HideSplit = HiddenFolderRecords.folderHideSplit(
+    fun folderHideSplitPreview(): VaultHideSplit = hiddenFolders.folderHideSplit(
         items = _items.value,
         bucketName = bucketName.value,
     )
@@ -1103,13 +1127,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * delete, so those photos end up in the vault rather than copied for nothing, and everything
      * after the stop is left untouched on the device.
      */
-    private suspend fun runHide(split: HiddenFolderRecords.HideSplit, reportProgress: Boolean) {
+    private suspend fun runHide(split: VaultHideSplit, reportProgress: Boolean) {
         val vaultable = split.vaultable
-        HiddenVaultDiagnostics.hideStarted(split)
+        vaultDiagnostics.hideStarted(split)
         // Client-side hide for the cloud-only members: add their linkIds to the hidden set so the
         // shared merge filter drops them everywhere. They have no device file at all and nothing on
         // Drive changes, so unhide re-includes them with no re-pairing.
-        HiddenCloudPhotos.hide(context, split.cloudLinkIds)
+        hiddenCloud.hide(split.cloudLinkIds)
         pendingHideCloudLinkIds = split.cloudLinkIds
         pendingHideFailures = 0
         if (vaultable.isEmpty()) {
@@ -1141,7 +1165,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
         // Step 2: copy each device file into app-private hidden storage. A backed-up photo also
         // stashes its cloud linkId so the reveal re-pairs by id instead of re-uploading.
-        val collected = mutableListOf<HiddenVaultJournal.Entry>()
+        val collected = mutableListOf<VaultJournalEntry>()
         var hideFailures = 0
         if (reportProgress) _folderVault.value = HiddenFolderProgress(0, vaultable.size, restoring = false)
         for (target in vaultable) {
@@ -1152,7 +1176,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
             )
             if (privateUri != null) {
-                collected += HiddenVaultJournal.Entry(
+                collected += VaultJournalEntry(
                     privateUri = privateUri,
                     sourceUri = local.uri,
                     sourceFolder = sourceFolder,
@@ -1169,7 +1193,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 _folderVault.value = HiddenFolderProgress(collected.size, vaultable.size, restoring = false)
             }
         }
-        HiddenVaultDiagnostics.copied(collected.size, hideFailures)
+        vaultDiagnostics.copied(collected.size, hideFailures)
         if (collected.isEmpty()) {
             rollbackPendingHide()
             _hideFailure.tryEmit(context.getString(R.string.gallery_copy_to_hidden_failed))
@@ -1189,14 +1213,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
         // Step 4: delete the MediaStore originals of exactly what was copied (one system-delete
         // dialog on Android 11+). A stopped copy pass narrows this to its own prefix, which is what
         // leaves the photos it never reached where the user can still see them.
-        val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
+        val deleting = VaultDecisions.deletableOriginals(vaultable, collected)
         // Hiding a device photo needs no account; the vault is app-private and the use case only
         // requires a signed-in user for a cloud trash, which a hide never performs (deleteFromCloud =
         // false). Pass the nullable userId through instead of aborting a guest hide here.
         val userId = accountManager.getPrimaryUserId().first()
         when (val result = deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
-            is DeletePhotoUseCase.Result.Success -> {
-                HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
+            is DeletePhotoResult.Success -> {
+                vaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                 // Snapshot both halves before commitPendingHide() clears the pending list, so Undo
                 // reverses exactly the hide that just landed.
                 val hideUris = pendingHidePrivateUris
@@ -1207,12 +1231,12 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 reportHideFailures()
                 selection.clear()
             }
-            is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
-                HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
+            is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
+                vaultDiagnostics.originalsAwaitingConsent(deleting.size)
                 pendingPermissionResult = result
                 _pendingDeleteIntent.value = result.pendingIntent
             }
-            is DeletePhotoUseCase.Result.CloudDeleteFailed -> rollbackPendingHide()
+            is DeletePhotoResult.CloudDeleteFailed -> rollbackPendingHide()
         }
     }
 
@@ -1264,10 +1288,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
         viewModelScope.launch {
             if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
-            HiddenCloudPhotos.reveal(context, cloudIds)
+            hiddenCloud.reveal(cloudIds)
             // Nothing was vaulted, so a folder left flagged would list in the vault holding no
             // photos while its card is gone from Albums, with no way back except revealing it.
-            if (folderName != null) setFolderFlag(SettingsKeys.HIDDEN_FOLDER_NAMES, enable = false)
+            if (folderName != null) setFolderFlag(Settings.HIDDEN_FOLDER_NAMES, enable = false)
         }
     }
 
@@ -1292,18 +1316,18 @@ class DeviceFolderDetailViewModel @Inject constructor(
             // being dropped: the device file had gone, the Drive copy had not, and the
             // screen said nothing at all. The timeline surface already reports this.
             val result = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
-            if (result is DeletePhotoUseCase.Result.NeedsMediaWritePermission) {
+            if (result is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>) {
                 // The next chunk of a delete too large for one request, launched like the first.
                 pendingPermissionResult = result
                 pendingFolderDelete = wholeFolder
                 _pendingDeleteIntent.value = result.pendingIntent
                 return@launch
             }
-            if (result is DeletePhotoUseCase.Result.CloudDeleteFailed) {
+            if (result is DeletePhotoResult.CloudDeleteFailed) {
                 _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
             }
             val leftOnDevice = when (result) {
-                is DeletePhotoUseCase.Result.Success -> result.keptOnDevice.also {
+                is DeletePhotoResult.Success -> result.keptOnDevice.also {
                     if (it.isNotEmpty() && !pending.hide) {
                         _hideFailure.tryEmit(context.getString(R.string.album_delete_photos_failed))
                     }
@@ -1318,7 +1342,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Settle a delete or hide whose system dialog was confirmed, for the [carriedOut] items it took. */
     private suspend fun finishConfirmedDelete(
-        pending: DeletePhotoUseCase.Result.NeedsMediaWritePermission,
+        pending: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>,
         carriedOut: List<GalleryItem>,
         folderGone: Boolean,
     ) {
@@ -1521,3 +1545,11 @@ internal class BackupTargetEnd(
 
 /** How long the folder screen holds its photos after a rename while the device list catches up. */
 private const val RENAME_HOLD_MS = 10_000L
+
+private fun ShareStripConfig.toUtil() = MetadataStripConfig(
+    stripGps = stripGps,
+    stripCameraInfo = stripCameraInfo,
+    stripTimestamp = stripTimestamp,
+    stripSoftwareInfo = stripSoftwareInfo,
+    stripAuthorship = stripAuthorship,
+)

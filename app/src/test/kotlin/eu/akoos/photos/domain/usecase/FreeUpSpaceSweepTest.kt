@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.app.PendingIntent
+import eu.akoos.photos.data.usecase.FreeUpSpaceUseCaseImpl
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
@@ -63,7 +65,7 @@ class FreeUpSpaceSweepTest {
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var linkDetailHelpers: LinkDetailHelpers
     private lateinit var resolver: ContentResolver
-    private lateinit var useCase: FreeUpSpaceUseCase
+    private lateinit var useCase: FreeUpSpaceUseCase<PendingIntent>
 
     private fun eligible(i: Int) = SyncState(
         localUri = "content://media/external/images/media/$i",
@@ -90,7 +92,7 @@ class FreeUpSpaceSweepTest {
         repo = mockk(relaxed = true)
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers)
+        useCase = FreeUpSpaceUseCaseImpl(context, repo, cloudRepo, linkDetailHelpers)
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
         every { resolver.delete(any(), any(), any()) } returns 1
     }
@@ -111,7 +113,7 @@ class FreeUpSpaceSweepTest {
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
-        assertEquals(1, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(1, (result as FreeUpResult.Done).freed)
         coVerify(exactly = 1) { repo.updateStatusAndDeleteLocal(rows[0].localUri, SyncStatus.CLOUD_ONLY) }
         coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(rows[1].localUri, any()) }
         coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(rows[2].localUri, any()) }
@@ -142,7 +144,7 @@ class FreeUpSpaceSweepTest {
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
-        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(0, (result as FreeUpResult.Done).freed)
         verify(exactly = 0) { resolver.delete(any(), any(), any()) }
     }
 
@@ -160,7 +162,7 @@ class FreeUpSpaceSweepTest {
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
-        assertEquals(120, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(120, (result as FreeUpResult.Done).freed)
         assertEquals(listOf("check 50", "check 50", "check 20"), events.filter { it.startsWith("check") })
         // check, its 50 deletes, the next check: no slice is deleted before its own check.
         val checks = events.withIndex().filter { it.value.startsWith("check") }.map { it.index }
@@ -201,7 +203,7 @@ class FreeUpSpaceSweepTest {
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
-        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 1, skipped = 1), result)
+        assertEquals(FreeUpResult.Done(freed = 1, skipped = 1), result)
     }
 
     @Test
@@ -220,7 +222,7 @@ class FreeUpSpaceSweepTest {
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
-        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(0, (result as FreeUpResult.Done).freed)
         coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any(), any()) }
     }
 }

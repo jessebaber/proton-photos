@@ -56,6 +56,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.AssignFacesToPersonUseCaseImpl
 
 /**
  * Moving photos from the person page to another person goes through the shared face assignment: the faces
@@ -107,7 +108,7 @@ class PersonMoveToPersonDbTest {
             faceIndexingScheduler = scheduler,
             ignorePeople = mockk(relaxed = true),
             renamePerson = mockk(relaxed = true),
-            assignFacesToPerson = AssignFacesToPersonUseCase(
+            assignFacesToPerson = AssignFacesToPersonUseCaseImpl(
                 db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.personCoverDao(), db.notPersonDao(),
                 db.clusterSummaryDao(), scheduler, db, edits,
             ),

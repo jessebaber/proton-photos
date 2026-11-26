@@ -61,9 +61,9 @@ import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
 import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
-import androidx.datastore.preferences.core.edit
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.rememberSettingsStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.vault.VaultHideSplit
 import kotlinx.coroutines.flow.map
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -219,7 +219,7 @@ fun AlbumDetailScreen(
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
     // rather than a flag is what lets the sheet describe the photos the tap was made on.
     var hideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+        mutableStateOf<VaultHideSplit?>(null)
     }
     // System trash-dialog launcher for deletes that remove the on-device copy (Android 11+).
     val appLock = LocalAppLock.current
@@ -299,6 +299,7 @@ fun AlbumDetailScreen(
     // Hand the VM-built share intent to the system chooser. It can arrive under the app lock, once cloud
     // originals finish downloading, and the chooser would open above the lock, so it waits for the unlock.
     val shareCtx = LocalContext.current
+    val settingsStore = rememberSettingsStore()
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
@@ -534,8 +535,8 @@ fun AlbumDetailScreen(
     val shownGrouping = visitGrouping ?: photoGrouping
     LaunchedEffect(state.albumLinkId) {
         val albumLinkId = state.albumLinkId
-        shareCtx.settingsDataStore.data
-            .map { PhotoViewChoices.from(it).groupingOfAlbum(albumLinkId) }
+        PhotoViewChoices.observe(settingsStore)
+            .map { it.groupingOfAlbum(albumLinkId) }
             .collect { photoGrouping = it }
     }
     // Group photos under the headers shown, on the same capture time the rest of the app groups that
@@ -556,14 +557,14 @@ fun AlbumDetailScreen(
     }
     val scrubberTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
     // Opt-in floating day pill while the grid scrolls; default off. Shares the scrubber's date mapping.
-    val showScrollDate by remember {
-        shareCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
+    val showScrollDate by remember(settingsStore) {
+        settingsStore.observe(Settings.SHOW_SCROLL_DATE)
     }.collectAsState(initial = false)
     // Which sort chip the drawer marks. The ViewModel reads the same preference for the order itself,
     // so this only has to say which one is active.
-    val photoSortMode by remember(state.albumLinkId) {
+    val photoSortMode by remember(settingsStore, state.albumLinkId) {
         val albumLinkId = state.albumLinkId
-        shareCtx.settingsDataStore.data.map { PhotoViewChoices.from(it).sortOfAlbum(albumLinkId) }
+        PhotoViewChoices.observe(settingsStore).map { it.sortOfAlbum(albumLinkId) }
     }.collectAsState(initial = AlbumPhotoSortMode.Default)
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
@@ -1423,11 +1424,11 @@ fun AlbumDetailScreen(
             onDelete = if (state.isSharedWithMe) null else ({ showDeleteAlbumConfirm = true }),
             onSlideshow = { playSlideshow() },
             onSortSelected = { mode ->
-                scope.launch { PhotoViewChoiceStore.setAlbumSort(shareCtx, state.albumLinkId, mode) }
+                scope.launch { PhotoViewChoiceStore.setAlbumSort(settingsStore, state.albumLinkId, mode) }
             },
             onGroupingSelected = { grouping ->
                 visitGrouping = grouping
-                scope.launch { PhotoViewChoiceStore.setAlbumGrouping(shareCtx, state.albumLinkId, grouping) }
+                scope.launch { PhotoViewChoiceStore.setAlbumGrouping(settingsStore, state.albumLinkId, grouping) }
             },
             onLeaveAlbum = { showLeaveAlbumConfirm = true },
         )

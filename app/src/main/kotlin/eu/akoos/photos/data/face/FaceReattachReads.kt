@@ -22,10 +22,11 @@
 
 package eu.akoos.photos.data.face
 
+import eu.akoos.photos.data.usecase.compareCodePoints
+
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.ReattachLabel
-import eu.akoos.photos.domain.usecase.compareCodePoints
 import eu.akoos.photos.util.forEachSqlChunk
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext

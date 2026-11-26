@@ -59,7 +59,7 @@ import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
-import eu.akoos.photos.data.api.model.NewsItem
+import eu.akoos.photos.domain.model.NewsItem
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.glassSource

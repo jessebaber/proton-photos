@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation
 
+import eu.akoos.photos.domain.catalog.SyncStateLiteRecord
 import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.SyncState
@@ -84,7 +85,7 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the album's uri lookup is the one the full rows give, in the same order`() {
-        val fromLean = albumLocalUrisByLinkId(lean(table))
+        val fromLean = albumLocalUrisByLinkId(leanRecord(table))
 
         assertEquals(fullRowAlbumUris(table).toList(), fromLean.toList())
         assertEquals("the later of two rows on one cloud id stands", "uri://twin-b", fromLean["c-twin"])
@@ -94,7 +95,7 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the vault's loose-copy set is the one the full rows give`() {
-        val rows = lean(table)
+        val rows = leanRecord(table)
         val hiddenIdSets = listOf(
             emptySet<String>(),
             setOf("c-gone"),
@@ -126,8 +127,8 @@ class SyncSnapshotReadersTest {
         assertEquals(fullRowOnDeviceIds(none), syncedCloudIdsOnDevice(sync))
         assertEquals(fullRowGalleryHiddenIds(none), sync.hiddenCloudIds)
         assertEquals(fullRowViewerUris(none), syncedLocalUrisByCloudId(sync.rows))
-        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(sync.rows))
-        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), sync.rows))
+        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(leanRecord(none)))
+        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), leanRecord(none)))
         assertEquals(fullRowPendingUris(none), pendingUploadUris(sync.rows))
     }
 
@@ -183,9 +184,13 @@ class SyncSnapshotReadersTest {
         states.filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
             .mapNotNull { it.localUri.takeIf { u -> u.isNotBlank() } }
 
-    /** The columns the DAO's lean read projects out of each row, in the same order. */
+    /** Lean DAO columns for gallery/viewer/settings readers still on SyncStateLite. */
     private fun lean(states: List<SyncState>): List<SyncStateLite> =
         states.map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, it.queued) }
+
+    /** Domain lean rows for album/hidden readers on SyncStateLiteRecord. */
+    private fun leanRecord(states: List<SyncState>): List<SyncStateLiteRecord> =
+        states.map { SyncStateLiteRecord(it.localUri, it.cloudFileId, it.status.name) }
 
     private fun row(uri: String, cloudId: String?, status: SyncStatus, queued: Boolean = false) = SyncState(
         localUri = uri,

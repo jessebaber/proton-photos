@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.common
 
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -115,7 +117,7 @@ internal fun shareStarts(selectedCount: Int, state: SelectionShareState): Boolea
  */
 class GalleryItemSelectionController @AssistedInject constructor(
     @Assisted private val scope: CoroutineScope,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val downloadPhotos: DownloadPhotosUseCase,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
@@ -508,7 +510,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
     private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
     val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
 
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
      *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
@@ -542,7 +544,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
             _isDeleting.value = true
             try {
                 when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
                         buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
@@ -550,11 +552,11 @@ class GalleryItemSelectionController @AssistedInject constructor(
                         reportKeptOnDevice(result)
                         selection.clear()
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         _pendingDeleteIntent.value = result.pendingIntent
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                    is DeletePhotoResult.CloudDeleteFailed -> {
                         // The Drive copies stayed where they were, so the photos are still there to
                         // act on: say why and hand the selection back rather than leaving a bar the
                         // user has to guess about.
@@ -664,7 +666,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                 // the nullable userId through instead of aborting a guest hide here.
                 val userId = accountManager.getPrimaryUserId().first()
                 when (val result = deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                         // Snapshot both halves before commitPendingHide() clears the pending list, so
                         // Undo reverses exactly the hide that just landed.
@@ -676,12 +678,12 @@ class GalleryItemSelectionController @AssistedInject constructor(
                         reportHideFailures()
                         selection.clear()
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
                         pendingPermissionResult = result
                         _pendingDeleteIntent.value = result.pendingIntent
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> rollbackPendingHide()
+                    is DeletePhotoResult.CloudDeleteFailed -> rollbackPendingHide()
                 }
             } finally {
                 _isDeleting.value = false
@@ -736,16 +738,16 @@ class GalleryItemSelectionController @AssistedInject constructor(
                 // being dropped: the device file had gone, the Drive copy had not, and the
                 // screen said nothing at all. The timeline surface already reports this.
                 val cloudResult = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
-                if (cloudResult is DeletePhotoUseCase.Result.NeedsMediaWritePermission) {
+                if (cloudResult is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>) {
                     // The next chunk of a delete too large for one request, launched like the first.
                     pendingPermissionResult = cloudResult
                     _pendingDeleteIntent.value = cloudResult.pendingIntent
                     return@launch
                 }
-                if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
+                if (cloudResult is DeletePhotoResult.CloudDeleteFailed) {
                     _actionFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
                 }
-                if (cloudResult is DeletePhotoUseCase.Result.Success && !pending.hide) reportKeptOnDevice(cloudResult)
+                if (cloudResult is DeletePhotoResult.Success && !pending.hide) reportKeptOnDevice(cloudResult)
                 finishConfirmedDelete(pending, pending.confirmedItems)
             }
             selection.clear()
@@ -754,7 +756,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
 
     /** Settle a delete or hide whose system dialog was confirmed, for the [carriedOut] items it took. */
     private suspend fun finishConfirmedDelete(
-        pending: DeletePhotoUseCase.Result.NeedsMediaWritePermission,
+        pending: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>,
         carriedOut: List<GalleryItem>,
     ) {
         // Snapshot both halves of the hide before commit clears them, then offer Undo for
@@ -785,7 +787,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     /** Say so when a delete left device files in place, which only Android 10 and older do. */
-    private fun reportKeptOnDevice(result: DeletePhotoUseCase.Result.Success) {
+    private fun reportKeptOnDevice(result: DeletePhotoResult.Success) {
         if (result.keptOnDevice.isEmpty()) return
         _actionFailure.tryEmit(context.getString(R.string.album_delete_photos_failed))
     }

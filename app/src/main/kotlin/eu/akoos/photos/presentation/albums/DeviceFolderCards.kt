@@ -97,7 +97,7 @@ object DeviceFolderCards {
      * A folder whose photos are all in the vault leaves no MediaStore row carrying its bucket name,
      * so [build] cannot see it at all. Driving this list off the stored names instead means the
      * folder is still there to be revealed, and [vaultedByFolder] (bucket name → its vault uris,
-     * newest first, from [eu.akoos.photos.data.hidden.HiddenFolderRecords]) is the one source for
+     * newest first, from [eu.akoos.photos.domain.vault.HiddenFolders]) is the one source for
      * both the count and the cover.
      *
      * Reading the device instead would count the wrong photos: once a hide has finished, a photo the

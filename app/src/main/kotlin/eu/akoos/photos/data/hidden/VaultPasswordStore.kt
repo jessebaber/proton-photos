@@ -29,6 +29,7 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.vault.VaultPassword
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -53,31 +54,31 @@ import javax.inject.Singleton
 @Singleton
 class VaultPasswordStore @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : VaultPassword {
 
     /** Emits whether a password is set, and again whenever that changes. */
-    fun observeIsSet(): Flow<Boolean> =
+    override fun observeIsSet(): Flow<Boolean> =
         context.settingsDataStore.data.map { it[SettingsKeys.VAULT_PASSWORD_BLOB] != null }.distinctUntilChanged()
 
-    suspend fun isSet(): Boolean = context.settingsDataStore.data.first()[SettingsKeys.VAULT_PASSWORD_BLOB] != null
+    override suspend fun isSet(): Boolean = context.settingsDataStore.data.first()[SettingsKeys.VAULT_PASSWORD_BLOB] != null
 
-    suspend fun set(password: CharArray) {
+    override suspend fun set(password: CharArray) {
         val blob = VaultPasswordCodec.encrypt(password, keystoreKey())
         context.settingsDataStore.edit { it[SettingsKeys.VAULT_PASSWORD_BLOB] = blob }
     }
 
-    suspend fun clear() {
+    override suspend fun clear() {
         context.settingsDataStore.edit { it.remove(SettingsKeys.VAULT_PASSWORD_BLOB) }
     }
 
     /** The password, or null when none is set or the stored value can no longer be decrypted. */
-    suspend fun read(): CharArray? {
+    override suspend fun read(): CharArray? {
         val blob = context.settingsDataStore.data.first()[SettingsKeys.VAULT_PASSWORD_BLOB] ?: return null
         return runCatching { VaultPasswordCodec.decrypt(blob, keystoreKey()) }.getOrNull()
     }
 
     /** Whether [typed] is the stored password. False when none is set. */
-    suspend fun matches(typed: CharArray): Boolean {
+    override suspend fun matches(typed: CharArray): Boolean {
         val stored = read() ?: return false
         try {
             return vaultPasswordMatches(stored, typed)

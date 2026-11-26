@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -34,8 +36,8 @@ import eu.akoos.photos.presentation.common.PhotoSortOrder
  * Both values sort on the same effective capture time, so the date headers, the scrubber and the
  * viewer-return index maths read one order and need no direction of their own.
  *
- * Persisted as an ordinal in [eu.akoos.photos.data.preferences.SettingsKeys.ALBUM_PHOTO_SORT_MODE]
- * and, for a folder, [eu.akoos.photos.data.preferences.SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE],
+ * Persisted as an ordinal in [eu.akoos.photos.domain.settings.Settings.ALBUM_PHOTO_SORT_MODE]
+ * and, for a folder, [eu.akoos.photos.domain.settings.Settings.DEVICE_FOLDER_PHOTO_SORT_MODE],
  * the same way the Albums-grid sort is stored, so these values must keep their positions.
  */
 enum class AlbumPhotoSortMode {
@@ -63,8 +65,8 @@ enum class AlbumPhotoSortMode {
  * Only the headers change. The photos keep their [AlbumPhotoSortMode] order, which runs on the same
  * capture time the headers are read from, so each section stays one run in either direction.
  *
- * Persisted as an ordinal in [eu.akoos.photos.data.preferences.SettingsKeys.ALBUM_PHOTO_GROUPING]
- * and, for a folder, [eu.akoos.photos.data.preferences.SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING],
+ * Persisted as an ordinal in [eu.akoos.photos.domain.settings.Settings.ALBUM_PHOTO_GROUPING]
+ * and, for a folder, [eu.akoos.photos.domain.settings.Settings.DEVICE_FOLDER_PHOTO_GROUPING],
  * the same way [AlbumPhotoSortMode] is stored, so these values must keep their positions.
  */
 enum class AlbumPhotoGrouping {

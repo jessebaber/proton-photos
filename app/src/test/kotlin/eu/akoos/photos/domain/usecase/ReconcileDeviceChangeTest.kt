@@ -22,6 +22,11 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.DEVICE_CHANGE_HASHES_PER_PASS
+import eu.akoos.photos.data.usecase.DEVICE_CHANGE_HASH_BYTES_PER_PASS
+
+import eu.akoos.photos.data.usecase.ReconcileSyncStateUseCaseImpl
+
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -101,7 +106,7 @@ class ReconcileDeviceChangeTest {
         every { prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
         every { prefs.asMap() } returns emptyMap()
 
-        useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope)
+        useCase = ReconcileSyncStateUseCaseImpl(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope)
     }
 
     @After

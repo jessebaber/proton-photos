@@ -85,6 +85,7 @@ import me.proton.core.auth.presentation.AuthOrchestrator
 import eu.akoos.photos.data.api.FORCE_UPDATE_REQUIRED
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.updater.InstallOutcome
+import eu.akoos.photos.domain.updater.InstallOutcome as DomainInstallOutcome
 import eu.akoos.photos.data.updater.InstallSessionEvents
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -98,7 +99,7 @@ import eu.akoos.photos.data.hidden.VaultSignOutPolicy
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
+import eu.akoos.photos.data.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.settings.FreeUpInterval
 import eu.akoos.photos.presentation.common.UpdatePromptDialog
@@ -638,8 +639,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun startPendingInstall() {
         when (val outcome = updateOrchestrator.installPending()) {
-            is InstallOutcome.Failed -> launchLegacyInstall()
-            is InstallOutcome.PendingUserAction -> runCatching { startActivity(outcome.intent) }
+            is DomainInstallOutcome.Failed -> launchLegacyInstall()
+            is DomainInstallOutcome.PendingUserAction ->
+                updateOrchestrator.consumeConfirmationIntent()?.let { runCatching { startActivity(it) } }
             else -> Unit
         }
     }

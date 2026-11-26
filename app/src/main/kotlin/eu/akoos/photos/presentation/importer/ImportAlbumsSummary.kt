@@ -48,7 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.ImportAlbumCount
+import eu.akoos.photos.domain.catalog.ImportAlbumCountRecord
 import eu.akoos.photos.presentation.theme.AppColors
 
 /** One labelled figure in an import summary: which glyph, what it is, and its value as text. */
@@ -69,7 +69,7 @@ data class ImportStat(
  */
 @Composable
 fun ImportAlbumsSummary(
-    albums: List<ImportAlbumCount>,
+    albums: List<ImportAlbumCountRecord>,
     showCounts: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -101,7 +101,7 @@ fun ImportAlbumsSummary(
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    text = album.name,
+                    text = album.albumName,
                     color = colors.fgPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,

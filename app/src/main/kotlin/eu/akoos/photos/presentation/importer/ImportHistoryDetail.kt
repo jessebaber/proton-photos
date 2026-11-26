@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.importer
 
+import eu.akoos.photos.domain.catalog.ImportUploadedRecord
+import eu.akoos.photos.domain.usecase.ledgerPhotoRecords
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -69,7 +71,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.UndoResult
-import eu.akoos.photos.domain.usecase.ledgerPhotos
 import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.DestructiveButton
@@ -231,6 +232,7 @@ fun ImportHistoryDetail(
 
 /** The run summary at the top of the detail: the archive's file name over a line of when it ran and
  *  its counts. Reuses the completed-run summary string so the wording matches the Done card. */
+
 @Composable
 private fun ImportDetailSummary(detail: ImportDetailData, modifier: Modifier = Modifier) {
     val colors = AppColors.current
@@ -238,7 +240,7 @@ private fun ImportDetailSummary(detail: ImportDetailData, modifier: Modifier = M
     // Derived from the run's own ledger so the split holds even when the capped history no longer carries
     // this run's summary row: imported counts the photos the run uploaded, alreadyInDrive the deduped ones,
     // a Live Photo once, as the history row and the Done card count it.
-    val photos = ledgerPhotos(detail.rows)
+    val photos = ledgerPhotoRecords(detail.rows)
     val alreadyCount = photos.filter { it.alreadyInDrive }.mapTo(HashSet()) { it.linkId }.size
     val importedCount = photos.count { !it.alreadyInDrive }
     // The history row folds already-in-Drive matches into its skipped total, so subtract them back out for

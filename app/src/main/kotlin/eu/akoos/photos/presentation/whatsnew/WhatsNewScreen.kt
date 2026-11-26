@@ -22,7 +22,8 @@
 
 package eu.akoos.photos.presentation.whatsnew
 
-import android.content.Context
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,16 +69,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.glassSource
@@ -89,19 +86,17 @@ import javax.inject.Inject
 
 /**
  * Persists the one-time "What's new" dismissal. [markSeen] writes the current versionCode to
- * [SettingsKeys.WHATS_NEW_SEEN_VERSION] so the screen can never reappear for this version. The
+ * WHATS_NEW_SEEN_VERSION so the screen can never reappear for this version. The
  * screen calls it on every exit (Got-it or back), so whichever path the user takes out of the
  * screen settles the gate.
  */
 @HiltViewModel
 class WhatsNewViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
     fun markSeen() {
         viewModelScope.launch {
-            context.settingsDataStore.edit {
-                it[SettingsKeys.WHATS_NEW_SEEN_VERSION] = BuildConfig.VERSION_CODE
-            }
+            settingsStore.set(Settings.WHATS_NEW_SEEN_VERSION, BuildConfig.VERSION_CODE)
         }
     }
 }

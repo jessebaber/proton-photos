@@ -22,12 +22,15 @@
 
 package eu.akoos.photos.presentation.onboarding
 
+import eu.akoos.photos.domain.settings.BootPreferences
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
-import android.provider.Settings
+import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,7 +71,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,10 +78,6 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.LanguagePrefsBoot
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.ThemePrefsBoot
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.presentation.lock.AppLockSettings
@@ -107,12 +105,13 @@ import eu.akoos.photos.presentation.onboarding.steps.WelcomeStep
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
-import eu.akoos.photos.service.ModelDownloadService
+import eu.akoos.photos.domain.work.BackgroundWork
 import eu.akoos.photos.util.MediaPermissions
-import eu.akoos.photos.util.ModelDownloadKind
+import eu.akoos.photos.domain.work.ModelDownloadKind
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -129,6 +128,9 @@ enum class BackupMode { Everything, ChooseLater, NothingForNow }
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
+    private val bootPreferences: BootPreferences,
+    private val backgroundWork: BackgroundWork,
     private val localMediaRepo: LocalMediaRepository,
     private val appLockManager: AppLockManager,
 ) : ViewModel() {
@@ -155,24 +157,23 @@ class OnboardingViewModel @Inject constructor(
      * mirror the persisted defaults; `stringResource` calls re-resolve via
      * `LocaleOverride` when the language flow re-emits.
      */
-    val themeMode: StateFlow<ThemeMode> = context.settingsDataStore.data
-        .map { prefs ->
-            val key = prefs[SettingsKeys.THEME_MODE]
-                ?: when (prefs[SettingsKeys.DARK_MODE]) {
-                    true  -> "dark"
-                    false -> "light"
-                    null  -> "system"
-                }
-            ThemeMode.fromKey(key)
+    val themeMode: StateFlow<ThemeMode> = combine(
+        settingsStore.observe(Settings.THEME_MODE),
+        settingsStore.observe(Settings.DARK_MODE),
+    ) { themeMode, darkMode ->
+        val key = themeMode ?: when (darkMode) {
+            true -> "dark"
+            false -> "light"
+            null -> "system"
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ThemeMode.System)
+        ThemeMode.fromKey(key)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ThemeMode.System)
 
-    val palette: StateFlow<ThemePalette> = context.settingsDataStore.data
-        .map { ThemePalette.fromKey(it[SettingsKeys.THEME_PALETTE]) }
+    val palette: StateFlow<ThemePalette> = settingsStore.observe(Settings.THEME_PALETTE)
+        .map { ThemePalette.fromKey(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ThemePalette.Default)
 
-    val language: StateFlow<String> = context.settingsDataStore.data
-        .map { it[SettingsKeys.LANGUAGE] ?: "system" }
+    val language: StateFlow<String> = settingsStore.observe(Settings.LANGUAGE)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), "system")
 
     /**
@@ -209,18 +210,18 @@ class OnboardingViewModel @Inject constructor(
      */
     fun setThemeLive(mode: ThemeMode) {
         viewModelScope.launch {
-            context.settingsDataStore.edit {
-                it[SettingsKeys.THEME_MODE] = mode.storageKey
-                it.remove(SettingsKeys.DARK_MODE)
+            settingsStore.edit {
+                set(Settings.THEME_MODE, mode.storageKey)
+                set(Settings.DARK_MODE, null)
             }
-            ThemePrefsBoot.write(context, mode.storageKey)
+            bootPreferences.writeThemeMode(mode.storageKey)
         }
     }
 
     /** Palette is purely an in-Compose accent swap — no boot-mirror, no AppCompat. */
     fun setPaletteLive(palette: ThemePalette) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.THEME_PALETTE] = palette.storageKey }
+            settingsStore.set(Settings.THEME_PALETTE, palette.storageKey)
         }
     }
 
@@ -235,8 +236,8 @@ class OnboardingViewModel @Inject constructor(
      */
     fun setLanguageLive(tag: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.LANGUAGE] = tag }
-            LanguagePrefsBoot.write(context, tag)
+            settingsStore.set(Settings.LANGUAGE, tag)
+            bootPreferences.writeLanguageTag(tag)
         }
     }
 
@@ -280,42 +281,42 @@ class OnboardingViewModel @Inject constructor(
         val lockSeconds = appLockTimeoutSeconds.coerceAtLeast(0)
 
         suspend fun commit(writeLock: Boolean) {
-            context.settingsDataStore.edit { p ->
+            settingsStore.edit {
                 when (backupMode) {
                     BackupMode.Everything -> {
-                        p[SettingsKeys.BACKUP_EVERYTHING] = true
-                        p[SettingsKeys.ALBUM_ALL_BY_DEFAULT] = true
-                        p[SettingsKeys.EXCLUDED_FOLDER_NAMES] = excludedFolders
+                        set(Settings.BACKUP_EVERYTHING, true)
+                        set(Settings.ALBUM_ALL_BY_DEFAULT, true)
+                        set(Settings.EXCLUDED_FOLDER_NAMES, excludedFolders)
                     }
                     BackupMode.ChooseLater -> {
-                        p[SettingsKeys.BACKUP_EVERYTHING] = false
+                        set(Settings.BACKUP_EVERYTHING, false)
                         if (selectedFolders.isNotEmpty()) {
-                            p[SettingsKeys.SYNC_FOLDER_NAMES] = selectedFolders
+                            set(Settings.SYNC_FOLDER_NAMES, selectedFolders)
                         } else {
                             // Empty pick collapses to NothingForNow semantically.
-                            p[SettingsKeys.SYNC_FOLDER_NAMES] = emptySet()
+                            set(Settings.SYNC_FOLDER_NAMES, emptySet())
                         }
                     }
                     BackupMode.NothingForNow -> {
-                        p[SettingsKeys.BACKUP_EVERYTHING] = false
-                        p[SettingsKeys.SYNC_FOLDER_NAMES] = emptySet()
+                        set(Settings.BACKUP_EVERYTHING, false)
+                        set(Settings.SYNC_FOLDER_NAMES, emptySet())
                     }
                 }
-                p[SettingsKeys.STRIP_ON_UPLOAD] = stripMetadata
-                p[SettingsKeys.STRIP_GPS] = stripGps
-                p[SettingsKeys.STRIP_CAMERA_INFO] = stripCamera
-                p[SettingsKeys.STRIP_TIMESTAMP] = stripTimestamp
-                p[SettingsKeys.STRIP_SOFTWARE_INFO] = stripSoftware
-                p[SettingsKeys.RENAME_TO_CAPTURE_DATE] = renameOnUpload
-                p[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = mirrorToLocal
-                p[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = deleteAfterBackup
-                if (mlFace || mlSemantic || mlOcr) p[SettingsKeys.AI_FEATURES_ENABLED] = true
-                p[SettingsKeys.THEME_MODE] = themeMode.storageKey
-                p[SettingsKeys.THEME_PALETTE] = palette.storageKey
-                p[SettingsKeys.LANGUAGE] = language
+                set(Settings.STRIP_ON_UPLOAD, stripMetadata)
+                set(Settings.STRIP_GPS, stripGps)
+                set(Settings.STRIP_CAMERA_INFO, stripCamera)
+                set(Settings.STRIP_TIMESTAMP, stripTimestamp)
+                set(Settings.STRIP_SOFTWARE_INFO, stripSoftware)
+                set(Settings.RENAME_TO_CAPTURE_DATE, renameOnUpload)
+                set(Settings.MIRROR_STRIP_TO_LOCAL, mirrorToLocal)
+                set(Settings.DELETE_LOCAL_AFTER_BACKUP, deleteAfterBackup)
+                if (mlFace || mlSemantic || mlOcr) set(Settings.AI_FEATURES_ENABLED, true)
+                set(Settings.THEME_MODE, themeMode.storageKey)
+                set(Settings.THEME_PALETTE, palette.storageKey)
+                set(Settings.LANGUAGE, language)
                 if (writeLock) {
-                    p[SettingsKeys.APP_LOCK_ENABLED] = appLockEnabled
-                    p[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS] = lockSeconds
+                    set(Settings.APP_LOCK_ENABLED, appLockEnabled)
+                    set(Settings.APP_LOCK_TIMEOUT_SECONDS, lockSeconds)
                 }
                 // Album-mirror opt-in: persist the chosen folder names (the
                 // custom set is already a subset of the selection because every
@@ -325,22 +326,22 @@ class OnboardingViewModel @Inject constructor(
                 // albumMirrorCustom parameter at the call site is intentionally
                 // accepted but unused here: its values are already merged into
                 // albumMirrorSelection by the step composable.
-                p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = albumMirrorSelection
-                p[SettingsKeys.ALBUM_OPT_OUT_FOLDER_NAMES] = albumMirrorOptOut
-                p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
-                p[SettingsKeys.ONBOARDING_COMPLETE] = true
+                set(Settings.ALBUM_OPT_IN_FOLDER_NAMES, albumMirrorSelection)
+                set(Settings.ALBUM_OPT_OUT_FOLDER_NAMES, albumMirrorOptOut)
+                set(Settings.ALBUM_OPT_IN_MIGRATED, true)
+                set(Settings.ONBOARDING_COMPLETE, true)
             }
             // Final defensive sync of the boot mirrors. Both were already written by
             // the live setters above, but a user who skipped the Appearance step (back
             // button, system back, etc.) and let it submit defaults would otherwise
             // leave the boot store stale.
-            ThemePrefsBoot.write(context, themeMode.storageKey)
-            LanguagePrefsBoot.write(context, language)
+            bootPreferences.writeThemeMode(themeMode.storageKey)
+            bootPreferences.writeLanguageTag(language)
             // Each chosen feature fetches its models on the download service, which records the
             // consent, queues the kinds one behind another and turns the feature on once the files verify.
-            if (mlFace) ModelDownloadService.start(context, ModelDownloadKind.FACE)
-            if (mlSemantic) ModelDownloadService.start(context, ModelDownloadKind.SEMANTIC)
-            if (mlOcr) ModelDownloadService.start(context, ModelDownloadKind.OCR)
+            if (mlFace) backgroundWork.startModelDownload(ModelDownloadKind.FACE)
+            if (mlSemantic) backgroundWork.startModelDownload(ModelDownloadKind.SEMANTIC)
+            if (mlOcr) backgroundWork.startModelDownload(ModelDownloadKind.OCR)
             onAppliedLocale()
         }
 
@@ -513,7 +514,7 @@ fun OnboardingScreen(
     fun openAllFilesSettings() {
         allFilesLauncher.launch(
             Intent(
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                AndroidSettings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                 android.net.Uri.fromParts("package", context.packageName, null),
             )
         )
@@ -526,7 +527,7 @@ fun OnboardingScreen(
         OnboardingStep.Notifications -> { { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) } }
         OnboardingStep.ManageMedia -> { {
             manageMediaLauncher.launch(
-                Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA).apply {
+                Intent(AndroidSettings.ACTION_REQUEST_MANAGE_MEDIA).apply {
                     data = android.net.Uri.fromParts("package", context.packageName, null)
                 }
             )
