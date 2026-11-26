@@ -168,6 +168,19 @@ class FreeUpSpaceViewModel @Inject constructor(
                         pendingLocalUris = result.localUris
                         _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }
                     }
+                    is FreeUpSpaceUseCase.FreeUpResult.Failed -> {
+                        _uiState.update {
+                            it.copy(
+                                running = false,
+                                verifying = false,
+                                message = context.getString(
+                                    R.string.settings_free_up_error,
+                                    result.message,
+                                ),
+                            )
+                        }
+                        if (result.freed > 0) load()
+                    }
                 }
             } catch (e: Exception) {
                 // Cancellation is the ordinary way this ends: the user left the screen, which stops
@@ -189,7 +202,7 @@ class FreeUpSpaceViewModel @Inject constructor(
         viewModelScope.launch {
             val uris = pendingLocalUris
             pendingLocalUris = emptyList()
-            uris.forEach { syncStateRepo.updateStatusAndDeleteLocal(it, SyncStatus.CLOUD_ONLY) }
+            syncStateRepo.updateStatusAndDeleteLocal(uris, SyncStatus.CLOUD_ONLY)
             _uiState.update { it.copy(pendingIntent = null, message = freedMessage(uris.size)) }
             load()
         }

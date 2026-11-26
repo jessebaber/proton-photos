@@ -152,4 +152,47 @@ class FreeUpSpaceWorkerTest {
     fun `the sweep requires battery not low`() {
         assertTrue(FreeUpSpaceWorker.sweepConstraints().requiresBatteryNotLow())
     }
+
+    @Test
+    fun `auto free-up disabled skips the sweep`() {
+        assertTrue(
+            "turning AUTO_FREE_UP off must short-circuit doWork before any reclaim",
+            FreeUpSpaceWorker.shouldSkipWhenAutoFreeUpDisabled(enabled = false),
+        )
+    }
+
+    @Test
+    fun `auto free-up enabled does not skip the sweep`() {
+        assertFalse(FreeUpSpaceWorker.shouldSkipWhenAutoFreeUpDisabled(enabled = true))
+    }
+
+    @Test
+    fun `cancel targets both the periodic and oneshot unique names`() {
+        assertEquals(
+            listOf(FreeUpSpaceWorker.TAG, FreeUpSpaceWorker.NAME_ONESHOT),
+            FreeUpSpaceWorker.uniqueWorkNamesToCancel(),
+        )
+    }
+
+    @Test
+    fun `CancellationException is not classified as a permanent sweep failure`() {
+        // CancellationException is an IllegalStateException; treating it as permanent would turn a
+        // cooperative cancel into Result.failure() and burn the WorkManager retry budget.
+        assertFalse(
+            FreeUpSpaceWorker.isPermanentSweepFailure(
+                kotlinx.coroutines.CancellationException("cancelled"),
+            ),
+        )
+    }
+
+    @Test
+    fun `a real IllegalStateException is still a permanent sweep failure`() {
+        assertTrue(FreeUpSpaceWorker.isPermanentSweepFailure(IllegalStateException("gone")))
+    }
+
+    @Test
+    fun `SecurityException and missing files are permanent sweep failures`() {
+        assertTrue(FreeUpSpaceWorker.isPermanentSweepFailure(SecurityException("denied")))
+        assertTrue(FreeUpSpaceWorker.isPermanentSweepFailure(java.io.FileNotFoundException("gone")))
+    }
 }
