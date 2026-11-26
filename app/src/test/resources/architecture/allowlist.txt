@@ -83,10 +83,8 @@ presentation-worker eu/akoos/photos/presentation/settings/SyncFoldersViewModel.k
 # stream: feat/presentation-media
 presentation-crypto eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
 presentation-data eu/akoos/photos/presentation/common/AddLabelsAction.kt
-presentation-data eu/akoos/photos/presentation/common/ConfirmSheet.kt
 presentation-data eu/akoos/photos/presentation/common/FavoriteSelection.kt
 presentation-data eu/akoos/photos/presentation/common/GalleryItemSelectionController.kt
-presentation-data eu/akoos/photos/presentation/common/HideConfirmation.kt
 presentation-data eu/akoos/photos/presentation/common/MoveToFolderController.kt
 presentation-data eu/akoos/photos/presentation/common/UndoController.kt
 presentation-data eu/akoos/photos/presentation/editor/PhotoEditorViewModel.kt
