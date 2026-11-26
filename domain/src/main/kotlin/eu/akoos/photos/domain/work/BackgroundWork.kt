@@ -80,6 +80,22 @@ interface BackgroundWork {
     fun startScreenshotOverlay()
     fun stopScreenshotOverlay()
 
+    fun scheduleSync(wifiOnly: Boolean = true, intervalMinutes: Long = 15L)
+    fun scheduleFreeUpSpace(intervalMs: Long)
+
+    /** Live running album downloads for the Activity screen. */
+    fun observeAlbumDownloads(): kotlinx.coroutines.flow.Flow<List<AlbumDownloadProgress>>
+    fun cancelWorkById(id: String)
+
+    data class AlbumDownloadProgress(
+        val id: String,
+        val albumName: String,
+        val done: Int,
+        val total: Int,
+        val coverUri: String?,
+    )
+
+
     /** Progress / result Data keys for workers, so presentation need not import worker classes. */
     object ImportKeys {
         const val KEY_DONE = "done"
@@ -112,6 +128,7 @@ interface BackgroundWork {
     }
 
     object AlbumDownloadKeys {
+        const val KEY_ALBUM_NAME = "albumName"
         const val KEY_PROGRESS_DONE = "progressDone"
         const val KEY_PROGRESS_TOTAL = "progressTotal"
         const val KEY_COVER_URI = "coverUri"

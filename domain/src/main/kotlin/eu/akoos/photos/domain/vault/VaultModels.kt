@@ -38,5 +38,6 @@ enum class SignOutVaultChoice {
 /** Constants naming the on-device rescue folder for vault leftovers. */
 object HiddenRescueNames {
     const val FOLDER = "Photos for Proton Rescue"
-    const val SIGN_OUT_FOLDER = "Photos for Proton Sign-out"
+    /** Matches data HiddenRescue.SIGN_OUT_FOLDER. */
+    const val SIGN_OUT_FOLDER = "PFPVault_SignOut"
 }

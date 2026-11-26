@@ -24,7 +24,11 @@ package eu.akoos.photos.data.ml
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.face.FaceEmbeddingModelManager
+import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceModelManager
+import eu.akoos.photos.data.ocr.OcrModelAssets
+import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.data.face.FaceModelPreparation as DataFacePrep
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.ocr.OnnxTextRecognizer
@@ -45,8 +49,11 @@ class FaceModelsImpl @Inject constructor(
     @ApplicationContext context: Context,
 ) : FaceModels {
     private val manager = FaceModelManager(context)
+    private val embeddingManager = FaceEmbeddingModelManager(context)
 
+    override val totalDownloadBytes: Long get() = FaceModelAssets.TOTAL_DOWNLOAD_BYTES
     override suspend fun onDisk(): File? = manager.onDisk()
+    override suspend fun embeddingOnDisk(): File? = embeddingManager.onDisk()
     override suspend fun prepare(
         onDownloadStart: () -> Unit,
         onProgress: (Long) -> Unit,
@@ -65,6 +72,7 @@ class OcrModelsImpl @Inject constructor(
     private val manager = OcrModelManager(context)
     private val recognizer = OnnxTextRecognizer(context)
 
+    override val totalDownloadBytes: Long get() = OcrModelAssets.TOTAL_DOWNLOAD_BYTES
     override fun filesPresentQuick(): Boolean = manager.filesPresentQuick()
     override suspend fun ensure(onDownloadStart: () -> Unit): OcrModelPreparation =
         when (recognizer.prepare(onDownloadStart)) {
@@ -81,6 +89,8 @@ class SemanticModelsImpl @Inject constructor(
 ) : SemanticModels {
     private val manager = SemanticModelManager(context)
 
+    override val totalDownloadBytes: Long get() = SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+    override suspend fun areModelsPresent(): Boolean = manager.areModelsPresent()
     override suspend fun onDisk(): Map<String, File>? =
         if (manager.areModelsPresent()) emptyMap() else null
 

@@ -23,11 +23,12 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
-import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.settings.SettingsBindings
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -42,7 +43,6 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -50,49 +50,39 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/**
- * The viewer's long-press choice: it selects text until the user picks the menu, and the pick is
- * stored under the key the viewer reads, with no account involved.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ViewerLongPressViewModelTest {
 
     private lateinit var context: Context
-
-    /** Every view model a case built, cleared afterwards so none keeps reading the shared DataStore
-     *  into the next test class. */
+    private lateinit var settingsStore: SettingsStore
     private val built = ArrayList<ViewerLongPressViewModel>()
 
-    private fun viewModel() = ViewerLongPressViewModel(context).also { built += it }
+    private fun viewModel() = ViewerLongPressViewModel(context, settingsStore).also { built += it }
 
-    /** Waits until the stored choice reads [expected]. Each check is a fresh read: a read that starts
-     *  while the write is still in flight can miss it, which is no concern of a screen that keeps
-     *  observing, but would leave a one-off wait hanging. */
     private suspend fun awaitStored(expected: Boolean) = withTimeout(5_000) {
-        while (context.settingsDataStore.data.first()[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] != expected) delay(20)
+        while (settingsStore.get(Settings.VIEWER_LONG_PRESS_OPENS_MENU) != expected) delay(20)
     }
 
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         context = ApplicationProvider.getApplicationContext()
-        runBlocking { context.settingsDataStore.edit { it.clear() } }
+        settingsStore = SettingsBindings.create(context.settingsDataStore)
+        runBlocking { settingsStore.set(Settings.VIEWER_LONG_PRESS_OPENS_MENU, false) }
     }
 
     @After
     fun tearDown() {
         built.forEach { it.viewModelScope.cancel() }
-        runBlocking { context.settingsDataStore.edit { it.clear() } }
+        runBlocking { settingsStore.set(Settings.VIEWER_LONG_PRESS_OPENS_MENU, false) }
         Dispatchers.resetMain()
     }
 
     @Test
     fun `a fresh install keeps the long press on select text`() = runBlocking {
-        assertNull(context.settingsDataStore.data.first()[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU])
-        // The state starts false before the store has been read, so what the empty store maps to is seen
-        // only once the collection has had time to take its first emission.
+        assertFalse(settingsStore.get(Settings.VIEWER_LONG_PRESS_OPENS_MENU))
         val seen = CopyOnWriteArrayList<Boolean>()
         val collecting = launch(Dispatchers.Default) { viewModel().opensMenu.collect { seen += it } }
         delay(500)

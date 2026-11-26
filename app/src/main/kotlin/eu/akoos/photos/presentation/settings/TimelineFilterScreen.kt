@@ -49,14 +49,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.platform.LocalContext
-import androidx.datastore.preferences.core.edit
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import eu.akoos.photos.domain.settings.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -87,7 +82,6 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.StatusError
 import eu.akoos.photos.util.ON_THIS_DAY_MAX_WINDOW_DAYS
-import eu.akoos.photos.util.onThisDayWindowDays
 
 /**
  * The Photos timeline settings hub — a menu of focused sub-pages so each concern lives on its
@@ -224,13 +218,11 @@ fun TimelineLayoutScreen(
 /** "On this day": whether the memories show, and how many whole days either side of the date they reach. */
 @Composable
 fun TimelineOnThisDayScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
+    val store = rememberSettingsStore()
     val scope = rememberCoroutineScope()
     val colors = AppColors.current
-    val show by remember {
-        ctx.settingsDataStore.data.map { it[SettingsKeys.SHOW_ON_THIS_DAY] ?: true }
-    }.collectAsState(initial = true)
-    val days by remember { ctx.onThisDayWindowDays() }.collectAsState(initial = 0)
+    val show by store.observe(Settings.SHOW_ON_THIS_DAY).collectAsState(initial = true)
+    val days by store.observe(Settings.ON_THIS_DAY_WINDOW_DAYS).collectAsState(initial = 0)
 
     SettingsSubPageScaffold(title = stringResource(R.string.gallery_on_this_day), onBack = onBack) {
         SettingsCard {
@@ -238,7 +230,7 @@ fun TimelineOnThisDayScreen(onBack: () -> Unit) {
                 label = stringResource(R.string.gallery_on_this_day),
                 checked = show,
                 onCheckedChange = { on ->
-                    scope.launch { ctx.settingsDataStore.edit { it[SettingsKeys.SHOW_ON_THIS_DAY] = on } }
+                    scope.launch { store.set(Settings.SHOW_ON_THIS_DAY, on) }
                 },
             )
         }
@@ -257,7 +249,7 @@ fun TimelineOnThisDayScreen(onBack: () -> Unit) {
                             onClick = {
                                 if (show) {
                                     scope.launch {
-                                        ctx.settingsDataStore.edit { it[SettingsKeys.ON_THIS_DAY_WINDOW_DAYS] = count }
+                                        store.set(Settings.ON_THIS_DAY_WINDOW_DAYS, count)
                                     }
                                 }
                             },

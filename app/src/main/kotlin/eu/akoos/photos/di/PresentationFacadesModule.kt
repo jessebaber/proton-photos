@@ -98,6 +98,21 @@ import eu.akoos.photos.domain.vault.HiddenVaultLeftover
 import eu.akoos.photos.domain.vault.HiddenVaultRestore
 import eu.akoos.photos.domain.vault.VaultPassword
 import eu.akoos.photos.domain.work.BackgroundWork
+
+import eu.akoos.photos.data.backup.SharedBackupImpl
+import eu.akoos.photos.data.compression.VideoEncodersImpl
+import eu.akoos.photos.data.debug.LargeLibrarySimImpl
+import eu.akoos.photos.data.debug.SdkDebugRoutesImpl
+import eu.akoos.photos.data.settings.AccountCleanupImpl
+import eu.akoos.photos.data.vault.HiddenVaultMaintenanceImpl
+import eu.akoos.photos.data.vault.VaultSignOutImpl
+import eu.akoos.photos.domain.backup.SharedBackup
+import eu.akoos.photos.domain.compression.VideoEncoders
+import eu.akoos.photos.domain.debug.LargeLibrarySim
+import eu.akoos.photos.domain.debug.SdkDebugRoutes
+import eu.akoos.photos.domain.settings.AccountCleanup
+import eu.akoos.photos.domain.vault.HiddenVaultMaintenance
+import eu.akoos.photos.domain.vault.VaultSignOut
 import javax.inject.Singleton
 
 /**
@@ -152,5 +167,14 @@ abstract class PresentationFacadesModule {
     @Binds @Singleton abstract fun bindWidgetSignOut(impl: PhotoWidgetSignOut): WidgetSignOut
 
     @Binds @Singleton abstract fun bindBackgroundWork(impl: BackgroundWorkImpl): BackgroundWork
+
+    @Binds @Singleton abstract fun bindSharedBackup(impl: SharedBackupImpl): SharedBackup
+    @Binds @Singleton abstract fun bindVideoEncoders(impl: VideoEncodersImpl): VideoEncoders
+    @Binds @Singleton abstract fun bindLargeLibrarySim(impl: LargeLibrarySimImpl): LargeLibrarySim
+    @Binds @Singleton abstract fun bindSdkDebugRoutes(impl: SdkDebugRoutesImpl): SdkDebugRoutes
+    @Binds @Singleton abstract fun bindAccountCleanup(impl: AccountCleanupImpl): AccountCleanup
+    @Binds @Singleton abstract fun bindVaultSignOut(impl: VaultSignOutImpl): VaultSignOut
+    @Binds @Singleton abstract fun bindHiddenVaultMaintenance(impl: HiddenVaultMaintenanceImpl): HiddenVaultMaintenance
 }
+
 

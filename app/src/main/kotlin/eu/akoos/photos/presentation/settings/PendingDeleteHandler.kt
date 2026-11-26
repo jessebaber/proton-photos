@@ -23,6 +23,8 @@
 package eu.akoos.photos.presentation.settings
 
 import android.app.Activity
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -38,15 +40,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.presentation.lock.LocalAppLock
@@ -63,7 +62,7 @@ import javax.inject.Inject
  * Drains the upload pipeline's pending delete queue through a foreground OS consent
  * dialog. The upload worker on Android 11+ cannot directly delete foreign owned
  * camera roll items (`contentResolver.delete()` returns 0 rows for items it does
- * not own); it queues the URIs into [SettingsKeys.PENDING_DELETE_URIS] instead, and
+ * not own); it queues the URIs into [Settings.PENDING_DELETE_URIS] instead, and
  * this handler runs them through [MediaStore.createTrashRequest] inside an
  * Activity context where the OS will surface the system trash dialog the user
  * needs to accept.
@@ -77,11 +76,11 @@ import javax.inject.Inject
 @HiltViewModel
 class PendingDeleteViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
     private val syncStateRepo: SyncStateRepository,
 ) : ViewModel() {
 
-    val pendingUris: StateFlow<Set<String>> = context.settingsDataStore.data
-        .map { it[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet() }
+    val pendingUris: StateFlow<Set<String>> = settingsStore.observe(Settings.PENDING_DELETE_URIS)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptySet())
 
     /**
@@ -93,10 +92,7 @@ class PendingDeleteViewModel @Inject constructor(
     fun onConsentGranted(uris: Set<String>) {
         viewModelScope.launch {
             runCatching { syncStateRepo.updateStatuses(uris, SyncStatus.CLOUD_ONLY) }
-            context.settingsDataStore.edit { p ->
-                val remaining = (p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()) - uris
-                p[SettingsKeys.PENDING_DELETE_URIS] = remaining
-            }
+            settingsStore.update(Settings.PENDING_DELETE_URIS) { it - uris }
         }
     }
 }

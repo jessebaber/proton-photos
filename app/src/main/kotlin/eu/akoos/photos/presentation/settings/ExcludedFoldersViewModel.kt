@@ -23,23 +23,22 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.AlbumMirrorFolders
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.albumMirrorFolders
-import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.settings.AlbumMirrorFolders
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.albumMirrorFolders
+import eu.akoos.photos.domain.settings.putAlbumMirrorFolders
+import eu.akoos.photos.domain.work.BackgroundWork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -63,6 +62,8 @@ import javax.inject.Inject
 @HiltViewModel
 class ExcludedFoldersViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
+    private val backgroundWork: BackgroundWork,
     private val localMediaRepo: LocalMediaRepository,
     private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
 ) : ViewModel() {
@@ -96,9 +97,8 @@ class ExcludedFoldersViewModel @Inject constructor(
         viewModelScope.launch {
             // Seed excluded set BEFORE the first media emission so the initial UI
             // already carries the persisted exclusions.
-            val initial = context.settingsDataStore.data.first()
-            excludedNames = initial[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
-            mirror = initial.albumMirrorFolders()
+            excludedNames = settingsStore.get(Settings.EXCLUDED_FOLDER_NAMES)
+            mirror = settingsStore.albumMirrorFolders()
 
             // The grouping walks the whole device list, so it runs off the main thread (see deviceBuckets).
             val buckets = localMediaRepo.observeLocalMedia()
@@ -155,7 +155,7 @@ class ExcludedFoldersViewModel @Inject constructor(
             s.copy(folders = s.folders.map { f -> f.copy(isMirrored = f.name in next) })
         }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it.putAlbumMirrorFolders(next) }
+            settingsStore.putAlbumMirrorFolders(next)
         }
         if (folderName in next) folderAlbumBackfill.onAlbumTurnedOn(folderName)
     }
@@ -175,14 +175,14 @@ class ExcludedFoldersViewModel @Inject constructor(
 
     private fun persist(names: Set<String>) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.EXCLUDED_FOLDER_NAMES] = names }
+            settingsStore.set(Settings.EXCLUDED_FOLDER_NAMES, names)
             // Kick a fresh reconcile so any LOCAL_ONLY rows that just landed in the
             // excluded set are dropped from `pending` immediately — otherwise an
-            // in-flight SyncWorker (or one that starts between toggle and the next
+            // in-flight sync (or one that starts between toggle and the next
             // periodic fire) would still upload them. Reads BACKUP_EVERYTHING +
             // SYNC_WIFI_ONLY itself, so the runNow call only needs the wifi flag.
-            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-            eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly)
+            val wifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY)
+            backgroundWork.runSyncNow(wifiOnly)
         }
     }
 }

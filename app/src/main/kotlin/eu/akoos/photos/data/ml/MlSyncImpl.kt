@@ -20,22 +20,41 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+
 package eu.akoos.photos.data.ml
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.mlsync.FaceSnapshotMode as DataFaceMode
+import eu.akoos.photos.data.mlsync.MlDriveFileKind as DataKind
 import eu.akoos.photos.data.mlsync.MlDriveResult
 import eu.akoos.photos.data.mlsync.MlRemoteSnapshot as DataSnapshot
 import eu.akoos.photos.data.mlsync.MlSyncController
-import eu.akoos.photos.data.mlsync.MlSyncOutcome
-import eu.akoos.photos.data.mlsync.MlSyncResult
+import eu.akoos.photos.data.mlsync.MlSyncCounts as DataCounts
+import eu.akoos.photos.data.mlsync.MlSyncFacePause
+import eu.akoos.photos.data.mlsync.MlSyncOperation as DataOp
+import eu.akoos.photos.data.mlsync.MlSyncOutcome as DataOutcome
+import eu.akoos.photos.data.mlsync.MlSyncPartStatus as DataPart
+import eu.akoos.photos.data.mlsync.MlSyncPhase as DataPhase
+import eu.akoos.photos.data.mlsync.MlSyncProgress as DataProgress
+import eu.akoos.photos.data.mlsync.MlSyncResult as DataResult
 import eu.akoos.photos.data.mlsync.MlSyncStart as DataStart
-import eu.akoos.photos.data.mlsync.MlSyncState
+import eu.akoos.photos.data.mlsync.MlSyncState as DataState
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.domain.ml.FacePauseHold
 import eu.akoos.photos.domain.ml.FaceSnapshotMode
+import eu.akoos.photos.domain.ml.MlDriveFileKind
 import eu.akoos.photos.domain.ml.MlRemoteSnapshot
 import eu.akoos.photos.domain.ml.MlSync
+import eu.akoos.photos.domain.ml.MlSyncCounts
+import eu.akoos.photos.domain.ml.MlSyncOperation
+import eu.akoos.photos.domain.ml.MlSyncOutcome
+import eu.akoos.photos.domain.ml.MlSyncPartStatus
+import eu.akoos.photos.domain.ml.MlSyncPhase
+import eu.akoos.photos.domain.ml.MlSyncProgress
+import eu.akoos.photos.domain.ml.MlSyncResult
 import eu.akoos.photos.domain.ml.MlSyncStart
-import eu.akoos.photos.domain.ml.MlSyncUiState
+import eu.akoos.photos.domain.ml.MlSyncState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -48,11 +67,12 @@ import javax.inject.Singleton
 @Singleton
 class MlSyncImpl @Inject constructor(
     private val controller: MlSyncController,
+    @ApplicationContext private val context: Context,
     @AppScope private val appScope: CoroutineScope,
 ) : MlSync {
-    override val state: StateFlow<MlSyncUiState> = controller.state
+    override val state: StateFlow<MlSyncState> = controller.state
         .map { it.toDomain() }
-        .stateIn(appScope, SharingStarted.Eagerly, MlSyncUiState.Idle)
+        .stateIn(appScope, SharingStarted.Eagerly, MlSyncState.Idle)
 
     override fun isAvailable(userId: UserId?): Boolean = controller.isAvailable(userId)
 
@@ -81,7 +101,7 @@ class MlSyncImpl @Inject constructor(
             is MlDriveResult.Ok -> result.value
             else -> emptyList()
         }
-        val keys = files.map { Triple(it.kind, it.deviceId, it.revisionUid) }.toSet()
+        val keys = files.map { Triple(it.kind.name, it.deviceId, it.revisionUid) }.toSet()
         val selected = remote.filter { Triple(it.kind.name, it.deviceId, it.revisionUid) in keys }
         return controller.restore(userId, selected, dataMode).toDomain()
     }
@@ -89,18 +109,43 @@ class MlSyncImpl @Inject constructor(
     override fun cancel() = controller.cancel()
     override fun dismissResult() = controller.dismissResult()
 
-    private fun MlSyncState.toDomain(): MlSyncUiState = when (this) {
-        MlSyncState.Idle -> MlSyncUiState.Idle
-        is MlSyncState.Running -> MlSyncUiState.Running(
-            operation = operation?.name,
-            done = progress.done,
-            total = progress.total,
-        )
-        is MlSyncState.Finished -> MlSyncUiState.Finished(
-            ok = outcome.result == MlSyncResult.SUCCESS,
-            message = outcome.failure,
-        )
+    override suspend fun readFacePauseHold(): FacePauseHold? =
+        MlSyncFacePause.read(context)?.let { FacePauseHold(it.switchOn, it.held) }
+
+    override suspend fun holdFacePause(): Boolean = MlSyncFacePause.hold(context)
+
+    override suspend fun liftFacePause() = MlSyncFacePause.lift(context)
+
+    private fun DataState.toDomain(): MlSyncState = when (this) {
+        DataState.Idle -> MlSyncState.Idle
+        is DataState.Running -> MlSyncState.Running(operation?.toDomain(), progress.toDomain())
+        is DataState.Finished -> MlSyncState.Finished(runId, outcome.toDomain())
     }
+
+    private fun DataOp.toDomain() = MlSyncOperation.valueOf(name)
+    private fun DataPhase.toDomain() = MlSyncPhase.valueOf(name)
+    private fun DataPart.toDomain() = MlSyncPartStatus.valueOf(name)
+    private fun DataResult.toDomain() = MlSyncResult.valueOf(name)
+
+    private fun DataProgress.toDomain() = MlSyncProgress(
+        phase = phase.toDomain(),
+        kind = kind?.let { MlDriveFileKind.valueOf(it.name) },
+        done = done,
+        total = total,
+    )
+
+    private fun DataCounts.toDomain() = MlSyncCounts(
+        faces, people, scanMarkers, searchEmbeddings, searchKept, filesDone, filesTotal,
+    )
+
+    private fun DataOutcome.toDomain() = MlSyncOutcome(
+        operation = operation?.toDomain(),
+        result = result.toDomain(),
+        faces = faces?.toDomain(),
+        search = search?.toDomain(),
+        counts = counts.toDomain(),
+        failure = failure,
+    )
 
     private fun DataStart.toDomain() = when (this) {
         DataStart.STARTED -> MlSyncStart.STARTED
@@ -111,7 +156,7 @@ class MlSyncImpl @Inject constructor(
     }
 
     private fun DataSnapshot.toDomain() = MlRemoteSnapshot(
-        kind = kind.name,
+        kind = MlDriveFileKind.valueOf(kind.name),
         deviceId = deviceId,
         isThisDevice = isThisDevice,
         deviceLabel = deviceLabel,

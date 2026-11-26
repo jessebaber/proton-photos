@@ -23,16 +23,13 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.domain.work.BackgroundWork
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.service.BackgroundSyncService
-import eu.akoos.photos.worker.SyncWorker
-import eu.akoos.photos.worker.UpdateCheckWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -48,21 +45,23 @@ import javax.inject.Inject
 
 /**
  * ViewModel for the "Notifications" screen — three switches backed by the NOTIFY_* keys in
- * [SettingsKeys]. Album-download and delete-reminder are opt-OUTS: absent reads as `true`
+ * [Settings]. Album-download and delete-reminder are opt-OUTS: absent reads as `true`
  * (shown), so a fresh install keeps the notifications it would post anyway. Backup-status is
  * the opposite, an opt-IN: absent reads as `false`, so that switch starts OFF.
  *
- * The backup-status switch carries extra weight: [SettingsKeys.NOTIFY_BACKUP_STATUS]
- * also decides whether the persistent [BackgroundSyncService] runs. Android refuses to
+ * The backup-status switch carries extra weight: [Settings.NOTIFY_BACKUP_STATUS]
+ * also decides whether the persistent background sync service runs. Android refuses to
  * keep a foreground service alive without showing its notification, so opting out has to
  * stop the service rather than merely hide a banner. The handler defers to
- * [SyncWorker.reconcileBackgroundWork], the single arming/teardown point every site shares,
+ * [BackgroundWork.reconcileSyncBackgroundWork], the single arming/teardown point every site shares,
  * so the service only re-starts on enable when backup is effectively on.
  */
 @HiltViewModel
 class NotificationSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
+    private val settingsStore: SettingsStore,
+    private val backgroundWork: BackgroundWork,
 ) : ViewModel() {
 
     data class UiState(
@@ -89,12 +88,11 @@ class NotificationSettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val prefs = context.settingsDataStore.data.first()
             _uiState.value = UiState(
-                backupStatus = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] == true,
-                albumDownload = prefs[SettingsKeys.NOTIFY_ALBUM_DOWNLOAD] != false,
-                deleteReminder = prefs[SettingsKeys.NOTIFY_DELETE_REMINDER] != false,
-                updateAvailable = prefs[SettingsKeys.UPDATE_BACKGROUND_CHECK] != false,
+                backupStatus = settingsStore.get(Settings.NOTIFY_BACKUP_STATUS),
+                albumDownload = settingsStore.get(Settings.NOTIFY_ALBUM_DOWNLOAD),
+                deleteReminder = settingsStore.get(Settings.NOTIFY_DELETE_REMINDER),
+                updateAvailable = settingsStore.get(Settings.UPDATE_BACKGROUND_CHECK),
             )
         }
     }
@@ -109,11 +107,11 @@ class NotificationSettingsViewModel @Inject constructor(
         _uiState.update { it.copy(backupStatus = enabled) }
         viewModelScope.launch {
             try {
-                context.settingsDataStore.edit { it[SettingsKeys.NOTIFY_BACKUP_STATUS] = enabled }
+                settingsStore.set(Settings.NOTIFY_BACKUP_STATUS, enabled)
                 // reconcile reads the just-written flag: with backup effectively on it starts the
                 // keep-alive service on enable and stops it on disable, keeping the service in lock
                 // step with the same opt-in gate every other arming site uses.
-                SyncWorker.reconcileBackgroundWork(context)
+                backgroundWork.reconcileSyncBackgroundWork()
             } catch (e: CancellationException) {
                 throw e
             }
@@ -123,29 +121,29 @@ class NotificationSettingsViewModel @Inject constructor(
     fun setAlbumDownload(enabled: Boolean) {
         _uiState.update { it.copy(albumDownload = enabled) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.NOTIFY_ALBUM_DOWNLOAD] = enabled }
+            settingsStore.set(Settings.NOTIFY_ALBUM_DOWNLOAD, enabled)
         }
     }
 
     fun setDeleteReminder(enabled: Boolean) {
         _uiState.update { it.copy(deleteReminder = enabled) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.NOTIFY_DELETE_REMINDER] = enabled }
+            settingsStore.set(Settings.NOTIFY_DELETE_REMINDER, enabled)
         }
     }
 
     /**
      * Persist the update-check opt-out AND bring the periodic work in line with it. Off cancels the
      * request outright rather than leaving it enqueued to wake up and no-op, so opting out stops
-     * the wake-ups as well as the notification; on re-enqueues it. [UpdateCheckWorker.reconcile]
+     * the wake-ups as well as the notification; on re-enqueues it. [BackgroundWork.reconcileUpdateCheck]
      * reads the just-written flag, so it is the same single arming point [App] uses at startup.
      */
     fun setUpdateAvailable(enabled: Boolean) {
         _uiState.update { it.copy(updateAvailable = enabled) }
         viewModelScope.launch {
             try {
-                context.settingsDataStore.edit { it[SettingsKeys.UPDATE_BACKGROUND_CHECK] = enabled }
-                UpdateCheckWorker.reconcile(context)
+                settingsStore.set(Settings.UPDATE_BACKGROUND_CHECK, enabled)
+                backgroundWork.reconcileUpdateCheck()
             } catch (e: CancellationException) {
                 throw e
             }

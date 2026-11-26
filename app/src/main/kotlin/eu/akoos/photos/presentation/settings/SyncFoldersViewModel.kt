@@ -23,7 +23,6 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,19 +32,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import eu.akoos.photos.data.preferences.AlbumMirrorFolders
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.albumMirrorFolders
-import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
-import eu.akoos.photos.worker.SyncWorker
+import eu.akoos.photos.domain.settings.AlbumMirrorFolders
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.albumMirrorFolders
+import eu.akoos.photos.domain.settings.putAlbumMirrorFolders
+import eu.akoos.photos.domain.work.BackgroundWork
 import javax.inject.Inject
 
 /** One device folder as the folder pickers list it: its name, its newest item as the cover, and how
@@ -65,6 +63,8 @@ internal fun deviceBuckets(items: List<LocalMediaItem>): List<DeviceBucket> =
 @HiltViewModel
 class SyncFoldersViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
+    private val backgroundWork: BackgroundWork,
     private val localMediaRepo: LocalMediaRepository,
     private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
 ) : ViewModel() {
@@ -101,10 +101,9 @@ class SyncFoldersViewModel @Inject constructor(
         viewModelScope.launch {
             // Load persisted selection + manual folder names before observing media so the
             // first emission already carries them.
-            val initial = context.settingsDataStore.data.first()
-            selectedNames = initial[SettingsKeys.SYNC_FOLDER_NAMES]
-            manualNames = initial[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] ?: emptySet()
-            mirror = initial.albumMirrorFolders()
+            selectedNames = settingsStore.get(Settings.SYNC_FOLDER_NAMES)
+            manualNames = settingsStore.get(Settings.MANUAL_LOCAL_FOLDER_NAMES)
+            mirror = settingsStore.albumMirrorFolders()
 
             val buckets = localMediaRepo.observeLocalMedia()
                 .map { deviceBuckets(it) }
@@ -151,7 +150,7 @@ class SyncFoldersViewModel @Inject constructor(
                     val cleaned = manualNames - populatedNames
                     if (cleaned != manualNames) {
                         manualNames = cleaned
-                        context.settingsDataStore.edit { it[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] = cleaned }
+                        settingsStore.set(Settings.MANUAL_LOCAL_FOLDER_NAMES, cleaned)
                     }
                 }
 
@@ -181,7 +180,7 @@ class SyncFoldersViewModel @Inject constructor(
         val updated = manualNames + name
         manualNames = updated
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] = updated }
+            settingsStore.set(Settings.MANUAL_LOCAL_FOLDER_NAMES, updated)
         }
         // Re-emit so the UI shows the placeholder without waiting for the next media flow tick.
         _uiState.update { s ->
@@ -200,12 +199,12 @@ class SyncFoldersViewModel @Inject constructor(
         mirror = mirror.copy(optedIn = mirror.optedIn - folderName, optedOut = mirror.optedOut - folderName)
         _uiState.update { s -> s.copy(folders = s.folders.filter { it.name != folderName }) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                prefs[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] = manualNames
-                prefs[SettingsKeys.SYNC_FOLDER_NAMES] = selectedNames ?: emptySet()
-                prefs.putAlbumMirrorFolders(mirror)
+            settingsStore.edit {
+                set(Settings.MANUAL_LOCAL_FOLDER_NAMES, manualNames)
+                set(Settings.SYNC_FOLDER_NAMES, selectedNames ?: emptySet())
             }
-            SyncWorker.reconcileBackgroundWork(context)
+            settingsStore.putAlbumMirrorFolders(mirror)
+            backgroundWork.reconcileSyncBackgroundWork()
         }
     }
 
@@ -232,7 +231,7 @@ class SyncFoldersViewModel @Inject constructor(
             s.copy(folders = s.folders.map { f -> f.copy(isMirrored = f.name in next) })
         }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it.putAlbumMirrorFolders(next) }
+            settingsStore.putAlbumMirrorFolders(next)
         }
         if (folderName in next) folderAlbumBackfill.onAlbumTurnedOn(folderName)
     }
@@ -252,12 +251,12 @@ class SyncFoldersViewModel @Inject constructor(
 
     private fun persistSelection(names: Set<String>) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SYNC_FOLDER_NAMES] = names }
+            settingsStore.set(Settings.SYNC_FOLDER_NAMES, names)
             // Arming the background triggers is gated on a folder actually being selected, so the
             // selection changing here is exactly when that gate flips: picking the first folder must
             // re-arm everything, deselecting the last must tear it all down. reconcile reads the
             // just-written set and does whichever applies.
-            SyncWorker.reconcileBackgroundWork(context)
+            backgroundWork.reconcileSyncBackgroundWork()
         }
     }
 }

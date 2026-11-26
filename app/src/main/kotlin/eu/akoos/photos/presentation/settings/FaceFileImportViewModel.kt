@@ -29,12 +29,12 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
-import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.mlsync.FACE_WALK_IDLE_TIMEOUT_MS
-import eu.akoos.photos.data.mlsync.MlSyncFacePause
-import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
-import eu.akoos.photos.data.mlsync.faceWalkResumes
-import eu.akoos.photos.data.mlsync.isStorageFull
+import eu.akoos.photos.domain.ml.FACE_WALK_IDLE_TIMEOUT_MS
+import eu.akoos.photos.domain.ml.FaceIndexing
+import eu.akoos.photos.domain.ml.MlSync
+import eu.akoos.photos.domain.ml.faceIndexingPausedByUser
+import eu.akoos.photos.domain.ml.faceWalkResumes
+import eu.akoos.photos.domain.ml.isStorageFull
 import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
 import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
 import kotlinx.coroutines.NonCancellable
@@ -59,7 +59,8 @@ class FaceFileImportViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val importFaceIndexUseCase: ImportFaceIndexUseCase,
-    private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val faceIndexing: FaceIndexing,
+    private val mlSync: MlSync,
 ) : ViewModel() {
 
     private val _message = MutableStateFlow<String?>(null)
@@ -93,20 +94,20 @@ class FaceFileImportViewModel @Inject constructor(
                     _message.value = context.getString(R.string.settings_ai_transfer_failed)
                     return@launch
                 }
-                val pause = MlSyncFacePause.read(context)
+                val pause = mlSync.readFacePauseHold()
                 val pausedByUser = faceIndexingPausedByUser(pause?.switchOn, pause?.held)
-                val held = MlSyncFacePause.hold(context)
+                val held = mlSync.holdFacePause()
                 try {
-                    if (held) faceIndexingScheduler.setPaused(true)
-                    withTimeoutOrNull(FACE_WALK_IDLE_TIMEOUT_MS) { faceIndexingScheduler.awaitIdle() }
-                    val result = faceIndexingScheduler.withImportFence {
+                    if (held) faceIndexing.setPaused(true)
+                    withTimeoutOrNull(FACE_WALK_IDLE_TIMEOUT_MS) { faceIndexing.awaitIdle() }
+                    val result = faceIndexing.withImportFence {
                         runCatching {
                             context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
                         }.getOrElse { if (isStorageFull(it)) FaceIndexImportOutcome.NotEnoughSpace else null }
                     }
                     // Forced and awaited, so the people are rebuilt before the walk comes back, even while the
                     // user keeps it paused. A names-only import has no faces to group until the scan finds them.
-                    if (result is FaceIndexImportOutcome.Success) faceIndexingScheduler.regroupNow(userId)
+                    if (result is FaceIndexImportOutcome.Success) faceIndexing.regroupNow(userId)
                     _message.value = when (result) {
                         is FaceIndexImportOutcome.Success ->
                             context.getString(R.string.settings_ai_import_done, result.faces, result.people)
@@ -127,9 +128,9 @@ class FaceFileImportViewModel @Inject constructor(
                     // scanned, so the walk skips them and only picks up what is new.
                     withContext(NonCancellable) {
                         if (faceWalkResumes(held, pausedByUser)) {
-                            MlSyncFacePause.lift(context)
+                            mlSync.liftFacePause()
                             if (accountManager.getPrimaryUserId().firstOrNull() == userId) {
-                                faceIndexingScheduler.requestIndex(userId)
+                                faceIndexing.requestIndex(userId)
                             }
                         }
                     }

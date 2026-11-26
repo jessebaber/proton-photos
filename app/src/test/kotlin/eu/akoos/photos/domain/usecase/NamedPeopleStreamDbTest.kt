@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.domain.catalog.PersonRecord
+
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -51,6 +53,11 @@ import eu.akoos.photos.data.usecase.ObservePeopleUseCaseImpl
  * them once filtered the same way: the same people, in the same order, ties, blank names and the Unsorted bucket
  * included, and the single-person stream gives the row the full stream held for that id.
  */
+
+private fun List<PersonEntity>.toRecords(): List<PersonRecord> = map {
+    PersonRecord(it.id, it.userId, it.displayName, it.coverFaceId, it.faceCount, it.updatedAt, it.isOther)
+}
+
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class NamedPeopleStreamDbTest {
@@ -120,7 +127,7 @@ class NamedPeopleStreamDbTest {
             all.filter { !it.isOther && !it.displayName.isNullOrBlank() }.map { it.id },
             named.filter { !it.isOther && !it.displayName.isNullOrBlank() }.map { it.id },
         )
-        assertEquals(namedPeopleCount(all), namedPeopleCount(named))
+        assertEquals(namedPeopleCount(all.toRecords()), namedPeopleCount(named.toRecords()))
         assertTrue(named.none { it.displayName.isNullOrEmpty() || it.userId != acct })
     }
 

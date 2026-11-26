@@ -27,19 +27,48 @@ import me.proton.core.domain.entity.UserId
 
 enum class LabelBackupStart { STARTED, ALREADY_RUNNING, NOT_AVAILABLE, FOLDER_MISSING }
 
+enum class LabelBackupOperation { SAVE, RESTORE }
+
+enum class LabelBackupStep { PREPARING, ENCRYPTING, UPLOADING, DOWNLOADING, MERGING }
+
+data class LabelBackupProgress(val step: LabelBackupStep) {
+    companion object {
+        val QUEUED = LabelBackupProgress(LabelBackupStep.PREPARING)
+    }
+}
+
+enum class LabelBackupResult {
+    SAVED, NOTHING_TO_SAVE, RESTORED, NOT_SIGNED_IN, NOT_CAPABLE,
+    WRONG_ACCOUNT, TOO_NEW, DAMAGED, CONFLICT, FOLDER_MISSING, FAILED,
+}
+
+data class LabelBackupOutcome(
+    val operation: LabelBackupOperation,
+    val result: LabelBackupResult,
+    val photos: Int = 0,
+    val newLabels: Int = 0,
+)
+
+data class LabelCount(val label: String, val photos: Int)
+
 data class LabelSavedCopy(
     val deviceId: String,
     val deviceLabel: String,
     val isThisDevice: Boolean,
     val savedAtMillis: Long,
     val revisionUid: String,
-    val labelCount: Int,
-)
+    val labels: List<LabelCount>,
+) {
+    val labelCount: Int get() = labels.size
+}
 
-sealed interface LabelBackupUiState {
-    data object Idle : LabelBackupUiState
-    data class Running(val operation: String, val step: String) : LabelBackupUiState
-    data class Finished(val ok: Boolean, val result: String) : LabelBackupUiState
+sealed interface LabelBackupState {
+    data object Idle : LabelBackupState
+    data class Running(
+        val operation: LabelBackupOperation,
+        val progress: LabelBackupProgress = LabelBackupProgress.QUEUED,
+    ) : LabelBackupState
+    data class Finished(val runId: String, val outcome: LabelBackupOutcome) : LabelBackupState
 }
 
 sealed interface LabelBackupCopies {
@@ -50,7 +79,7 @@ sealed interface LabelBackupCopies {
 }
 
 interface LabelBackup {
-    val state: StateFlow<LabelBackupUiState>
+    val state: StateFlow<LabelBackupState>
     fun isAvailable(userId: UserId?): Boolean
     suspend fun save(userId: UserId, createFolderConfirmed: Boolean): LabelBackupStart
     suspend fun listCopies(userId: UserId): LabelBackupCopies

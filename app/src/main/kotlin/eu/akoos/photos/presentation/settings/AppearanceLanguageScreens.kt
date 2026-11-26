@@ -23,6 +23,9 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.presentation.settings.rememberSettingsStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -52,7 +55,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,8 +62,6 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
@@ -314,14 +314,15 @@ fun LanguageSettingsScreen(
 @HiltViewModel
 class ClockFormatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
-    val choice: StateFlow<ClockFormat> = context.settingsDataStore.data
-        .map { ClockFormat.fromKey(it[SettingsKeys.CLOCK_FORMAT]) }
+    val choice: StateFlow<ClockFormat> = settingsStore.observe(Settings.CLOCK_FORMAT)
+        .map { ClockFormat.fromKey(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ClockFormat.AUTO)
 
     fun set(format: ClockFormat) {
-        viewModelScope.launch { context.settingsDataStore.edit { it[SettingsKeys.CLOCK_FORMAT] = format.key } }
+        viewModelScope.launch { settingsStore.set(Settings.CLOCK_FORMAT, format.key) }
     }
 }
 
@@ -329,15 +330,15 @@ class ClockFormatViewModel @Inject constructor(
 @HiltViewModel
 class ViewerLongPressViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
-    val opensMenu: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] == true }
+    val opensMenu: StateFlow<Boolean> = settingsStore.observe(Settings.VIEWER_LONG_PRESS_OPENS_MENU)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     fun set(opensMenu: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] = opensMenu }
+            settingsStore.set(Settings.VIEWER_LONG_PRESS_OPENS_MENU, opensMenu)
         }
     }
 }

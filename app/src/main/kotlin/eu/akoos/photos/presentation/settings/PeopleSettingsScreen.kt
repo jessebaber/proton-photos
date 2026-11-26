@@ -30,26 +30,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import eu.akoos.photos.presentation.people.PeopleColumnChoices
 import eu.akoos.photos.presentation.people.PeopleDisplay
-import eu.akoos.photos.presentation.people.ownPeopleDisplayOf
-import eu.akoos.photos.presentation.people.peopleDisplayOf
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -59,13 +53,17 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun PeopleSettingsScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
+    val store = rememberSettingsStore()
     val scope = rememberCoroutineScope()
-    val follow by remember {
-        ctx.settingsDataStore.data.map { it[SettingsKeys.PEOPLE_FOLLOW_ALBUMS] ?: true }
-    }.collectAsState(initial = true)
-    val own by remember {
-        ctx.settingsDataStore.data.map(::ownPeopleDisplayOf)
+    val follow by store.observe(Settings.PEOPLE_FOLLOW_ALBUMS).collectAsState(initial = true)
+    val own by combine(
+        store.observe(Settings.PEOPLE_VIEW_MODE),
+        store.observe(Settings.PEOPLE_GRID_COLUMNS),
+    ) { mode, cols ->
+        PeopleDisplay(
+            AlbumsViewMode.fromOrdinal(mode),
+            cols.coerceIn(PeopleColumnChoices.first(), PeopleColumnChoices.last()),
+        )
     }.collectAsState(initial = PeopleDisplay(AlbumsViewMode.Default, PeopleColumnChoices.first()))
 
     SettingsSubPageScaffold(title = stringResource(R.string.gallery_category_people), onBack = onBack) {
@@ -76,19 +74,23 @@ fun PeopleSettingsScreen(onBack: () -> Unit) {
                 checked = follow,
                 onCheckedChange = { on ->
                     scope.launch {
-                        ctx.settingsDataStore.edit { prefs ->
-                            // The page's own layout starts from the one it was just following, so
-                            // turning the switch off changes nothing on the page until a pick below.
-                            if (!on) {
-                                val shown = peopleDisplayOf(prefs)
-                                if (prefs[SettingsKeys.PEOPLE_VIEW_MODE] == null) {
-                                    prefs[SettingsKeys.PEOPLE_VIEW_MODE] = shown.viewMode.ordinal
+                        if (!on) {
+                            // Seed own layout from the albums layout currently shown when unfollowing.
+                            val albumsMode = store.get(Settings.ALBUMS_VIEW_MODE)
+                            val albumsCols = store.get(Settings.ALBUM_GRID_COLUMNS)
+                            val peopleMode = store.get(Settings.PEOPLE_VIEW_MODE)
+                            val peopleCols = store.get(Settings.PEOPLE_GRID_COLUMNS)
+                            store.edit {
+                                if (peopleMode == Settings.PEOPLE_VIEW_MODE.default) {
+                                    set(Settings.PEOPLE_VIEW_MODE, albumsMode)
                                 }
-                                if (prefs[SettingsKeys.PEOPLE_GRID_COLUMNS] == null) {
-                                    prefs[SettingsKeys.PEOPLE_GRID_COLUMNS] = shown.columns
+                                if (peopleCols == Settings.PEOPLE_GRID_COLUMNS.default) {
+                                    set(Settings.PEOPLE_GRID_COLUMNS, albumsCols)
                                 }
+                                set(Settings.PEOPLE_FOLLOW_ALBUMS, false)
                             }
-                            prefs[SettingsKeys.PEOPLE_FOLLOW_ALBUMS] = on
+                        } else {
+                            store.set(Settings.PEOPLE_FOLLOW_ALBUMS, true)
                         }
                     }
                 },
@@ -111,7 +113,7 @@ fun PeopleSettingsScreen(onBack: () -> Unit) {
                             selected = own.viewMode == mode,
                             onClick = {
                                 scope.launch {
-                                    ctx.settingsDataStore.edit { it[SettingsKeys.PEOPLE_VIEW_MODE] = mode.ordinal }
+                                    store.set(Settings.PEOPLE_VIEW_MODE, mode.ordinal)
                                 }
                             },
                             modifier = Modifier.weight(1f),
@@ -133,7 +135,7 @@ fun PeopleSettingsScreen(onBack: () -> Unit) {
                                 selected = own.columns == count,
                                 onClick = {
                                     scope.launch {
-                                        ctx.settingsDataStore.edit { it[SettingsKeys.PEOPLE_GRID_COLUMNS] = count }
+                                        store.set(Settings.PEOPLE_GRID_COLUMNS, count)
                                     }
                                 },
                                 modifier = Modifier.weight(1f),

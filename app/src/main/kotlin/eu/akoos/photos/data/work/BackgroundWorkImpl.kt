@@ -23,7 +23,12 @@
 package eu.akoos.photos.data.work
 
 import android.content.Context
+import androidx.lifecycle.asFlow
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import java.util.UUID
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.domain.importer.ImportAlbumMode
 import eu.akoos.photos.domain.work.BackgroundWork
@@ -153,4 +158,31 @@ class BackgroundWorkImpl @Inject constructor(
     override fun startScreenshotOverlay() = ScreenshotOverlayService.start(context)
     override fun stopScreenshotOverlay() = ScreenshotOverlayService.stop(context)
 
+    override fun scheduleSync(wifiOnly: Boolean, intervalMinutes: Long) {
+        SyncWorker.schedule(workManager, wifiOnly, intervalMinutes)
+    }
+
+    override fun scheduleFreeUpSpace(intervalMs: Long) {
+        FreeUpSpaceWorker.schedule(workManager, intervalMs)
+    }
+
+    override fun observeAlbumDownloads(): Flow<List<BackgroundWork.AlbumDownloadProgress>> =
+        workManager.getWorkInfosByTagLiveData(AlbumDownloadWorker.TAG).asFlow().map { infos ->
+            infos.filter { it.state == WorkInfo.State.RUNNING }.map { wi ->
+                BackgroundWork.AlbumDownloadProgress(
+                    id = wi.id.toString(),
+                    albumName = wi.progress.getString(AlbumDownloadWorker.KEY_ALBUM_NAME).orEmpty(),
+                    done = wi.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_DONE, 0),
+                    total = wi.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_TOTAL, 0),
+                    coverUri = wi.progress.getString(BackgroundWork.AlbumDownloadKeys.KEY_COVER_URI)
+                        ?.takeIf { it.isNotBlank() },
+                )
+            }.filter { it.total > 0 }
+        }
+
+    override fun cancelWorkById(id: String) {
+        runCatching { workManager.cancelWorkById(UUID.fromString(id)) }
+    }
+
 }
+

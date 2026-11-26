@@ -23,6 +23,8 @@
 package eu.akoos.photos.presentation.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import eu.akoos.photos.presentation.settings.rememberSettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,10 +40,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.gallery.AlbumDisplayFilter
 import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import eu.akoos.photos.presentation.gallery.albumDisplayFilterAt
@@ -83,16 +82,16 @@ internal fun albumsSettingsRows(
  */
 @Composable
 fun AlbumsSettingsScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
+    val settingsStore = rememberSettingsStore()
     val scope = rememberCoroutineScope()
     val viewMode = rememberAlbumsViewMode()
     val columns = rememberAlbumColumns()
     val showCollection = rememberAlbumsShowCollection()
-    val defaultFilter by remember {
-        ctx.settingsDataStore.data.map { albumDisplayFilterAt(it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0) }
+    val defaultFilter by remember(settingsStore) {
+        settingsStore.observe(Settings.ALBUMS_DEFAULT_FILTER).map { albumDisplayFilterAt(it) }
     }.collectAsState(initial = AlbumDisplayFilter.All)
-    val rememberLast by remember {
-        ctx.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false }
+    val rememberLast by remember(settingsStore) {
+        settingsStore.observe(Settings.ALBUMS_REMEMBER_LAST_FILTER)
     }.collectAsState(initial = false)
 
     SettingsSubPageScaffold(title = stringResource(R.string.gallery_tab_albums), onBack = onBack) {
@@ -113,7 +112,7 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
                                         selected = columns == count,
                                         onClick = {
                                             scope.launch {
-                                                ctx.settingsDataStore.edit { it[SettingsKeys.ALBUM_GRID_COLUMNS] = count }
+                                                settingsStore.set(Settings.ALBUM_GRID_COLUMNS, count)
                                             }
                                         },
                                         modifier = Modifier.weight(1f),
@@ -142,9 +141,7 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
                                         onClick = {
                                             if (enabled) {
                                                 scope.launch {
-                                                    ctx.settingsDataStore.edit {
-                                                        it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = filter.ordinal
-                                                    }
+                                                    settingsStore.set(Settings.ALBUMS_DEFAULT_FILTER, filter.ordinal)
                                                 }
                                             }
                                         },
@@ -162,7 +159,7 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
                                 checked = rememberLast,
                                 onCheckedChange = { on ->
                                     scope.launch {
-                                        ctx.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = on }
+                                        settingsStore.set(Settings.ALBUMS_REMEMBER_LAST_FILTER, on)
                                     }
                                 },
                             )
@@ -180,7 +177,7 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
                                 checked = showCollection,
                                 onCheckedChange = { on ->
                                     scope.launch {
-                                        ctx.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SHOW_COLLECTION] = on }
+                                        settingsStore.set(Settings.ALBUMS_SHOW_COLLECTION, on)
                                     }
                                 },
                             )

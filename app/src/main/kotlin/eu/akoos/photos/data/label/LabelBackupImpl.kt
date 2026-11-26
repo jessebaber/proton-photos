@@ -20,15 +20,21 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+
 package eu.akoos.photos.data.label
 
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.label.LabelBackup
 import eu.akoos.photos.domain.label.LabelBackupCopies
-import eu.akoos.photos.domain.label.LabelBackupStart
-import eu.akoos.photos.domain.label.LabelBackupUiState
-import eu.akoos.photos.domain.label.LabelSavedCopy as DomainCopy
-import eu.akoos.photos.data.label.LabelBackupResult
+import eu.akoos.photos.domain.label.LabelBackupOperation as DomOp
+import eu.akoos.photos.domain.label.LabelBackupOutcome as DomOutcome
+import eu.akoos.photos.domain.label.LabelBackupProgress as DomProgress
+import eu.akoos.photos.domain.label.LabelBackupResult as DomResult
+import eu.akoos.photos.domain.label.LabelBackupStart as DomStart
+import eu.akoos.photos.domain.label.LabelBackupState as DomState
+import eu.akoos.photos.domain.label.LabelBackupStep as DomStep
+import eu.akoos.photos.domain.label.LabelCount as DomCount
+import eu.akoos.photos.domain.label.LabelSavedCopy as DomCopy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,13 +49,13 @@ class LabelBackupImpl @Inject constructor(
     private val controller: LabelBackupController,
     @AppScope private val appScope: CoroutineScope,
 ) : LabelBackup {
-    override val state: StateFlow<LabelBackupUiState> = controller.state
+    override val state: StateFlow<DomState> = controller.state
         .map { it.toDomain() }
-        .stateIn(appScope, SharingStarted.Eagerly, LabelBackupUiState.Idle)
+        .stateIn(appScope, SharingStarted.Eagerly, DomState.Idle)
 
     override fun isAvailable(userId: UserId?): Boolean = controller.isAvailable(userId)
 
-    override suspend fun save(userId: UserId, createFolderConfirmed: Boolean): LabelBackupStart =
+    override suspend fun save(userId: UserId, createFolderConfirmed: Boolean): DomStart =
         controller.save(userId, createFolderConfirmed).toDomain()
 
     override suspend fun listCopies(userId: UserId): LabelBackupCopies =
@@ -60,46 +66,49 @@ class LabelBackupImpl @Inject constructor(
             LabelBackupRunner.Copies.Failed -> LabelBackupCopies.Failed
         }
 
-    override suspend fun restore(userId: UserId, copy: DomainCopy): LabelBackupStart {
+    override suspend fun restore(userId: UserId, copy: DomCopy): DomStart {
         val dataCopy = when (val listed = controller.listCopies(userId)) {
             is LabelBackupRunner.Copies.Found -> listed.copies.firstOrNull {
                 it.deviceId == copy.deviceId && it.revisionUid == copy.revisionUid
             }
             else -> null
-        } ?: return LabelBackupStart.NOT_AVAILABLE
+        } ?: return DomStart.NOT_AVAILABLE
         return controller.restore(userId, dataCopy).toDomain()
     }
 
     override fun cancel() = controller.cancel()
     override fun dismissResult() = controller.dismissResult()
 
-    private fun LabelBackupState.toDomain(): LabelBackupUiState = when (this) {
-        LabelBackupState.Idle -> LabelBackupUiState.Idle
-        is LabelBackupState.Running -> LabelBackupUiState.Running(
-            operation = operation.name,
-            step = progress.step.name,
+    private fun LabelBackupState.toDomain(): DomState = when (this) {
+        LabelBackupState.Idle -> DomState.Idle
+        is LabelBackupState.Running -> DomState.Running(
+            operation = DomOp.valueOf(operation.name),
+            progress = DomProgress(DomStep.valueOf(progress.step.name)),
         )
-        is LabelBackupState.Finished -> LabelBackupUiState.Finished(
-            ok = outcome.result == LabelBackupResult.SAVED ||
-                outcome.result == LabelBackupResult.RESTORED ||
-                outcome.result == LabelBackupResult.NOTHING_TO_SAVE,
-            result = outcome.result.name,
+        is LabelBackupState.Finished -> DomState.Finished(
+            runId = runId,
+            outcome = DomOutcome(
+                operation = DomOp.valueOf(outcome.operation.name),
+                result = DomResult.valueOf(outcome.result.name),
+                photos = outcome.photos,
+                newLabels = outcome.newLabels,
+            ),
         )
     }
 
-    private fun eu.akoos.photos.data.label.LabelBackupStart.toDomain() = when (this) {
-        eu.akoos.photos.data.label.LabelBackupStart.STARTED -> LabelBackupStart.STARTED
-        eu.akoos.photos.data.label.LabelBackupStart.ALREADY_RUNNING -> LabelBackupStart.ALREADY_RUNNING
-        eu.akoos.photos.data.label.LabelBackupStart.NOT_AVAILABLE -> LabelBackupStart.NOT_AVAILABLE
-        eu.akoos.photos.data.label.LabelBackupStart.FOLDER_MISSING -> LabelBackupStart.FOLDER_MISSING
+    private fun LabelBackupStart.toDomain() = when (this) {
+        LabelBackupStart.STARTED -> DomStart.STARTED
+        LabelBackupStart.ALREADY_RUNNING -> DomStart.ALREADY_RUNNING
+        LabelBackupStart.NOT_AVAILABLE -> DomStart.NOT_AVAILABLE
+        LabelBackupStart.FOLDER_MISSING -> DomStart.FOLDER_MISSING
     }
 
-    private fun LabelSavedCopy.toDomain() = DomainCopy(
+    private fun LabelSavedCopy.toDomain() = DomCopy(
         deviceId = deviceId,
         deviceLabel = deviceLabel,
         isThisDevice = isThisDevice,
         savedAtMillis = savedAtMillis,
         revisionUid = revisionUid,
-        labelCount = labels.size,
+        labels = labels.map { DomCount(it.label, it.photos) },
     )
 }

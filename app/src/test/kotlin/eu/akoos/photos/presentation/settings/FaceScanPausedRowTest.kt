@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.settings
 
-import eu.akoos.photos.data.face.FaceIndexingState
+import eu.akoos.photos.domain.ml.FaceIndexingState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

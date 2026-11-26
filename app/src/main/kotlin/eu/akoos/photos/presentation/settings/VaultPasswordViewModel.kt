@@ -25,7 +25,7 @@ package eu.akoos.photos.presentation.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import eu.akoos.photos.data.hidden.VaultPasswordStore
+import eu.akoos.photos.domain.vault.VaultPassword
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -38,7 +38,7 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class VaultPasswordViewModel @Inject constructor(
-    private val store: VaultPasswordStore,
+    private val store: VaultPassword,
 ) : ViewModel() {
 
     val isSet: StateFlow<Boolean> = store.observeIsSet()

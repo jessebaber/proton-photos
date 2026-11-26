@@ -29,6 +29,9 @@ interface PeopleCatalog {
     suspend fun personById(personId: Long): PersonRecord?
     fun observePersonForUser(userId: String, personId: Long): Flow<PersonRecord?>
     suspend fun namedPeopleForUser(userId: String): List<PersonRecord>
+    fun observeNamedPeopleForUser(userId: String): Flow<List<PersonRecord>>
+    fun observePeopleForUser(userId: String): Flow<List<PersonRecord>>
+    fun observeFaceCountForUser(userId: String): Flow<Int>
     suspend fun otherPersonId(userId: String): Long?
     suspend fun updateCoverAndCount(personId: Long, coverFaceId: String?, faceCount: Int)
 
