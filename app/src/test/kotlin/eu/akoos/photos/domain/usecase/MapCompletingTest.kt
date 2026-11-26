@@ -37,6 +37,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import eu.akoos.photos.data.usecase.PEOPLE_BUILD_REST_MAX_MS
+import eu.akoos.photos.data.usecase.PEOPLE_BUILD_REST_MIN_MS
+import eu.akoos.photos.data.usecase.peopleBuildRestMs
+import eu.akoos.photos.data.usecase.mapCompleting
 
 /**
  * The people list is built from a source that, while a sync runs, never stops changing: every build has to

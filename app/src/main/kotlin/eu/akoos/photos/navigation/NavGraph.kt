@@ -74,11 +74,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import androidx.datastore.preferences.core.edit
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.preferences.setContinueWithoutAccount
-import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
-import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+import eu.akoos.photos.di.settingsStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.thumbnails.ThumbnailDecrypt
+import eu.akoos.photos.domain.thumbnails.ThumbnailUrls
 import eu.akoos.photos.presentation.common.LocalViewerReturnKey
 import eu.akoos.photos.presentation.common.ViewerReturnTarget
 import eu.akoos.photos.presentation.common.resolve
@@ -318,6 +318,7 @@ private data class MetadataEditorRequest(
 class NavViewModel @Inject constructor(
     accountManager: AccountManager,
     @ApplicationContext context: Context,
+    settingsStore: SettingsStore,
 ) : ViewModel() {
     val isLoggedIn: StateFlow<Boolean?> = accountManager.getPrimaryUserId()
         .map { it != null }
@@ -334,8 +335,8 @@ class NavViewModel @Inject constructor(
      */
     val startupRoute: StateFlow<StartupRoute> = combine(
         accountManager.getPrimaryUserId().map { it != null },
-        context.settingsDataStore.data.map { it[SettingsKeys.ONBOARDING_COMPLETE] == true },
-        context.settingsDataStore.data.map { it[SettingsKeys.CONTINUE_WITHOUT_ACCOUNT] == true },
+        settingsStore.observe(Settings.ONBOARDING_COMPLETE),
+        settingsStore.observe(Settings.CONTINUE_WITHOUT_ACCOUNT),
     ) { loggedIn, onboarded, localOnly ->
         when {
             loggedIn && !onboarded -> StartupRoute.NeedsOnboarding
@@ -347,15 +348,15 @@ class NavViewModel @Inject constructor(
 }
 
 /**
- * Exposes the app-scoped [ThumbnailUrlStore] map to the composition. Obtained once at the nav root
+ * Exposes the app-scoped [ThumbnailUrls] map to the composition. Obtained once at the nav root
  * so every screen below inherits the live linkId -> thumbnail URL map through [LocalThumbnailUrls];
  * a decrypt that lands mid-scroll then repaints just the affected cell on any of them without each
  * screen wiring the store itself. [requestCover] backs [LocalCoverThumbnailRequester] the same way.
  */
 @HiltViewModel
 class ThumbnailUrlsViewModel @Inject constructor(
-    store: ThumbnailUrlStore,
-    private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
+    store: ThumbnailUrls,
+    private val thumbnailDecrypt: ThumbnailDecrypt,
     private val accountManager: AccountManager,
 ) : ViewModel() {
     val urls: StateFlow<Map<String, String>> = store.urls
@@ -364,7 +365,7 @@ class ThumbnailUrlsViewModel @Inject constructor(
     fun requestCover(linkId: String) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            thumbnailDecryptScheduler.requestPinnedCover(userId, linkId)
+            thumbnailDecrypt.requestPinnedCover(userId, linkId)
         }
     }
 }
@@ -426,12 +427,12 @@ fun NavGraph(
     // Which map the entry points open: false (default) = the modern world map, true = the classic OSM map.
     val mapEntryCtx = LocalContext.current
     val mapStyleOsm by remember(mapEntryCtx) {
-        mapEntryCtx.settingsDataStore.data.map { it[SettingsKeys.MAP_STYLE_OSM] ?: false }
+        mapEntryCtx.settingsStore().observe(Settings.MAP_STYLE_OSM)
     }.collectAsStateWithLifecycle(initialValue = false)
     // Whether the one-time map-style chooser has already been answered. Until it has, a map entry
     // point raises the chooser instead of navigating, so the style is picked at the moment it matters.
     val mapStylePrompted by remember(mapEntryCtx) {
-        mapEntryCtx.settingsDataStore.data.map { it[SettingsKeys.MAP_STYLE_PROMPTED] ?: false }
+        mapEntryCtx.settingsStore().observe(Settings.MAP_STYLE_PROMPTED)
     }.collectAsStateWithLifecycle(initialValue = false)
     var showMapStyleChooser by remember { mutableStateOf(false) }
     // When the chooser was raised by the on-map switch button (not the first-run prompt), the registered
@@ -733,11 +734,11 @@ fun NavGraph(
                 onSignInClick = {
                     // A prior local-only choice is consumed when the user chooses to sign in, so a
                     // later sign-out returns to this screen rather than back into local-only mode.
-                    scope.launch { navContext.setContinueWithoutAccount(false) }
+                    scope.launch { navContext.settingsStore().set(Settings.CONTINUE_WITHOUT_ACCOUNT, false) }
                     onStartLogin()
                 },
                 onContinueWithoutAccount = {
-                    scope.launch { navContext.setContinueWithoutAccount(true) }
+                    scope.launch { navContext.settingsStore().set(Settings.CONTINUE_WITHOUT_ACCOUNT, true) }
                 },
             )
         }
@@ -805,7 +806,7 @@ fun NavGraph(
             LaunchedEffect(Unit) {
                 if (whatsNewChecked) return@LaunchedEffect
                 whatsNewChecked = true
-                val seen = whatsNewContext.settingsDataStore.data.first()[SettingsKeys.WHATS_NEW_SEEN_VERSION] ?: 0
+                val seen = whatsNewContext.settingsStore().get(Settings.WHATS_NEW_SEEN_VERSION)
                 val whatsNewPending = seen < BuildConfig.VERSION_CODE
                 if (thankYouVm.shouldShow()) {
                     // On the 2.5.0 update the thank-you leads: it shows first, and What's New (if still
@@ -2260,9 +2261,9 @@ fun NavGraph(
                 onChoose = { classic ->
                     showMapStyleChooser = false
                     scope.launch {
-                        navContext.settingsDataStore.edit {
-                            it[SettingsKeys.MAP_STYLE_OSM] = classic
-                            it[SettingsKeys.MAP_STYLE_PROMPTED] = true
+                        navContext.settingsStore().edit {
+                            set(Settings.MAP_STYLE_OSM, classic)
+                            set(Settings.MAP_STYLE_PROMPTED, true)
                         }
                     }
                     // The switch pops by the registered pattern, which names the map destination exactly

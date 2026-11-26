@@ -118,6 +118,7 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.model.PersonSummary
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
@@ -173,7 +174,7 @@ internal fun faceScanPausedRow(pauseSwitchOn: Boolean, state: FaceIndexingState)
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val workManager: WorkManager,
-    private val freeUpSpace: FreeUpSpaceUseCase,
+    private val freeUpSpace: FreeUpSpaceUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,
@@ -2137,7 +2138,7 @@ class SettingsViewModel @Inject constructor(
                 runCatching { PhotoWidgetUpdateWorker.cancelAll(context) }
                 // 1. Stop anything that could re-decrypt content back into the caches we are about
                 //    to wipe, and stop the persistent process-keeper service.
-                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context, workManager)
+                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context)
                 // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
                 //    token disappears (heap can't recover keys; the re-login starts from a clean
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).

@@ -23,7 +23,7 @@
 package eu.akoos.photos.data.face
 
 import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
-import eu.akoos.photos.util.SourceRetryBook
+import eu.akoos.photos.data.ml.SourceRetryBook
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

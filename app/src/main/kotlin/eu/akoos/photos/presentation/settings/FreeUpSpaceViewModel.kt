@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.settings
 
+import eu.akoos.photos.domain.usecase.FreeUpResult
+
 import android.app.PendingIntent
 import android.content.Context
 import androidx.lifecycle.ViewModel
@@ -57,7 +59,7 @@ import javax.inject.Inject
 @HiltViewModel
 class FreeUpSpaceViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val freeUpSpace: FreeUpSpaceUseCase,
+    private val freeUpSpace: FreeUpSpaceUseCase<PendingIntent>,
     private val syncStateRepo: SyncStateRepository,
     private val localRepo: eu.akoos.photos.domain.repository.LocalMediaRepository,
     private val accountManager: AccountManager,
@@ -171,9 +173,9 @@ class FreeUpSpaceViewModel @Inject constructor(
         }
     }
 
-    private suspend fun handle(result: FreeUpSpaceUseCase.FreeUpResult) {
+    private suspend fun handle(result: FreeUpResult<PendingIntent>) {
         when (result) {
-            is FreeUpSpaceUseCase.FreeUpResult.Done -> {
+            is FreeUpResult.Done -> {
                 freedThisRun += result.freed
                 _uiState.update {
                     it.copy(
@@ -183,7 +185,7 @@ class FreeUpSpaceViewModel @Inject constructor(
                 }
                 load()
             }
-            is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+            is FreeUpResult.NeedsPermission<PendingIntent> -> {
                 pendingLocalUris = result.localUris
                 pendingRemaining = result.remaining
                 _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }

@@ -42,6 +42,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.AssignPersonNameUseCaseImpl
 
 /** Folding a group into a named person writes in one transaction, so a write that fails leaves both as they were. */
 @RunWith(RobolectricTestRunner::class)
@@ -63,7 +64,7 @@ class AssignPersonNameTransactionDbTest {
     @After
     fun tearDown() = db.close()
 
-    private fun assign(personDao: PersonDao = db.personDao()) = AssignPersonNameUseCase(
+    private fun assign(personDao: PersonDao = db.personDao()) = AssignPersonNameUseCaseImpl(
         db.faceDao(), personDao, db.personManualPhotoDao(), db.notPersonDao(),
         db.personCoverDao(), db.clusterSummaryDao(), db,
     )

@@ -23,21 +23,12 @@
 package eu.akoos.photos.util
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.work.WorkManager
 import coil.imageLoader
-import eu.akoos.photos.data.importer.ImportScanCache
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.shellPresentationEntryPoint
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.domain.usecase.StageImportUseCase
-import eu.akoos.photos.service.BackgroundSyncService
-import eu.akoos.photos.worker.AlbumDownloadWorker
-import eu.akoos.photos.worker.ImportWorker
-import eu.akoos.photos.worker.MetadataEditWorker
-import eu.akoos.photos.worker.SyncWorker
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.first
 
 /**
  * The parts of leaving an account that are plain files and scheduled work, in one place both ways out
@@ -59,21 +50,13 @@ object SignOutCleanup {
         "video_editor",
         "motion",
         StageImportUseCase.THUMB_DIR,
-        ImportScanCache.DIR_NAME,
+        "import_scan",
     )
 
     /** Stop everything scheduled against the account: backup, album downloads, an import, queued
      *  metadata edits and the service that keeps the process alive. */
-    fun stopBackgroundWork(context: Context, workManager: WorkManager) {
-        runCatching {
-            SyncWorker.cancel(workManager)
-            workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT)
-            workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER)
-            workManager.cancelAllWorkByTag(AlbumDownloadWorker.TAG)
-            workManager.cancelAllWorkByTag(ImportWorker.TAG)
-            workManager.cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)
-            BackgroundSyncService.stop(context)
-        }
+    fun stopBackgroundWork(context: Context) {
+        runCatching { shellPresentationEntryPoint(context).backgroundWork().cancelAccountSessionWork() }
     }
 
     /** Delete the decrypted photo content cached on disk and in the image loader. Blocking file work,
@@ -105,21 +88,15 @@ object SignOutCleanup {
     fun consumeUnfinishedSignIn(userId: String): Boolean = unfinishedSignIns.remove(userId)
 
     suspend fun markPending(context: Context, userId: String) {
-        context.settingsDataStore.edit { p ->
-            p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() + userId
-        }
+        shellPresentationEntryPoint(context).settingsStore().update(Settings.SIGN_OUT_CLEANUP_PENDING) { it + userId }
     }
 
     suspend fun clearPending(context: Context, userId: String) {
-        context.settingsDataStore.edit { p ->
-            val left = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() - userId
-            if (left.isEmpty()) p.remove(SettingsKeys.SIGN_OUT_CLEANUP_PENDING)
-            else p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = left
-        }
+        shellPresentationEntryPoint(context).settingsStore().update(Settings.SIGN_OUT_CLEANUP_PENDING) { it - userId }
     }
 
     suspend fun pending(context: Context): Set<String> =
-        context.settingsDataStore.data.first()[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty()
+        shellPresentationEntryPoint(context).settingsStore().get(Settings.SIGN_OUT_CLEANUP_PENDING)
 
     fun runningNow(): Set<String> = running.toSet()
 

@@ -45,6 +45,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.RenamePersonUseCaseImpl
 
 /**
  * Renaming a person and taking the name away, against an in-memory database: a removed name leaves no face
@@ -70,7 +71,7 @@ class RenamePersonDbTest {
     @After
     fun tearDown() = db.close()
 
-    private fun rename(faceDao: FaceDao = db.faceDao()) = RenamePersonUseCase(faceDao, db.personDao(), db, FaceEditCounter())
+    private fun rename(faceDao: FaceDao = db.faceDao()) = RenamePersonUseCaseImpl(faceDao, db.personDao(), db, FaceEditCounter())
 
     private suspend fun person(id: Long, name: String?) =
         db.personDao().upsert(PersonEntity(id = id, userId = acct, displayName = name, faceCount = 1))

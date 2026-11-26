@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.viewer
 
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -76,6 +78,7 @@ import eu.akoos.photos.presentation.gallery.isItemFavorite
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.CategorizeItem
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.data.db.dao.LocalTagDao
@@ -103,6 +106,7 @@ import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
+import eu.akoos.photos.domain.catalog.LocationCatalog
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.UserPhotoTags
@@ -243,7 +247,7 @@ class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cloudRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val downloadPhotos: DownloadPhotosUseCase,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val hiddenStorage: HiddenStorageManager,
@@ -258,6 +262,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val forceUploadLocalUris: eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val photoLocationDao: PhotoLocationDao,
+    private val locationCatalog: LocationCatalog,
     private val localTagDao: LocalTagDao,
     private val photoListingDao: PhotoListingDao,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
@@ -639,7 +644,7 @@ class PhotoViewerViewModel @Inject constructor(
 
     /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
      *  system trash dialog. Cleared on commit OR on cancel — never leaks across user actions. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     fun deleteItem(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         viewModelScope.launch {
@@ -656,9 +661,9 @@ class PhotoViewerViewModel @Inject constructor(
             )
             _deleteState.value = when (result) {
                 // Android 10 refused to remove another app's file: nothing changed, the photo stays.
-                is DeletePhotoUseCase.Result.Success if result.keptOnDevice.isNotEmpty() ->
+                is DeletePhotoResult.Success if result.keptOnDevice.isNotEmpty() ->
                     DeleteState.Failed(context.getString(R.string.viewer_delete_vault_failed))
-                is DeletePhotoUseCase.Result.Success           -> {
+                is DeletePhotoResult.Success           -> {
                     // A cloud-trash delete is reversible; offer Undo through the shared bar so it
                     // shows even after the viewer closes. A local-only free-up carries no undo.
                     if (deleteFromCloud) {
@@ -671,8 +676,8 @@ class PhotoViewerViewModel @Inject constructor(
                     }
                     DeleteState.Done
                 }
-                is DeletePhotoUseCase.Result.CloudDeleteFailed -> DeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))
-                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                is DeletePhotoResult.CloudDeleteFailed -> DeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))
+                is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                     pendingPermissionResult = result
                     DeleteState.NeedsPermission(result.pendingIntent)
                 }
@@ -933,9 +938,9 @@ class PhotoViewerViewModel @Inject constructor(
                     freeUpSpace     = pending.freeUpSpace,
                     hide            = pending.hide,
                 )
-            } else DeletePhotoUseCase.Result.Success()
+            } else DeletePhotoResult.Success()
 
-            if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
+            if (cloudResult is DeletePhotoResult.CloudDeleteFailed) {
                 _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))
                 return@launch
             }
@@ -1030,9 +1035,9 @@ class PhotoViewerViewModel @Inject constructor(
                     PhotoGpsResolver.localGps(context, item.local.uri, item.local.mimeType)
                 is GalleryItem.Synced ->
                     PhotoGpsResolver.localGps(context, item.local.uri, item.local.mimeType)
-                        ?: userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                        ?: userId?.let { PhotoGpsResolver.cloudGps(locationCatalog, it, item.cloud.linkId) }
                 is GalleryItem.CloudOnly ->
-                    userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                    userId?.let { PhotoGpsResolver.cloudGps(locationCatalog, it, item.cloud.linkId) }
             } ?: metadataGps()
             _detailsGps.value = latLng?.let { DetailsGps(it.first, it.second) }
             if (latLng != null) {
@@ -1340,17 +1345,17 @@ class PhotoViewerViewModel @Inject constructor(
                 hide            = true,    // route through createDeleteRequest + HIDDEN status
             )
             when (result) {
-                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                     HiddenVaultDiagnostics.originalsAwaitingConsent(1)
                     pendingPermissionResult = result
                     _deleteState.value = DeleteState.NeedsPermission(result.pendingIntent)
                 }
                 // Android 10 refused to remove another app's original, so the vault copy goes again.
-                is DeletePhotoUseCase.Result.Success if result.keptOnDevice.isNotEmpty() -> {
+                is DeletePhotoResult.Success if result.keptOnDevice.isNotEmpty() -> {
                     cancelPendingHide()
                     _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_hide_failed))
                 }
-                is DeletePhotoUseCase.Result.Success -> {
+                is DeletePhotoResult.Success -> {
                     HiddenVaultDiagnostics.originalsRemoved(1, neededConsent = false)
                     // Pre-Q: delete succeeded synchronously. Commit the hidden URI now.
                     // Snapshot the vault URI first: commitPendingHide() clears it.
@@ -1359,7 +1364,7 @@ class PhotoViewerViewModel @Inject constructor(
                     buildHideUndoAction(listOfNotNull(hiddenUri))?.let { undoController.offer(it) }
                     _deleteState.value = DeleteState.Done
                 }
-                is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                is DeletePhotoResult.CloudDeleteFailed -> {
                     cancelPendingHide()   // shouldn't happen with deleteFromCloud=false
                     _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_hide_failed))
                 }

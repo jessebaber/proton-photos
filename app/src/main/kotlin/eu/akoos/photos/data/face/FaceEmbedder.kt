@@ -41,6 +41,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.math.sqrt
+import eu.akoos.photos.domain.usecase.normalize
 
 /**
  * Turns one aligned face crop into a [DIM]-d embedding by running the GhostFaceNet recognition

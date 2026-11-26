@@ -28,7 +28,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.share.ShareBackupActivity
 
 /**
  * Builds the ACTION_SEND / ACTION_SEND_MULTIPLE intents that hand decrypted media to other
@@ -117,7 +116,7 @@ object ShareIntentBuilder {
     fun chooser(context: Context, target: Intent, title: CharSequence): Intent =
         Intent.createChooser(target, title).putExtra(
             Intent.EXTRA_EXCLUDE_COMPONENTS,
-            arrayOf(ComponentName(context, ShareBackupActivity::class.java)),
+            arrayOf(ComponentName(context.packageName, "eu.akoos.photos.presentation.share.ShareBackupActivity")),
         )
 
     /**

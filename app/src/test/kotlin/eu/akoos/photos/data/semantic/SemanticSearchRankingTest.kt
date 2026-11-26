@@ -22,9 +22,9 @@
 
 package eu.akoos.photos.data.semantic
 
+import eu.akoos.photos.data.usecase.topKByCosine
+import eu.akoos.photos.data.usecase.unpackSemanticEmbedding
 import eu.akoos.photos.domain.usecase.SemanticHit
-import eu.akoos.photos.domain.usecase.topKByCosine
-import eu.akoos.photos.domain.usecase.unpackSemanticEmbedding
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertEquals

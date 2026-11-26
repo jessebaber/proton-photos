@@ -46,6 +46,9 @@ import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Random
+import eu.akoos.photos.data.usecase.AssignPersonNameUseCaseImpl
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
+import eu.akoos.photos.data.usecase.IncrementalBatch
 
 /**
  * The centroid cache a batched grouping matches against is repaired only where a curation edit left it off: a
@@ -132,7 +135,7 @@ class ClusterSummaryRepairDbTest {
         assertTrue("ticks=$ticks", ticks >= PEOPLE.toInt() / 64)
         val before = cache()
 
-        val assign = AssignPersonNameUseCase(
+        val assign = AssignPersonNameUseCaseImpl(
             db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
             db.personCoverDao(), db.clusterSummaryDao(), db,
         )

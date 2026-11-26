@@ -23,9 +23,9 @@
 package eu.akoos.photos.util
 
 import android.content.Context
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.settingsStore
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.settings.Settings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -39,8 +39,8 @@ private val MEMORY_MILESTONE_YEARS = listOf(1, 2, 5, 10)
 const val ON_THIS_DAY_MAX_WINDOW_DAYS = 3
 
 /** The user's "days either side" choice for "On this day", 0 (the day itself) to [ON_THIS_DAY_MAX_WINDOW_DAYS]. */
-fun Context.onThisDayWindowDays(): Flow<Int> = settingsDataStore.data
-    .map { (it[SettingsKeys.ON_THIS_DAY_WINDOW_DAYS] ?: 0).coerceIn(0, ON_THIS_DAY_MAX_WINDOW_DAYS) }
+fun Context.onThisDayWindowDays(): Flow<Int> = settingsStore().observe(Settings.ON_THIS_DAY_WINDOW_DAYS)
+    .map { it.coerceIn(0, ON_THIS_DAY_MAX_WINDOW_DAYS) }
     .distinctUntilChanged()
 
 /**

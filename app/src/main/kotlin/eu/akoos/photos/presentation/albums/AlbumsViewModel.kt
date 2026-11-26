@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.domain.usecase.MoveToFolderResult
+
 import android.content.Context
 import android.content.IntentSender
 import androidx.datastore.preferences.core.edit
@@ -158,7 +160,7 @@ class AlbumsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
     private val localMediaRepo: LocalMediaRepository,
-    private val moveToFolder: MoveToFolderUseCase,
+    private val moveToFolder: MoveToFolderUseCase<IntentSender>,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
@@ -710,19 +712,19 @@ class AlbumsViewModel @Inject constructor(
         _pendingMoveIntent.value = null
     }
 
-    private suspend fun handleRenameResult(result: MoveToFolderUseCase.Result, newName: String) {
+    private suspend fun handleRenameResult(result: MoveToFolderResult<IntentSender>, newName: String) {
         when (result) {
-            is MoveToFolderUseCase.Result.Moved -> {
+            is MoveToFolderResult.Moved -> {
                 stashedMove = null
                 _pendingMoveIntent.value = null
                 _folderRenameConfirmation.emit(newName)
             }
-            is MoveToFolderUseCase.Result.NeedsPermission -> {
+            is MoveToFolderResult.NeedsPermission<IntentSender> -> {
                 stashedMove = result.pending
                 _pendingMoveIntent.value = result.intentSender
             }
-            is MoveToFolderUseCase.Result.Failed,
-            MoveToFolderUseCase.Result.NothingToDo -> {
+            is MoveToFolderResult.Failed,
+            MoveToFolderResult.NothingToDo -> {
                 stashedMove = null
                 _pendingMoveIntent.value = null
             }

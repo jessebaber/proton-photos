@@ -31,7 +31,8 @@ import android.os.Build
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.exifinterface.media.ExifInterface
-import eu.akoos.photos.data.upload.LocalOverwriteGuard
+import eu.akoos.photos.di.shellPresentationEntryPoint
+import eu.akoos.photos.domain.entity.isUsableGpsFix
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileOutputStream
@@ -230,7 +231,7 @@ object ExifHelper {
                 ?: return PhotoMetadata()
             val exif = stream.use { ExifInterface(it) }
             // A 0, 0 fix is what a camera writes when it has none, so it reads as no location.
-            val latLon = exif.latLong?.takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(it[0], it[1]) }
+            val latLon = exif.latLong?.takeIf { isUsableGpsFix(it[0], it[1]) }
             PhotoMetadata(
                 make = exif.getAttribute(ExifInterface.TAG_MAKE),
                 model = exif.getAttribute(ExifInterface.TAG_MODEL),
@@ -445,7 +446,7 @@ object ExifHelper {
         if (config.isNoOp) return StripResult.Failed
         return try {
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
-            LocalOverwriteGuard(context).run(uri) {
+            shellPresentationEntryPoint(context).localOverwrite().run(uri) {
                 val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                     ?: throw java.io.IOException("could not open $uri")
                 fd.use {

@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
+
 import android.util.Log
 import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
