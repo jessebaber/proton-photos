@@ -57,7 +57,7 @@ import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
 import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.data.semantic.SemanticModelManager
 import eu.akoos.photos.data.semantic.SemanticModelPreparation
-import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.util.formatBytes
 import eu.akoos.photos.util.ModelDownloadKind
 import eu.akoos.photos.util.ModelDownloadState
 import kotlinx.coroutines.CancellationException
