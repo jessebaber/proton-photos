@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CarryOverToReplacement
+import eu.akoos.photos.data.usecase.CloudPhotoExifRewriter
+import eu.akoos.photos.data.usecase.WriteSyncedPhotoMetadataUseCase
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.mockk.coVerify

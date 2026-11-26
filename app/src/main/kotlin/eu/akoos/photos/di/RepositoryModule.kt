@@ -32,8 +32,6 @@ import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
-import eu.akoos.photos.domain.usecase.CloudPhotoExifRewriter
-import eu.akoos.photos.domain.usecase.CloudPhotoExifRewriterImpl
 import javax.inject.Singleton
 
 @Module
@@ -52,7 +50,4 @@ abstract class RepositoryModule {
     @Singleton
     abstract fun bindSyncStateRepository(impl: SyncStateRepositoryImpl): SyncStateRepository
 
-    @Binds
-    @Singleton
-    abstract fun bindCloudPhotoExifRewriter(impl: CloudPhotoExifRewriterImpl): CloudPhotoExifRewriter
 }
