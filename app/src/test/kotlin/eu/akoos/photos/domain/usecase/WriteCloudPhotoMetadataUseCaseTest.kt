@@ -33,6 +33,7 @@ import kotlinx.coroutines.test.runTest
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.TestDatabase
+import eu.akoos.photos.data.usecase.CloudLinkCheck
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto

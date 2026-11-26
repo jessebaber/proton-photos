@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.duplicates
 
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import android.util.Log
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -52,6 +54,7 @@ import eu.akoos.photos.data.repository.drive.PerceptualHashScheduler
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -109,7 +112,7 @@ internal fun shouldRecluster(current: Map<String, Long>, last: Map<String, Long>
 class DuplicateFinderViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val findDuplicates: FindDuplicatesUseCase,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
     private val perceptualHashDao: PerceptualHashDao,
@@ -162,7 +165,7 @@ class DuplicateFinderViewModel @Inject constructor(
     private val recentlyDeleted = MutableStateFlow<Set<String>>(emptySet())
 
     /** Deferred cloud-delete work held while the Android 11+ system trash dialog is up. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     // The item list last handed to the background hash scheduler. The combined flow re-emits on
     // every single hash write, but the scheduler only needs to (re)scan when the library itself
@@ -542,18 +545,18 @@ class DuplicateFinderViewModel @Inject constructor(
                     deleteFromCloud = true,
                 )
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // A copy Android 10 refused to remove is still there, so it stays in its group.
                         val landed = result.landed(toDelete)
                         removeFromGroup(group, landed.map { it.stableId }.toSet())
                         markDeleted(landed)
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         _uiState.update { it.copy(pendingDeleteIntent = result.pendingIntent) }
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    is DeletePhotoResult.CloudDeleteFailed ->
                         _uiState.update { it.copy(errorMessage = "drive") }
                 }
             } catch (e: Exception) {
@@ -613,7 +616,7 @@ class DuplicateFinderViewModel @Inject constructor(
                     deleteFromCloud = true,
                 )
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // A copy Android 10 refused to remove is still there, so it stays in its group.
                         perGroup.forEach { (group, items) ->
                             removeFromGroup(group, result.landed(items).map { it.stableId }.toSet())
@@ -621,11 +624,11 @@ class DuplicateFinderViewModel @Inject constructor(
                         markDeleted(result.landed(toDelete))
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         _uiState.update { it.copy(pendingDeleteIntent = result.pendingIntent) }
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    is DeletePhotoResult.CloudDeleteFailed ->
                         _uiState.update { it.copy(errorMessage = "drive") }
                 }
             } catch (e: Exception) {
@@ -656,11 +659,11 @@ class DuplicateFinderViewModel @Inject constructor(
                 // later chunk declined leaves exactly the earlier ones marked.
                 val result = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         markDeleted(pending.itemsBeingDeleted)
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                    is DeletePhotoResult.CloudDeleteFailed -> {
                         // The system already carried out the device delete before handing back
                         // here, so this copy IS gone from the phone even though Drive kept its own.
                         // It has to be recorded as deleted for exactly that reason: left out, the
@@ -669,7 +672,7 @@ class DuplicateFinderViewModel @Inject constructor(
                         markDeleted(pending.itemsBeingDeleted)
                         _uiState.update { it.copy(errorMessage = "drive") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         // The next chunk, launched like the first.
                         markDeleted(pending.itemsBeingDeleted)
                         pendingPermissionResult = result

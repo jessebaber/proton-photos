@@ -1,0 +1,210 @@
+# stream: feat/domain-module
+
+# stream: feat/domain-contracts
+data-presentation eu/akoos/photos/data/gif/GifExporter.kt
+data-presentation eu/akoos/photos/service/GifExportService.kt
+data-presentation eu/akoos/photos/service/ModelDownloadService.kt
+data-presentation eu/akoos/photos/service/ScreenshotOverlayService.kt
+domain-location eu/akoos/photos/domain/ocr/TextBlockCleanup.kt
+domain-location eu/akoos/photos/domain/ocr/TextRecognition.kt
+domain-location eu/akoos/photos/domain/repository/DrivePhotoRepository.kt
+domain-location eu/akoos/photos/domain/repository/NewsRepository.kt
+
+# stream: feat/settings-store
+
+# stream: feat/extract-media
+
+# stream: feat/extract-people
+domain-location eu/akoos/photos/domain/usecase/AddPhotosToPersonUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/AssignFacesToPersonUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/AssignPersonNameUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/AutoMergePeopleUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/ClusterFacesUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/FaceIndexTransfer.kt
+domain-location eu/akoos/photos/domain/usecase/FaceRekeyMergePlan.kt
+domain-location eu/akoos/photos/domain/usecase/HideSimilarFacesUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/IgnorePeopleUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/MigrateGuestFaceDataUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/NotThisPersonUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/ObservePeopleUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/ObservePlacesUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/PersonCentroids.kt
+domain-location eu/akoos/photos/domain/usecase/PersonNames.kt
+domain-location eu/akoos/photos/domain/usecase/RekeyPhotoFacesUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/RenamePersonUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/SemanticSearchUseCase.kt
+
+# stream: feat/extract-sync
+domain-location eu/akoos/photos/domain/usecase/DrivePairLookup.kt
+domain-location eu/akoos/photos/domain/usecase/GetGalleryItemsUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/ReconcileSyncStateUseCase.kt
+
+# stream: feat/presentation-facades
+
+# stream: feat/extract-upload
+domain-location eu/akoos/photos/domain/usecase/BucketAlbumMirror.kt
+domain-location eu/akoos/photos/domain/usecase/FolderAlbumBackfill.kt
+domain-location eu/akoos/photos/domain/usecase/FolderMoveAlbumFollow.kt
+domain-location eu/akoos/photos/domain/usecase/ForceUploadLocalUrisUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/InvalidateStrippedLocationsUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/QueuedAlbumJoiner.kt
+domain-location eu/akoos/photos/domain/usecase/UploadBatchSupport.kt
+domain-location eu/akoos/photos/domain/usecase/UploadBytePreparer.kt
+domain-location eu/akoos/photos/domain/usecase/UploadPendingUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/UploadStructuralStripper.kt
+
+# stream: feat/extract-metadata
+domain-location eu/akoos/photos/domain/usecase/CarryOverToReplacement.kt
+domain-location eu/akoos/photos/domain/usecase/CloudCompressQueue.kt
+domain-location eu/akoos/photos/domain/usecase/CloudMetadataSaveController.kt
+domain-location eu/akoos/photos/domain/usecase/CloudPhotoExifRewriterImpl.kt
+domain-location eu/akoos/photos/domain/usecase/CloudPhotoReplacement.kt
+domain-location eu/akoos/photos/domain/usecase/CompressCloudPhotoUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/WriteCloudPhotoMetadataUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/WriteSyncedPhotoMetadataUseCase.kt
+
+# stream: feat/extract-import
+domain-location eu/akoos/photos/domain/usecase/ImportTakeoutUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/StageImportUseCase.kt
+domain-location eu/akoos/photos/domain/usecase/UndoImportUseCase.kt
+
+# stream: feat/presentation-settings
+presentation-data eu/akoos/photos/presentation/settings/AccountScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/ActivityScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/ActivityViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/AlbumsSettingsScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/AppearanceLanguageScreens.kt
+presentation-data eu/akoos/photos/presentation/settings/ExcludedFoldersViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/FaceFileImportViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/LabelBackupRules.kt
+presentation-data eu/akoos/photos/presentation/settings/LabelRestoreDrawer.kt
+presentation-data eu/akoos/photos/presentation/settings/LabelSelection.kt
+presentation-data eu/akoos/photos/presentation/settings/LabelsSettingsScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/LabelsSettingsViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/LargeLibrarySimViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/MlDriveSyncRules.kt
+presentation-data eu/akoos/photos/presentation/settings/MlDriveSyncViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/NotificationSettingsViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/PendingDeleteHandler.kt
+presentation-data eu/akoos/photos/presentation/settings/PeopleFoundCount.kt
+presentation-data eu/akoos/photos/presentation/settings/PeopleSettingsScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/SdkSettingsScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/SettingsScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/SettingsViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/SharedBackupCard.kt
+presentation-data eu/akoos/photos/presentation/settings/SignOutVaultSheet.kt
+presentation-data eu/akoos/photos/presentation/settings/SyncFoldersViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/TimelineFilterScreen.kt
+presentation-data eu/akoos/photos/presentation/settings/TimelineFilterViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/TrashViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/VaultPasswordSheet.kt
+presentation-data eu/akoos/photos/presentation/settings/VaultPasswordViewModel.kt
+presentation-data eu/akoos/photos/presentation/settings/compression/CodecOptions.kt
+presentation-service eu/akoos/photos/presentation/settings/NotificationSettingsViewModel.kt
+presentation-service eu/akoos/photos/presentation/settings/SettingsViewModel.kt
+presentation-worker eu/akoos/photos/presentation/settings/ActivityViewModel.kt
+presentation-worker eu/akoos/photos/presentation/settings/ExcludedFoldersViewModel.kt
+presentation-worker eu/akoos/photos/presentation/settings/NotificationSettingsViewModel.kt
+presentation-worker eu/akoos/photos/presentation/settings/SettingsViewModel.kt
+presentation-worker eu/akoos/photos/presentation/settings/SyncFoldersViewModel.kt
+
+# stream: feat/presentation-media
+presentation-crypto eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
+presentation-data eu/akoos/photos/presentation/common/AddLabelsAction.kt
+presentation-data eu/akoos/photos/presentation/common/ConfirmSheet.kt
+presentation-data eu/akoos/photos/presentation/common/FavoriteSelection.kt
+presentation-data eu/akoos/photos/presentation/common/GalleryItemSelectionController.kt
+presentation-data eu/akoos/photos/presentation/common/HideConfirmation.kt
+presentation-data eu/akoos/photos/presentation/common/MoveToFolderController.kt
+presentation-data eu/akoos/photos/presentation/common/UndoController.kt
+presentation-data eu/akoos/photos/presentation/editor/PhotoEditorViewModel.kt
+presentation-data eu/akoos/photos/presentation/editor/VideoEditorViewModel.kt
+presentation-data eu/akoos/photos/presentation/gallery/AddToAlbumMembershipViewModel.kt
+presentation-data eu/akoos/photos/presentation/gallery/GalleryGrid.kt
+presentation-data eu/akoos/photos/presentation/gallery/GalleryRails.kt
+presentation-data eu/akoos/photos/presentation/gallery/GalleryScreen.kt
+presentation-data eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
+presentation-data eu/akoos/photos/presentation/gallery/GridZoom.kt
+presentation-data eu/akoos/photos/presentation/metadata/MetadataEditorViewModel.kt
+presentation-data eu/akoos/photos/presentation/viewer/DetailsMapBox.kt
+presentation-data eu/akoos/photos/presentation/viewer/LabelEditorInput.kt
+presentation-data eu/akoos/photos/presentation/viewer/PhotoViewerScreen.kt
+presentation-data eu/akoos/photos/presentation/viewer/PhotoViewerViewModel.kt
+presentation-data eu/akoos/photos/presentation/viewer/ViewerTextOverlay.kt
+presentation-service eu/akoos/photos/presentation/gifmaker/GifMakerViewModel.kt
+presentation-worker eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
+
+# stream: feat/presentation-albums
+presentation-data eu/akoos/photos/presentation/albums/AlbumBrowseSource.kt
+presentation-data eu/akoos/photos/presentation/albums/AlbumDetailScreen.kt
+presentation-data eu/akoos/photos/presentation/albums/AlbumDetailViewModel.kt
+presentation-data eu/akoos/photos/presentation/albums/AlbumPhotoPickerViewModel.kt
+presentation-data eu/akoos/photos/presentation/albums/AlbumsScreen.kt
+presentation-data eu/akoos/photos/presentation/albums/AlbumsViewModel.kt
+presentation-data eu/akoos/photos/presentation/albums/LibraryTiles.kt
+presentation-data eu/akoos/photos/presentation/albums/PhotoViewChoices.kt
+presentation-data eu/akoos/photos/presentation/folders/DeviceFolderDetailScreen.kt
+presentation-data eu/akoos/photos/presentation/folders/DeviceFolderDetailViewModel.kt
+presentation-data eu/akoos/photos/presentation/hidden/HiddenAlbumViewModel.kt
+presentation-data eu/akoos/photos/presentation/importer/ImportAlbumsSummary.kt
+presentation-data eu/akoos/photos/presentation/importer/ImportReviewSection.kt
+presentation-data eu/akoos/photos/presentation/importer/ImportScreen.kt
+presentation-data eu/akoos/photos/presentation/importer/ImportViewModel.kt
+presentation-data eu/akoos/photos/presentation/lock/AppLockManager.kt
+presentation-data eu/akoos/photos/presentation/news/NewsScreen.kt
+presentation-data eu/akoos/photos/presentation/offline/OfflinePhotosViewModel.kt
+presentation-data eu/akoos/photos/presentation/onboarding/OnboardingScreen.kt
+presentation-data eu/akoos/photos/presentation/onboarding/steps/MlIntroStep.kt
+presentation-data eu/akoos/photos/presentation/picker/ExternalPickHandover.kt
+presentation-data eu/akoos/photos/presentation/share/ShareBackupActivity.kt
+presentation-data eu/akoos/photos/presentation/updater/UpdateOrchestrator.kt
+presentation-data eu/akoos/photos/presentation/whatsnew/WhatsNewScreen.kt
+presentation-service eu/akoos/photos/presentation/onboarding/OnboardingScreen.kt
+presentation-worker eu/akoos/photos/presentation/albums/AlbumDetailViewModel.kt
+presentation-worker eu/akoos/photos/presentation/albums/AlbumsViewModel.kt
+presentation-worker eu/akoos/photos/presentation/folders/DeviceFolderDetailViewModel.kt
+presentation-worker eu/akoos/photos/presentation/importer/ImportViewModel.kt
+
+# stream: feat/presentation-people
+presentation-data eu/akoos/photos/presentation/calendar/CalendarViewModel.kt
+presentation-data eu/akoos/photos/presentation/calendar/DayDetailViewModel.kt
+presentation-data eu/akoos/photos/presentation/duplicates/DuplicateFinderViewModel.kt
+presentation-data eu/akoos/photos/presentation/duplicates/DuplicateIgnoreStore.kt
+presentation-data eu/akoos/photos/presentation/location/LocationDetailScreen.kt
+presentation-data eu/akoos/photos/presentation/location/LocationDetailViewModel.kt
+presentation-data eu/akoos/photos/presentation/map/MapViewModel.kt
+presentation-data eu/akoos/photos/presentation/memories/MemoriesViewModel.kt
+presentation-data eu/akoos/photos/presentation/people/AddToPersonFaceViewModel.kt
+presentation-data eu/akoos/photos/presentation/people/FaceExclusionsViewModel.kt
+presentation-data eu/akoos/photos/presentation/people/NameOrMergeViewModel.kt
+presentation-data eu/akoos/photos/presentation/people/PeopleDisplay.kt
+presentation-data eu/akoos/photos/presentation/people/PeopleViewModel.kt
+presentation-data eu/akoos/photos/presentation/people/ReviewSuggestionsViewModel.kt
+presentation-data eu/akoos/photos/presentation/person/FindMorePhotosViewModel.kt
+presentation-data eu/akoos/photos/presentation/person/PersonDetailViewModel.kt
+presentation-data eu/akoos/photos/presentation/search/PhotoPlaceIndex.kt
+presentation-data eu/akoos/photos/presentation/search/SearchFilter.kt
+presentation-data eu/akoos/photos/presentation/search/SearchScreen.kt
+presentation-data eu/akoos/photos/presentation/search/SearchViewModel.kt
+
+# stream: feat/presentation-shell
+data-widget eu/akoos/photos/data/mlsync/FaceSnapshotExporter.kt
+data-widget eu/akoos/photos/data/repository/DrivePhotoRepositoryImpl.kt
+presentation-data eu/akoos/photos/navigation/NavGraph.kt
+presentation-data eu/akoos/photos/widget/HiddenSetsSource.kt
+presentation-data eu/akoos/photos/widget/PhotoWidgetConfigActivity.kt
+presentation-data eu/akoos/photos/widget/PhotoWidgetConfigViewModel.kt
+presentation-data eu/akoos/photos/widget/PhotoWidgetUpdater.kt
+presentation-data eu/akoos/photos/widget/WidgetHiddenFilter.kt
+util-data eu/akoos/photos/util/DeviceHealthPolicy.kt
+util-data eu/akoos/photos/util/ExifHelper.kt
+util-data eu/akoos/photos/util/MlSourceRetry.kt
+util-data eu/akoos/photos/util/OnThisDayHelper.kt
+util-data eu/akoos/photos/util/OutgoingPhotoUris.kt
+util-data eu/akoos/photos/util/PhotoGpsResolver.kt
+util-data eu/akoos/photos/util/SignOutCleanup.kt
+util-data eu/akoos/photos/util/ThankYouController.kt
+util-presentation eu/akoos/photos/util/LabelNormalizer.kt
+util-presentation eu/akoos/photos/util/ShareIntentBuilder.kt
+util-service eu/akoos/photos/util/SignOutCleanup.kt
+util-worker eu/akoos/photos/util/SignOutCleanup.kt
