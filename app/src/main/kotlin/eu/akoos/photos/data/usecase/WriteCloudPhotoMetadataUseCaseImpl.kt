@@ -20,89 +20,25 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import eu.akoos.photos.data.usecase.CloudLinkCheck
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.util.isTransientApiError
-import java.io.File
-import kotlinx.coroutines.CancellationException
+import eu.akoos.photos.domain.usecase.CloudLinkCheck
+import eu.akoos.photos.domain.usecase.CloudSavePhase
+import eu.akoos.photos.domain.usecase.LocationEdit
+import eu.akoos.photos.domain.usecase.WriteCloudPhotoMetadataUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 import javax.inject.Singleton
-
-
-/** How the caller wants a cloud photo's GPS place changed. A capture-date-only edit passes
- *  [Unchanged] so the location block is left exactly as the file already holds it. */
-sealed interface LocationEdit {
-
-    /** The GPS block is not addressed and keeps whatever the file already holds. */
-    data object Unchanged : LocationEdit
-
-    /** The GPS block is removed. */
-    data object Clear : LocationEdit
-
-    /** The GPS block is set to [latitude] / [longitude]. */
-    data class Set(val latitude: Double, val longitude: Double) : LocationEdit
-}
-
-/** The step a single cloud metadata save has reached, reported through the invoke callback so a
- *  progress surface can label where the replacement is (download and rewrite, upload, then album
- *  re-add and trash). */
-enum class CloudSavePhase { PREPARING, UPLOADING, FINISHING }
-
-/**
- * Rewrites the changed EXIF onto a downloaded original in place and reports the photo xAttr that
- * describes the result. The write is LOSSLESS: only the addressed tags change, every pixel and every
- * untouched tag stays byte-for-byte. Isolated behind an interface so the orchestration in
- * [WriteCloudPhotoMetadataUseCase] can be unit-tested with a stub, while the real Android EXIF work
- * lives in [CloudPhotoExifRewriterImpl].
- */
-interface CloudPhotoExifRewriter {
-
-    /**
-     * Applies the edit to [file] in place and returns the xAttr for the corrected copy. [writeCaptureMs]
-     * (when non-null) rewrites the datetime tags; [location] sets, clears, or leaves the GPS block; each
-     * of [description] / [artist] / [copyright] (when non-null) writes that descriptive text tag, with an
-     * empty string clearing it. [xAttrCaptureMs] is the capture time stamped into the returned xAttr (the
-     * new time, or the original when only the place changed). The returned xAttr carries the ORIGINAL
-     * orientation, dimensions, camera and subject-area so a correction never re-orients or re-sizes the
-     * photo.
-     */
-    fun rewrite(
-        file: File,
-        mimeType: String,
-        writeCaptureMs: Long?,
-        xAttrCaptureMs: Long,
-        location: LocationEdit,
-        description: String?,
-        artist: String?,
-        copyright: String?,
-    ): UploadXAttrMetadata
-
-    /**
-     * Builds the photo xAttr for [uri] WITHOUT touching a single byte: reads the source orientation,
-     * dimensions, camera and subject-area and folds in [xAttrCaptureMs] and [location], exactly the
-     * read-only half of [rewrite]. Serves the Synced path, where the device file was already
-     * EXIF-edited in place by the local save, so only the xAttr for the replacement upload has to be
-     * derived here. [uri] may be a content or a file uri.
-     */
-    fun xAttrFor(
-        uri: String,
-        mimeType: String,
-        xAttrCaptureMs: Long,
-        location: LocationEdit,
-    ): UploadXAttrMetadata
-}
 
 /**
  * Changes a single CLOUD photo's capture date and/or GPS place. Proton Drive has no metadata-edit or
@@ -121,46 +57,34 @@ interface CloudPhotoExifRewriter {
  * upload item for any container, since Drive stores it in its own capture-time field.
  */
 @Singleton
-class WriteCloudPhotoMetadataUseCase @Inject constructor(
+class WriteCloudPhotoMetadataUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cloudRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
     private val exifRewriter: CloudPhotoExifRewriter,
     private val carryOver: CarryOverToReplacement,
     private val linkCheck: CloudLinkCheck,
-) {
+) : WriteCloudPhotoMetadataUseCase {
     private val replacement = CloudPhotoReplacement(context, cloudRepo, carryOver, linkCheck::isLive)
 
-    sealed interface Result {
-        data object Success : Result
-
-        /** Neither the date nor the place was addressed, so nothing was uploaded or trashed. */
-        data object NothingToDo : Result
-
-        /** [transient] marks a failure a retry could plausibly clear (network blip, 429/5xx) so the
-         *  caller can hold the edit for another attempt rather than discard it. False by default: a
-         *  failure not built from a classified network error stays permanent. */
-        data class Failed(val reason: String, val transient: Boolean = false) : Result
-    }
-
-    suspend operator fun invoke(
+    override suspend operator fun invoke(
         photo: CloudPhoto,
         newCaptureMs: Long?,
         location: LocationEdit,
-        description: String? = null,
-        artist: String? = null,
-        copyright: String? = null,
-        onPhase: ((CloudSavePhase) -> Unit)? = null,
-        resumeUploadedLinkId: String? = null,
-        onUploaded: (suspend (String) -> Unit)? = null,
-    ): Result = withContext(Dispatchers.IO) {
+        description: String?,
+        artist: String?,
+        copyright: String?,
+        onPhase: ((CloudSavePhase) -> Unit)?,
+        resumeUploadedLinkId: String?,
+        onUploaded: (suspend (String) -> Unit)?,
+    ): WriteCloudPhotoMetadataUseCase.Result = withContext(Dispatchers.IO) {
         if (newCaptureMs == null && location is LocationEdit.Unchanged &&
             description == null && artist == null && copyright == null
         ) {
-            return@withContext Result.NothingToDo
+            return@withContext WriteCloudPhotoMetadataUseCase.Result.NothingToDo
         }
         val userId = accountManager.getPrimaryUserId().first()
-            ?: return@withContext Result.Failed("not signed in")
+            ?: return@withContext WriteCloudPhotoMetadataUseCase.Result.Failed("not signed in")
         onPhase?.invoke(CloudSavePhase.PREPARING)
 
         // Only the changed EXIF tags are rewritten on the working copy, losslessly; the pixels are never
@@ -196,9 +120,9 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
             )
         }
         when (val r = replacement.replace(userId, photo, prepare, onPhase, resumeUploadedLinkId, onUploaded)) {
-            is CloudPhotoReplacement.Result.Success -> Result.Success
-            CloudPhotoReplacement.Result.Skipped -> Result.NothingToDo
-            is CloudPhotoReplacement.Result.Failed -> Result.Failed(r.reason, r.transient)
+            is CloudPhotoReplacement.Result.Success -> WriteCloudPhotoMetadataUseCase.Result.Success
+            CloudPhotoReplacement.Result.Skipped -> WriteCloudPhotoMetadataUseCase.Result.NothingToDo
+            is CloudPhotoReplacement.Result.Failed -> WriteCloudPhotoMetadataUseCase.Result.Failed(r.reason, r.transient)
         }
     }
 }

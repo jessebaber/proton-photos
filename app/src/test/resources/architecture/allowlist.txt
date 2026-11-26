@@ -16,14 +16,6 @@
 # stream: feat/extract-upload
 
 # stream: feat/extract-metadata
-domain-location eu/akoos/photos/domain/usecase/CarryOverToReplacement.kt
-domain-location eu/akoos/photos/domain/usecase/CloudCompressQueue.kt
-domain-location eu/akoos/photos/domain/usecase/CloudMetadataSaveController.kt
-domain-location eu/akoos/photos/domain/usecase/CloudPhotoExifRewriterImpl.kt
-domain-location eu/akoos/photos/domain/usecase/CloudPhotoReplacement.kt
-domain-location eu/akoos/photos/domain/usecase/CompressCloudPhotoUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/WriteCloudPhotoMetadataUseCase.kt
-domain-location eu/akoos/photos/domain/usecase/WriteSyncedPhotoMetadataUseCase.kt
 
 # stream: feat/extract-import
 domain-location eu/akoos/photos/domain/usecase/ImportTakeoutUseCase.kt

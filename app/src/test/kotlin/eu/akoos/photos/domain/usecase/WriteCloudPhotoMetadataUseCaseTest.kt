@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CarryOverToReplacement
+import eu.akoos.photos.data.usecase.CloudPhotoExifRewriter
+import eu.akoos.photos.data.usecase.WriteCloudPhotoMetadataUseCaseImpl
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -91,7 +94,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
             .build()
         labels = PhotoLabelRepository(labelDb.photoLabelDao(), accountManager)
         carryOver = CarryOverToReplacement(cloud, noListingRow(), labels, faces, mockk(relaxed = true))
-        useCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, rewriter, carryOver, liveLinks())
+        useCase = WriteCloudPhotoMetadataUseCaseImpl(context, cloud, accountManager, rewriter, carryOver, liveLinks())
     }
 
     @After
@@ -387,7 +390,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
         val videoRewriter = RecordingExifRewriter(
             UploadXAttrMetadata(displayWidth = 1920, displayHeight = 1080, durationMillis = 5_000L),
         )
-        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, carryOver, liveLinks())
+        val videoUseCase = WriteCloudPhotoMetadataUseCaseImpl(context, cloud, accountManager, videoRewriter, carryOver, liveLinks())
         val newCaptureMs = 1_700_000_000_000L
 
         val result = videoUseCase(original, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
@@ -419,7 +422,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
         // The rewriter's xAttr carries no duration (the probe found none), so the item duration falls back
         // to the video's already-known cloud duration rather than landing at 0.
         val videoRewriter = RecordingExifRewriter(UploadXAttrMetadata(displayWidth = 1280, displayHeight = 720))
-        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, carryOver, liveLinks())
+        val videoUseCase = WriteCloudPhotoMetadataUseCaseImpl(context, cloud, accountManager, videoRewriter, carryOver, liveLinks())
 
         val result = videoUseCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
 

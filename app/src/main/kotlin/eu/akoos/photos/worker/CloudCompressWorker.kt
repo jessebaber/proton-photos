@@ -56,8 +56,8 @@ import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.CloudCompressQueue
-import eu.akoos.photos.domain.usecase.CloudPhotoReplacement
-import eu.akoos.photos.domain.usecase.CompressCloudPhotoUseCase
+import eu.akoos.photos.data.usecase.CloudPhotoReplacement
+import eu.akoos.photos.data.usecase.CompressCloudPhotoUseCase
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
