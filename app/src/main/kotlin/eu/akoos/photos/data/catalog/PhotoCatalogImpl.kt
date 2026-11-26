@@ -29,6 +29,7 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.domain.catalog.PerceptualHashLiteRecord
 import eu.akoos.photos.domain.catalog.PhotoCatalog
+import eu.akoos.photos.domain.catalog.OwnStreamTotalsRecord
 import eu.akoos.photos.domain.catalog.PhotoPickerRowRecord
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -61,6 +62,12 @@ class PhotoCatalogImpl @Inject constructor(
         }
 
     override suspend fun embeddingCount(userId: String): Int = imageEmbeddingDao.countForUser(userId)
+    override fun observeEmbeddingCount(userId: String): Flow<Int> =
+        imageEmbeddingDao.observeCountForUser(userId)
+    override fun observeOwnStreamTotals(userId: String): Flow<OwnStreamTotalsRecord> =
+        photoListingDao.observeOwnStreamTotals(userId).map {
+            OwnStreamTotalsRecord(it.photos, it.videos, it.bytes)
+        }
     override suspend fun hasFaceScans(userId: String): Boolean = faceScanDao.hasAnyForUser(userId)
     override suspend fun clearFaceScans(userId: String) = faceScanDao.clearForUser(userId)
     override suspend fun clearEmbeddings(userId: String) = imageEmbeddingDao.deleteAllForUser(userId)

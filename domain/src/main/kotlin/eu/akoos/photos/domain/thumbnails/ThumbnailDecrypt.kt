@@ -33,4 +33,17 @@ interface ThumbnailDecrypt {
     fun requestPinnedCover(userId: UserId, linkId: String)
     fun cancel(linkId: String)
     fun clear()
+
+    /** Decrypt a trash/grid thumbnail into a local file URL; null on failure. */
+    suspend fun decryptThumbnailToFileBounded(
+        userId: UserId,
+        linkId: String,
+        volumeId: String,
+        serverUrl: String,
+        serverToken: String?,
+        contentKeyPacketBase64: String,
+        encNodeKey: String,
+        encNodePass: String,
+        parentLinkId: String,
+    ): String?
 }

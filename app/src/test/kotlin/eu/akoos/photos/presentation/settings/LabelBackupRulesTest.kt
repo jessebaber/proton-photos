@@ -23,13 +23,13 @@
 package eu.akoos.photos.presentation.settings
 
 import eu.akoos.photos.R
-import eu.akoos.photos.data.label.LabelBackupOperation
-import eu.akoos.photos.data.label.LabelBackupOutcome
-import eu.akoos.photos.data.label.LabelBackupProgress
-import eu.akoos.photos.data.label.LabelBackupResult
-import eu.akoos.photos.data.label.LabelBackupState
-import eu.akoos.photos.data.label.LabelCount
-import eu.akoos.photos.data.label.LabelBackupStep
+import eu.akoos.photos.domain.label.LabelBackupOperation
+import eu.akoos.photos.domain.label.LabelBackupOutcome
+import eu.akoos.photos.domain.label.LabelBackupProgress
+import eu.akoos.photos.domain.label.LabelBackupResult
+import eu.akoos.photos.domain.label.LabelBackupState
+import eu.akoos.photos.domain.label.LabelCount
+import eu.akoos.photos.domain.label.LabelBackupStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

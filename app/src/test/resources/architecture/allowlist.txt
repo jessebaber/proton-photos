@@ -40,46 +40,6 @@ domain-location eu/akoos/photos/domain/usecase/ImportTakeoutUseCase.kt
 domain-location eu/akoos/photos/domain/usecase/StageImportUseCase.kt
 domain-location eu/akoos/photos/domain/usecase/UndoImportUseCase.kt
 
-# stream: feat/presentation-settings
-presentation-data eu/akoos/photos/presentation/settings/AccountScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/ActivityScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/ActivityViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/AlbumsSettingsScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/AppearanceLanguageScreens.kt
-presentation-data eu/akoos/photos/presentation/settings/ExcludedFoldersViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/FaceFileImportViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/LabelBackupRules.kt
-presentation-data eu/akoos/photos/presentation/settings/LabelRestoreDrawer.kt
-presentation-data eu/akoos/photos/presentation/settings/LabelSelection.kt
-presentation-data eu/akoos/photos/presentation/settings/LabelsSettingsScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/LabelsSettingsViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/LargeLibrarySimViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/MlDriveSyncRules.kt
-presentation-data eu/akoos/photos/presentation/settings/MlDriveSyncViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/NotificationSettingsViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/PendingDeleteHandler.kt
-presentation-data eu/akoos/photos/presentation/settings/PeopleFoundCount.kt
-presentation-data eu/akoos/photos/presentation/settings/PeopleSettingsScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/SdkSettingsScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/SettingsScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/SettingsViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/SharedBackupCard.kt
-presentation-data eu/akoos/photos/presentation/settings/SignOutVaultSheet.kt
-presentation-data eu/akoos/photos/presentation/settings/SyncFoldersViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/TimelineFilterScreen.kt
-presentation-data eu/akoos/photos/presentation/settings/TimelineFilterViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/TrashViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/VaultPasswordSheet.kt
-presentation-data eu/akoos/photos/presentation/settings/VaultPasswordViewModel.kt
-presentation-data eu/akoos/photos/presentation/settings/compression/CodecOptions.kt
-presentation-service eu/akoos/photos/presentation/settings/NotificationSettingsViewModel.kt
-presentation-service eu/akoos/photos/presentation/settings/SettingsViewModel.kt
-presentation-worker eu/akoos/photos/presentation/settings/ActivityViewModel.kt
-presentation-worker eu/akoos/photos/presentation/settings/ExcludedFoldersViewModel.kt
-presentation-worker eu/akoos/photos/presentation/settings/NotificationSettingsViewModel.kt
-presentation-worker eu/akoos/photos/presentation/settings/SettingsViewModel.kt
-presentation-worker eu/akoos/photos/presentation/settings/SyncFoldersViewModel.kt
-
 # stream: feat/presentation-media
 presentation-crypto eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
 presentation-data eu/akoos/photos/presentation/common/AddLabelsAction.kt

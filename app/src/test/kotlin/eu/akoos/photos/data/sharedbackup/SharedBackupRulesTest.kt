@@ -37,6 +37,7 @@ import eu.akoos.photos.data.mlsync.MlSyncWorkData
 import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.mlsync.SearchImportMode
 import eu.akoos.photos.data.mlsync.shouldImportSearchEmbedding
+import eu.akoos.photos.domain.backup.SharedBackupStatus as DomSharedBackupStatus
 import eu.akoos.photos.presentation.settings.SharedBackupLine
 import eu.akoos.photos.presentation.settings.sharedBackupLine
 import io.mockk.coEvery
@@ -236,7 +237,7 @@ class SharedBackupRulesTest {
 
     @Test
     fun `the status line says syncing, never, failed or when`() {
-        val never = SharedBackupStatus(enabled = true, lastAtMs = 0L, lastFailed = false)
+        val never = DomSharedBackupStatus(enabled = true, lastAtMs = 0L, lastFailed = false)
         assertEquals(SharedBackupLine.SYNCING, sharedBackupLine(running = true, status = never))
         assertEquals(SharedBackupLine.NEVER, sharedBackupLine(running = false, status = never))
         assertEquals(SharedBackupLine.FAILED, sharedBackupLine(false, never.copy(lastAtMs = 5L, lastFailed = true)))

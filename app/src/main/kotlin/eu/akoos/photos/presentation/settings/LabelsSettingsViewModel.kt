@@ -26,14 +26,14 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import eu.akoos.photos.data.db.dao.LabelUsage
-import eu.akoos.photos.data.label.LabelBackupController
-import eu.akoos.photos.data.label.LabelBackupRunner
-import eu.akoos.photos.data.label.LabelBackupStart
-import eu.akoos.photos.data.label.LabelBackupState
-import eu.akoos.photos.data.label.LabelCreation
-import eu.akoos.photos.data.label.LabelSavedCopy
-import eu.akoos.photos.data.label.PhotoLabelRepository
+import eu.akoos.photos.domain.label.LabelUsage
+import eu.akoos.photos.domain.label.LabelBackupStart
+import eu.akoos.photos.domain.label.LabelBackupState
+import eu.akoos.photos.domain.label.LabelCreation
+import eu.akoos.photos.domain.label.LabelSavedCopy
+import eu.akoos.photos.domain.label.LabelBackup
+import eu.akoos.photos.domain.label.LabelBackupCopies
+import eu.akoos.photos.domain.label.PhotoLabels
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,8 +78,8 @@ internal sealed interface LabelRestoreSheet {
  */
 @HiltViewModel
 class LabelsSettingsViewModel @Inject constructor(
-    private val labelRepo: PhotoLabelRepository,
-    private val backup: LabelBackupController,
+    private val labelRepo: PhotoLabels,
+    private val backup: LabelBackup,
     private val accountManager: AccountManager,
 ) : ViewModel() {
 
@@ -155,10 +155,10 @@ class LabelsSettingsViewModel @Inject constructor(
                     LabelRestoreSheet.Hidden
                 } else {
                     when (val copies = backup.listCopies(userId)) {
-                        is LabelBackupRunner.Copies.Found ->
+                        is LabelBackupCopies.Found ->
                             LabelRestoreSheet.Pick(copies.copies, copies.copies.firstOrNull()?.deviceId)
-                        LabelBackupRunner.Copies.Empty -> LabelRestoreSheet.Empty
-                        LabelBackupRunner.Copies.NotCapable, LabelBackupRunner.Copies.Failed -> LabelRestoreSheet.Failed
+                        LabelBackupCopies.Empty -> LabelRestoreSheet.Empty
+                        LabelBackupCopies.NotCapable, LabelBackupCopies.Failed -> LabelRestoreSheet.Failed
                     }
                 }
             } catch (e: CancellationException) {

@@ -59,7 +59,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.hidden.HiddenRescue
+import eu.akoos.photos.domain.vault.HiddenRescueNames
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.PrimaryButton
@@ -279,7 +279,7 @@ internal fun VaultPasswordRemoveSheet(
         SheetColumn {
             SheetTitle(stringResource(R.string.vault_password_remove_title))
             Text(
-                stringResource(R.string.vault_password_remove_body, HiddenRescue.FOLDER),
+                stringResource(R.string.vault_password_remove_body, HiddenRescueNames.FOLDER),
                 color = colors.fgDim,
                 fontSize = 14.sp,
             )
@@ -372,7 +372,7 @@ internal fun VaultPasswordSettingRow(isSet: Boolean, onClick: () -> Unit) {
         description = if (isSet) {
             stringResource(R.string.settings_vault_password_on_desc)
         } else {
-            stringResource(R.string.settings_vault_password_desc, HiddenRescue.FOLDER)
+            stringResource(R.string.settings_vault_password_desc, HiddenRescueNames.FOLDER)
         },
         onClick = onClick,
     )

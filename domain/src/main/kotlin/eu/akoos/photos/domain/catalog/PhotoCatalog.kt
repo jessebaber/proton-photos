@@ -35,6 +35,8 @@ interface PhotoCatalog {
 
     fun observePerceptualHashes(algo: Int): Flow<List<PerceptualHashLiteRecord>>
     suspend fun embeddingCount(userId: String): Int
+    fun observeEmbeddingCount(userId: String): Flow<Int>
+    fun observeOwnStreamTotals(userId: String): Flow<OwnStreamTotalsRecord>
     suspend fun hasFaceScans(userId: String): Boolean
     suspend fun clearFaceScans(userId: String)
     suspend fun clearEmbeddings(userId: String)

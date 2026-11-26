@@ -36,4 +36,26 @@ class ThumbnailDecryptImpl @Inject constructor(
     override fun requestPinnedCover(userId: UserId, linkId: String) = scheduler.requestPinnedCover(userId, linkId)
     override fun cancel(linkId: String) = scheduler.cancel(linkId)
     override fun clear() = scheduler.clear()
+
+    override suspend fun decryptThumbnailToFileBounded(
+        userId: UserId,
+        linkId: String,
+        volumeId: String,
+        serverUrl: String,
+        serverToken: String?,
+        contentKeyPacketBase64: String,
+        encNodeKey: String,
+        encNodePass: String,
+        parentLinkId: String,
+    ): String? = scheduler.decryptThumbnailToFileBounded(
+        userId = userId,
+        linkId = linkId,
+        volumeId = volumeId,
+        serverUrl = serverUrl,
+        serverToken = serverToken,
+        contentKeyPacketBase64 = contentKeyPacketBase64,
+        encNodeKey = encNodeKey,
+        encNodePass = encNodePass,
+        parentLinkId = parentLinkId,
+    )
 }

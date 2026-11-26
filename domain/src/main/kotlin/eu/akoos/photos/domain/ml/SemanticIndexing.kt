@@ -35,6 +35,30 @@ data class SemanticIndexingProgress(
 
 enum class SemanticStatusLabel { WaitingModel, Indexing, Paused, Ready, NotIndexed }
 
+const val SEMANTIC_INDEX_FOREGROUND_THRESHOLD = 50
+
+fun semanticStatusLabel(
+    state: SemanticIndexingState,
+    indexedCount: Int,
+    pending: Int,
+): SemanticStatusLabel {
+    val bulkIndex = pending >= SEMANTIC_INDEX_FOREGROUND_THRESHOLD
+    return when (state) {
+        SemanticIndexingState.WaitingModel -> SemanticStatusLabel.WaitingModel
+        SemanticIndexingState.Running ->
+            if (bulkIndex) SemanticStatusLabel.Indexing
+            else if (indexedCount > 0) SemanticStatusLabel.Ready
+            else SemanticStatusLabel.NotIndexed
+        SemanticIndexingState.Paused ->
+            if (bulkIndex) SemanticStatusLabel.Paused
+            else if (indexedCount > 0) SemanticStatusLabel.Ready
+            else SemanticStatusLabel.NotIndexed
+        SemanticIndexingState.Done -> SemanticStatusLabel.Ready
+        SemanticIndexingState.Idle ->
+            if (indexedCount > 0) SemanticStatusLabel.Ready else SemanticStatusLabel.NotIndexed
+    }
+}
+
 /** Schedules and controls on-device semantic embedding indexing. */
 interface SemanticIndexing {
     val progress: StateFlow<SemanticIndexingProgress>

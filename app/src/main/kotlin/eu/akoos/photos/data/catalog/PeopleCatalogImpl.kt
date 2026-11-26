@@ -57,6 +57,15 @@ class PeopleCatalogImpl @Inject constructor(
     override suspend fun namedPeopleForUser(userId: String): List<PersonRecord> =
         personDao.namedPeopleForUser(userId).map { it.toRecord() }
 
+    override fun observeNamedPeopleForUser(userId: String): Flow<List<PersonRecord>> =
+        personDao.observeNamedPeopleForUser(userId).map { list -> list.map { it.toRecord() } }
+
+    override fun observePeopleForUser(userId: String): Flow<List<PersonRecord>> =
+        personDao.observePeopleForUser(userId).map { list -> list.map { it.toRecord() } }
+
+    override fun observeFaceCountForUser(userId: String): Flow<Int> =
+        faceDao.observeFaceCountForUser(userId)
+
     override suspend fun otherPersonId(userId: String): Long? = personDao.otherPersonId(userId)
 
     override suspend fun updateCoverAndCount(personId: Long, coverFaceId: String?, faceCount: Int) =

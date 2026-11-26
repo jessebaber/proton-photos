@@ -71,15 +71,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.R
-import eu.akoos.photos.data.mlsync.MlDriveStore
-import eu.akoos.photos.data.mlsync.MlSyncController
-import eu.akoos.photos.data.mlsync.MlSyncOperation
-import eu.akoos.photos.data.mlsync.MlSyncState
-import eu.akoos.photos.data.sharedbackup.DriveDeviceCopies
-import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
-import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
-import eu.akoos.photos.data.sharedbackup.SharedBackupStatus
-import eu.akoos.photos.data.sharedbackup.SharedBackupStore
+import eu.akoos.photos.domain.backup.DriveDeviceCopies
+import eu.akoos.photos.domain.backup.SharedBackup
+import eu.akoos.photos.domain.backup.SharedBackupStatus
+import eu.akoos.photos.domain.ml.MlSync
+import eu.akoos.photos.domain.ml.MlSyncOperation
+import eu.akoos.photos.domain.ml.MlSyncState
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.lock.LocalAppLock
@@ -118,30 +115,28 @@ internal fun sharedBackupLine(running: Boolean, status: SharedBackupStatus): Sha
 /** The Drive backup card's automatic switch, its status, and the Back up now and Load from Drive rows. */
 @HiltViewModel
 class SharedBackupViewModel @Inject constructor(
-    private val store: SharedBackupStore,
-    private val scheduler: SharedBackupScheduler,
-    private val runner: SharedBackupRunner,
-    private val driveStore: MlDriveStore,
+    private val sharedBackup: SharedBackup,
     private val accountManager: AccountManager,
-    controller: MlSyncController,
+    private val mlSync: MlSync,
 ) : ViewModel() {
 
     internal data class UiState(val status: SharedBackupStatus, val running: Boolean)
 
-    internal val state: StateFlow<UiState> = combine(store.status, controller.state) { status, job ->
-        UiState(status, job is MlSyncState.Running && job.operation == MlSyncOperation.ROUND)
+    internal val state: StateFlow<UiState> = combine(sharedBackup.status, mlSync.state) { status, job ->
+        val running = sharedBackup.isRunning(job is MlSyncState.Running && job.operation == MlSyncOperation.ROUND)
+        UiState(status, running)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState(SharedBackupStatus(false, 0L, false), false))
 
     fun setEnabled(enabled: Boolean) {
-        viewModelScope.launch { scheduler.setEnabled(enabled) }
+        viewModelScope.launch { sharedBackup.setEnabled(enabled) }
     }
 
     fun saveNow() {
-        viewModelScope.launch { scheduler.saveNow() }
+        viewModelScope.launch { sharedBackup.saveNow() }
     }
 
     fun loadNow() {
-        viewModelScope.launch { scheduler.loadNow() }
+        viewModelScope.launch { sharedBackup.loadNow() }
     }
 
     /** The list of the backups on Drive while its sheet is open: null closed. */
@@ -174,7 +169,7 @@ class SharedBackupViewModel @Inject constructor(
     fun trash(device: DriveDeviceCopies) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
-            if (userId != null && runner.trash(userId, device)) {
+            if (userId != null && sharedBackup.trash(userId, device)) {
                 (_copies.value as? Copies.Loaded)?.let { loaded ->
                     _copies.value = loaded.copy(devices = loaded.devices.filterNot { it.deviceId == device.deviceId })
                 }
@@ -187,8 +182,8 @@ class SharedBackupViewModel @Inject constructor(
 
     private suspend fun readCopies(): Copies {
         val userId = accountManager.getPrimaryUserId().first() ?: return Copies.Failed
-        val own = runCatching { driveStore.deviceId() }.getOrNull()
-        return runner.devices(userId)?.let { Copies.Loaded(own, it) } ?: Copies.Failed
+        val own = sharedBackup.deviceId()
+        return sharedBackup.devices(userId)?.let { Copies.Loaded(own, it) } ?: Copies.Failed
     }
 }
 
@@ -381,7 +376,7 @@ private fun DriveCopiesSheet(
                                     Text(
                                         when {
                                             own -> stringResource(R.string.drive_copies_this_device)
-                                            device.name != null -> device.name
+                                            device.name != null -> device.name!!
                                             else -> stringResource(R.string.drive_copies_other_device)
                                         },
                                         color = colors.fgPrimary,

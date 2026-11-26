@@ -27,9 +27,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import eu.akoos.photos.data.preferences.InMemoryPreferencesDataStore
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.settings.SettingsBindings
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.FolderAlbumBackfill
+import eu.akoos.photos.domain.work.BackgroundWork
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -48,18 +50,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * The Sync folders screen shows and switches the same Drive album rule the upload pipeline and the
- * Excluded folders screen read. With "Back up everything" on and its album default started, every folder
- * is an album except the ones switched off, so the screen must read that rule rather than only the
- * switched-on set, and switching a folder off there must record it as switched off.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncFoldersAlbumRuleTest {
 
     private val context = mockk<Context>()
     private val media = mockk<LocalMediaRepository>()
     private val backfill = mockk<FolderAlbumBackfill>(relaxed = true)
+    private val backgroundWork = mockk<BackgroundWork>(relaxed = true)
     private lateinit var store: InMemoryPreferencesDataStore
 
     private fun item(uri: String, bucket: String) = LocalMediaItem(
@@ -88,7 +85,8 @@ class SyncFoldersAlbumRuleTest {
     private suspend fun screen(prefs: Preferences): SyncFoldersViewModel {
         store = InMemoryPreferencesDataStore(prefs)
         InMemoryPreferencesDataStore.install(context, store)
-        val vm = SyncFoldersViewModel(context, media, backfill)
+        val settingsStore = SettingsBindings.create(store)
+        val vm = SyncFoldersViewModel(context, settingsStore, backgroundWork, media, backfill)
         vm.uiState.first { !it.isLoading }
         return vm
     }

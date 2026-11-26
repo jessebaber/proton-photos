@@ -187,3 +187,10 @@ data class PhotoPickerRowRecord(
     val linkId: String,
     val thumbnailUrl: String?,
 )
+
+data class OwnStreamTotalsRecord(
+    val photos: Int,
+    val videos: Int,
+    val bytes: Long,
+)
+
