@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.vault
 
+import kotlinx.coroutines.flow.StateFlow
+
 /** Read/write of the persisted vault index and per-uri maps. */
 interface HiddenVaultIndex {
     fun pairedUris(rawPairs: Set<String>): Set<String>
@@ -30,6 +32,7 @@ interface HiddenVaultIndex {
 
 /** Editor that mutates vault blobs after metadata / edit flows. */
 interface HiddenVaultEdit {
+    val moves: StateFlow<Map<String, VaultMove>>
     suspend fun rename(uri: String, newName: String): String?
     suspend fun copy(uri: String, newName: String): String?
     suspend fun adoptCopy(sourceUri: String, copyUri: String, displayName: String)
@@ -39,6 +42,8 @@ interface HiddenVaultEdit {
 /** Restores or deletes a vaulted photo through the shared restorer path. */
 interface HiddenVaultRestore {
     suspend fun deletePhoto(hiddenUri: String): Boolean
+    suspend fun restorePhoto(hiddenUri: String, fallbackDisplayName: String? = null): Boolean
+    suspend fun restoreAll(hiddenUris: List<String>): Int
 }
 
 /** Leftover vault file discovery after sign-out / wipe. */

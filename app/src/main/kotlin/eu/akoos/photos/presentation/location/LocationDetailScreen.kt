@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.location
 
+import eu.akoos.photos.domain.vault.HideConfirmSource
+
 import android.app.Activity
 import android.net.Uri
 import android.os.Build
@@ -207,7 +209,7 @@ fun LocationPhotosContent(
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
     // rather than a flag is what lets the sheet describe the photos the tap was made on.
     var hideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+        mutableStateOf<HideConfirmSource?>(null)
     }
 
     // The VM builds the system-share intent off the UI thread; the screen launches the chooser. It can

@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.common
 
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import android.content.Context
 import android.content.res.Resources
 import android.util.Log
@@ -86,7 +88,6 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -94,12 +95,10 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.LabelBulkResult
-import eu.akoos.photos.data.db.dao.LabelUsage
-import eu.akoos.photos.data.label.LabelKeyReconciler
-import eu.akoos.photos.data.label.PhotoLabelRepository
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.label.LabelBulkResult
+import eu.akoos.photos.domain.label.LabelUsage
+import eu.akoos.photos.domain.label.LabelKeyReconciler
+import eu.akoos.photos.domain.label.PhotoLabels
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -227,7 +226,8 @@ internal object BulkLabelInput {
 /** Backs the Add labels sheet every selection surface shares: the used labels and the bulk write. */
 @HiltViewModel
 class AddLabelsViewModel @Inject constructor(
-    private val labelRepo: PhotoLabelRepository,
+    private val labelRepo: PhotoLabels,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -266,7 +266,7 @@ class AddLabelsViewModel @Inject constructor(
                 null
             }
             if (result != null && result.changedPhotos > 0) {
-                runCatching { context.settingsDataStore.edit { it[SettingsKeys.LABELS_NOTE_SEEN] = true } }
+                runCatching { settingsStore.set(Settings.LABELS_NOTE_SEEN, true) }
             }
             onDone(result)
         }
@@ -299,7 +299,7 @@ class AddLabelsViewModel @Inject constructor(
                 false
             }
             if (ok && labels.isNotEmpty()) {
-                runCatching { context.settingsDataStore.edit { it[SettingsKeys.LABELS_NOTE_SEEN] = true } }
+                runCatching { settingsStore.set(Settings.LABELS_NOTE_SEEN, true) }
             }
             onDone(ok)
         }

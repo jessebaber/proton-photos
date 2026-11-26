@@ -24,14 +24,11 @@ package eu.akoos.photos.presentation.common
 
 import android.content.Context
 import android.util.Log
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.hidden.HiddenCloudPhotos
-import eu.akoos.photos.data.hidden.HiddenVaultRestorer
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.vault.HiddenCloud
+import eu.akoos.photos.domain.vault.HiddenVaultRestore
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -66,7 +63,8 @@ import javax.inject.Singleton
 @Singleton
 class UndoController @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val hiddenVaultRestorer: HiddenVaultRestorer,
+    private val hiddenVaultRestorer: HiddenVaultRestore,
+    private val hiddenCloud: HiddenCloud,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
@@ -163,7 +161,7 @@ class UndoController @Inject constructor(
         var failed = 0
         if (action.cloudLinkIds.isNotEmpty()) {
             try {
-                HiddenCloudPhotos.reveal(context, action.cloudLinkIds)
+                hiddenCloud.reveal(action.cloudLinkIds)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "undo: hidden set not cleared: ${e.message}")

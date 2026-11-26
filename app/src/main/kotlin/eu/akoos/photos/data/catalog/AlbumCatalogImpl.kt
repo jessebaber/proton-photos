@@ -25,6 +25,7 @@ package eu.akoos.photos.data.catalog
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.catalog.AlbumMembershipRecord
 import eu.akoos.photos.domain.catalog.CloudAlbumRecord
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -54,6 +55,14 @@ class AlbumCatalogImpl @Inject constructor(
 
     override fun observeAssociatedPhotoLinkIdsForAlbums(albumIds: Set<String>): Flow<List<String>> =
         albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(albumIds)
+
+    override fun observeAllAssociatedPhotoLinkIds(): Flow<List<String>> =
+        albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds()
+
+    override fun observeAlbumIdsForPhotos(photoLinkIds: Set<String>): Flow<List<AlbumMembershipRecord>> =
+        albumPhotoMembershipDao.observeAlbumIdsForPhotos(photoLinkIds).map { rows ->
+            rows.map { AlbumMembershipRecord(it.albumLinkId, it.photoLinkId) }
+        }
 
     override suspend fun membershipLinkIdsForAlbum(albumLinkId: String): List<String> =
         albumPhotoMembershipDao.getPhotoLinkIds(albumLinkId)

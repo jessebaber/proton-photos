@@ -67,4 +67,5 @@ class PhotoLabelsImpl @Inject constructor(
     override suspend fun deleteForPhotos(photoKeys: Collection<String>): Int = repo.deleteForPhotos(photoKeys)
     override suspend fun clearForUser(userId: UserId): Int = repo.clearForUser(userId)
     override suspend fun adoptGuestLabels(accountId: String): Int = repo.adoptGuestLabels(accountId)
+    override suspend fun reconcileKeys(items: Iterable<GalleryItem>): Int = repo.reconcileKeys(items)
 }

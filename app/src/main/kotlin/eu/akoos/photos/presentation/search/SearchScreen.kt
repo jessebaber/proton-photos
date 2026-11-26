@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.domain.vault.HideConfirmSource
+
 import android.app.Activity
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -386,7 +388,7 @@ fun SearchScreen(
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
     // rather than a flag is what lets the sheet describe the photos the tap was made on.
     var hideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+        mutableStateOf<HideConfirmSource?>(null)
     }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     var showAddToPersonSheet by remember { mutableStateOf(false) }

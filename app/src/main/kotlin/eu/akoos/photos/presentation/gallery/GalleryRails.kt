@@ -24,13 +24,10 @@ package eu.akoos.photos.presentation.gallery
 
 import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.presentation.common.pillSurface
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -83,6 +80,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import eu.akoos.photos.di.mediaPresentationEntryPoint
+import eu.akoos.photos.domain.settings.Settings
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -235,7 +234,7 @@ private fun AlbumsRailPills(
     // The configured default narrowing. The pill highlights only when the current filter differs
     // from this default, so leaving the filter at its default reads as "unfiltered".
     val defaultFilterOrdinal by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.ALBUMS_DEFAULT_FILTER)
     }.collectAsState(initial = 0)
     val defaultFilter = albumDisplayFilterAt(defaultFilterOrdinal)
     val newAlbumLabel = stringResource(R.string.albums_new_album)
@@ -815,10 +814,10 @@ internal fun CategoryRail(
     val peopleRail = LocalPeopleRail.current
 
     val savedCsv by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.CATEGORY_RAIL_ORDER)
     }.collectAsState(initial = null)
     val hidden by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.CATEGORY_RAIL_HIDDEN)
     }.collectAsState(initial = emptySet())
     val order = remember(savedCsv, hidden) { visibleCategories(savedCsv, hidden) }
 
@@ -1226,10 +1225,10 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
     val colors = AppColors.current
 
     val savedCsv by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.CATEGORY_RAIL_ORDER)
     }.collectAsState(initial = null)
     val hidden by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.CATEGORY_RAIL_HIDDEN)
     }.collectAsState(initial = emptySet())
     var order by remember { mutableStateOf<List<GalleryFilter>>(emptyList()) }
     LaunchedEffect(savedCsv) { order = resolveCategoryOrder(savedCsv) }
@@ -1238,9 +1237,10 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
         val snapshot = order
         scope.launch {
             runCatching {
-                context.settingsDataStore.edit {
-                    it[SettingsKeys.CATEGORY_RAIL_ORDER] = snapshot.joinToString(",") { f -> f.name }
-                }
+                mediaPresentationEntryPoint(context).settingsStore().set(
+                    Settings.CATEGORY_RAIL_ORDER,
+                    snapshot.joinToString(",") { f -> f.name },
+                )
             }
         }
     }
@@ -1248,10 +1248,8 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
     fun toggleHidden(cat: GalleryFilter) {
         scope.launch {
             runCatching {
-                context.settingsDataStore.edit {
-                    val current = it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()
-                    it[SettingsKeys.CATEGORY_RAIL_HIDDEN] =
-                        if (cat.name in current) current - cat.name else current + cat.name
+                mediaPresentationEntryPoint(context).settingsStore().update(Settings.CATEGORY_RAIL_HIDDEN) { current ->
+                    if (cat.name in current) current - cat.name else current + cat.name
                 }
             }
         }

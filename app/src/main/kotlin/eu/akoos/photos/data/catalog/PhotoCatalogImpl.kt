@@ -64,4 +64,9 @@ class PhotoCatalogImpl @Inject constructor(
     override suspend fun hasFaceScans(userId: String): Boolean = faceScanDao.hasAnyForUser(userId)
     override suspend fun clearFaceScans(userId: String) = faceScanDao.clearForUser(userId)
     override suspend fun clearEmbeddings(userId: String) = imageEmbeddingDao.deleteAllForUser(userId)
+
+    override suspend fun getThumbnailUrlSeed(userId: String): List<PhotoPickerRowRecord> =
+        photoListingDao.getThumbnailUrlSeed(userId).map { PhotoPickerRowRecord(it.linkId, it.thumbnailUrl) }
+
+    override suspend fun clearCachedThumbnailUrls() = photoListingDao.clearCachedThumbnailUrls()
 }

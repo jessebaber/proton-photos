@@ -38,4 +38,7 @@ interface PhotoCatalog {
     suspend fun hasFaceScans(userId: String): Boolean
     suspend fun clearFaceScans(userId: String)
     suspend fun clearEmbeddings(userId: String)
+
+    suspend fun getThumbnailUrlSeed(userId: String): List<PhotoPickerRowRecord>
+    suspend fun clearCachedThumbnailUrls()
 }

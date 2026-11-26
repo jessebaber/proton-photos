@@ -31,14 +31,23 @@ data class VaultHideTarget(
     val local: LocalMediaItem,
     val cloudLinkId: String?,
     val sizeBytes: Long,
-)
+) {
+    val captureTimeMs: Long get() = item.captureTimeMs
+}
 
 /** Device files to vault plus cloud link ids to filter-hide. */
 data class VaultHideSplit(
     val vaultable: List<VaultHideTarget>,
     val cloudLinkIds: List<String>,
-) {
-    val isEmpty: Boolean get() = vaultable.isEmpty() && cloudLinkIds.isEmpty()
+) : HideConfirmSource {
+    override val isEmpty: Boolean get() = vaultable.isEmpty() && cloudLinkIds.isEmpty()
+    override val vaultCount: Int get() = vaultable.size
+    override val cloudCopyCount: Int get() = vaultable.count { it.cloudLinkId != null }
+    override val cloudOnlyCount: Int get() = cloudLinkIds.size
+
+    companion object {
+        val EMPTY = VaultHideSplit(emptyList(), emptyList())
+    }
 }
 
 /** Pure folder/vault partitioning helpers presentation uses when hiding a device folder. */

@@ -187,3 +187,9 @@ data class PhotoPickerRowRecord(
     val linkId: String,
     val thumbnailUrl: String?,
 )
+
+data class AlbumMembershipRecord(
+    val albumLinkId: String,
+    val photoLinkId: String,
+)
+

@@ -39,12 +39,16 @@ import eu.akoos.photos.worker.ImportWorker
 import eu.akoos.photos.worker.StageImportWorker
 import eu.akoos.photos.worker.SyncWorker
 import eu.akoos.photos.worker.UpdateCheckWorker
+import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class BackgroundWorkImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val cryptoServiceClient: CryptoServiceClient,
+    private val photoStreamService: PhotoStreamService,
 ) : BackgroundWork {
     private val workManager get() = WorkManager.getInstance(context)
 
@@ -141,4 +145,7 @@ class BackgroundWorkImpl @Inject constructor(
 
     override fun startScreenshotOverlay() = ScreenshotOverlayService.start(context)
     override fun stopScreenshotOverlay() = ScreenshotOverlayService.stop(context)
+
+    override fun armColdOpenDamping() = cryptoServiceClient.armColdOpenDamping()
+    override fun setGentleSync(active: Boolean) = photoStreamService.setGentleSync(active)
 }

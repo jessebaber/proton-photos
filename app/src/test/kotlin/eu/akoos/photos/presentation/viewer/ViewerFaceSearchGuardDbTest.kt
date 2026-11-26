@@ -29,6 +29,13 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+import eu.akoos.photos.domain.catalog.FaceBoxRecord
+import eu.akoos.photos.domain.catalog.FaceRecord
+import eu.akoos.photos.domain.catalog.NotPersonRecord
+import eu.akoos.photos.domain.catalog.PersonRecord
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -62,6 +69,30 @@ class ViewerFaceSearchGuardDbTest {
     @After
     fun tearDown() = db.close()
 
+    private fun people(): PeopleCatalog = object : PeopleCatalog {
+        override suspend fun personById(personId: Long): PersonRecord? = null
+        override fun observePersonForUser(userId: String, personId: Long) = flowOf(null)
+        override suspend fun namedPeopleForUser(userId: String) = emptyList<PersonRecord>()
+        override suspend fun otherPersonId(userId: String): Long? = null
+        override suspend fun updateCoverAndCount(personId: Long, coverFaceId: String?, faceCount: Int) {}
+        override suspend fun keptFacesForPhoto(userId: String, photoKey: String) = emptyList<FaceRecord>()
+        override suspend fun facesForPerson(userId: String, personId: Long) = emptyList<FaceRecord>()
+        override suspend fun facesOnPhotos(userId: String, photoKeys: List<String>) = emptyList<FaceBoxRecord>()
+        override suspend fun facePhotoKeysIn(userId: String, photoKeys: List<String>): List<String> =
+            db.faceDao().facePhotoKeysIn(userId, photoKeys)
+        override fun photoKeysForPerson(userId: String, personId: Long) = flowOf(emptyList<String>())
+        override fun observeFaceBoxesForPerson(userId: String, personId: Long) = flowOf(emptyList<FaceBoxRecord>())
+        override suspend fun faceIdsForPerson(userId: String, personId: Long) = emptyList<String>()
+        override suspend fun distinctPhotoKeysForPerson(userId: String, personId: Long) = emptyList<String>()
+        override suspend fun topFaceForPerson(userId: String, personId: Long): String? = null
+        override suspend fun faceCountForPerson(userId: String, personId: Long) = 0
+        override suspend fun upsertFaces(rows: List<FaceRecord>) {}
+        override suspend fun allNotPersonForUser(userId: String) = emptyList<NotPersonRecord>()
+        override fun photoKeysForName(userId: String, name: String) = flowOf(emptyList<String>())
+        override suspend fun photoKeysForNameList(userId: String, name: String) = emptyList<String>()
+        override suspend fun clearCurationTimes(userId: String) {}
+    }
+
     private fun face(user: String, photoKey: String, personId: Long?, rejected: Boolean = false) = FaceEntity(
         id = "$photoKey#0", userId = user, photoKey = photoKey,
         left = 0f, top = 0f, right = 1f, bottom = 1f, landmarks = "",
@@ -73,7 +104,7 @@ class ViewerFaceSearchGuardDbTest {
         db.faceDao().upsert(face(USER, PHOTO, personId = null, rejected = true))
 
         assertTrue(db.faceDao().keptFacesForPhoto(USER, PHOTO).isEmpty())
-        assertFalse(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
+        assertFalse(viewerMayDetectFaces(people(), USER, PHOTO))
     }
 
     @Test
@@ -83,7 +114,7 @@ class ViewerFaceSearchGuardDbTest {
         // A face just taken off a person is ungrouped, and the bar lists it so it can be named again.
         assertTrue(db.faceDao().keptFacesForPhoto(USER, PHOTO).single().personId == null)
         assertTrue(isLoneFace(personId = null, otherId = 9L))
-        assertFalse(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
+        assertFalse(viewerMayDetectFaces(people(), USER, PHOTO))
     }
 
     @Test
@@ -91,29 +122,29 @@ class ViewerFaceSearchGuardDbTest {
         db.personDao().upsert(PersonEntity(id = 3L, userId = USER, displayName = "Alice", faceCount = 1))
         db.faceDao().upsert(face(USER, PHOTO, personId = 3L))
 
-        assertFalse(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
+        assertFalse(viewerMayDetectFaces(people(), USER, PHOTO))
     }
 
     @Test
     fun `a scanned photo with no faces may be searched`() = runTest {
         db.faceScanDao().upsert(listOf(FaceScanEntity(USER, PHOTO)))
 
-        assertTrue(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
+        assertTrue(viewerMayDetectFaces(people(), USER, PHOTO))
     }
 
     @Test
     fun `another account's face does not block the search`() = runTest {
         db.faceDao().upsert(face("other", PHOTO, personId = null, rejected = true))
 
-        assertTrue(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
-        assertFalse(viewerMayDetectFaces(db.faceDao(), "other", PHOTO))
+        assertTrue(viewerMayDetectFaces(people(), USER, PHOTO))
+        assertFalse(viewerMayDetectFaces(people(), "other", PHOTO))
     }
 
     @Test
     fun `a guest's removed face blocks the guest's search`() = runTest {
         db.faceDao().upsert(face(GUEST, PHOTO, personId = null, rejected = true))
 
-        assertFalse(viewerMayDetectFaces(db.faceDao(), GUEST, PHOTO))
+        assertFalse(viewerMayDetectFaces(people(), GUEST, PHOTO))
     }
 
     @Test

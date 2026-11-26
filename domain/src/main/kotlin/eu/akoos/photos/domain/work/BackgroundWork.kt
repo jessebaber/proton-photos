@@ -77,6 +77,9 @@ interface BackgroundWork {
     fun startScreenshotOverlay()
     fun stopScreenshotOverlay()
 
+    fun armColdOpenDamping()
+    fun setGentleSync(active: Boolean)
+
     /** Progress / result Data keys for workers, so presentation need not import worker classes. */
     object ImportKeys {
         const val KEY_DONE = "done"

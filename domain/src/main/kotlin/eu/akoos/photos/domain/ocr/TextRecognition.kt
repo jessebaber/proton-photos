@@ -101,5 +101,17 @@ data class RecognizedTextBlock(
  */
 interface TextRecognizer<F> : AutoCloseable {
 
-    suspend fun recognize(frame: F): List<RecognizedTextBlock>
+    /** Total download size announced when the OCR models are not yet on disk. */
+    val downloadBytes: Long
+
+    /** Persist consent and allow the next [prepare] to fetch models. */
+    fun allowModelDownload()
+
+    /** Ensure models are ready; [onDownloadStart] fires once a network fetch begins. */
+    suspend fun prepare(onDownloadStart: () -> Unit = {}): eu.akoos.photos.domain.ml.OcrModelPreparation
+
+    suspend fun recognize(
+        frame: F,
+        onStage: (TextReadStage) -> Unit = {},
+    ): List<RecognizedTextBlock>
 }

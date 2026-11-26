@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import eu.akoos.photos.di.mediaPresentationEntryPoint
+import eu.akoos.photos.domain.settings.Settings
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,8 +72,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.map.vector.FAR_CULL_COS
 import eu.akoos.photos.presentation.map.vector.WorldMapData
@@ -132,7 +132,7 @@ internal fun DetailsMapBox(
     val context = LocalContext.current
     // Null until the setting is read, so a Classic user never sees the globe flash in first.
     val mapStyleOsm by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.MAP_STYLE_OSM] ?: false }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.MAP_STYLE_OSM)
     }.collectAsStateWithLifecycle<Boolean?>(initialValue = null)
     val shape = RoundedCornerShape(14.dp)
 

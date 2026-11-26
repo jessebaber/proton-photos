@@ -90,6 +90,25 @@ import eu.akoos.photos.domain.vault.HiddenVaultLeftover
 import eu.akoos.photos.domain.vault.HiddenVaultRestore
 import eu.akoos.photos.domain.vault.VaultPassword
 import eu.akoos.photos.domain.work.BackgroundWork
+
+import eu.akoos.photos.data.catalog.SyncSnapshotImpl
+import eu.akoos.photos.data.downloads.PhotoDownloadsImpl
+import eu.akoos.photos.data.ml.FaceDetectorFactoryImpl
+import eu.akoos.photos.data.notification.EditUploadNotifierImpl
+import eu.akoos.photos.data.ocr.TextRecognizerFactoryImpl
+import eu.akoos.photos.data.share.ShareBackupImpl
+import eu.akoos.photos.data.upload.LocalOverwriteImpl
+import eu.akoos.photos.data.vault.HiddenVaultJournalOpsImpl
+import eu.akoos.photos.data.vault.VaultDiagnosticsImpl
+import eu.akoos.photos.domain.catalog.SyncSnapshot
+import eu.akoos.photos.domain.downloads.PhotoDownloads
+import eu.akoos.photos.domain.ml.FaceDetectorFactory
+import eu.akoos.photos.domain.notification.EditUploadNotifier
+import eu.akoos.photos.domain.ocr.TextRecognizerFactory
+import eu.akoos.photos.domain.share.ShareBackup
+import eu.akoos.photos.domain.upload.LocalOverwrite
+import eu.akoos.photos.domain.vault.HiddenVaultJournalOps
+import eu.akoos.photos.domain.vault.VaultDiagnostics
 import javax.inject.Singleton
 
 /**
@@ -139,5 +158,16 @@ abstract class PresentationFacadesModule {
     @Binds @Singleton abstract fun bindSyncCatalog(impl: SyncCatalogImpl): SyncCatalog
 
     @Binds @Singleton abstract fun bindBackgroundWork(impl: BackgroundWorkImpl): BackgroundWork
+
+    @Binds @Singleton abstract fun bindHiddenVaultJournalOps(impl: HiddenVaultJournalOpsImpl): HiddenVaultJournalOps
+    @Binds @Singleton abstract fun bindVaultDiagnostics(impl: VaultDiagnosticsImpl): VaultDiagnostics
+    @Binds @Singleton abstract fun bindSyncSnapshot(impl: SyncSnapshotImpl): SyncSnapshot
+    @Binds @Singleton abstract fun bindPhotoDownloads(impl: PhotoDownloadsImpl): PhotoDownloads
+    @Binds @Singleton abstract fun bindShareBackup(impl: ShareBackupImpl): ShareBackup
+    @Binds @Singleton abstract fun bindLocalOverwrite(impl: LocalOverwriteImpl): LocalOverwrite
+    @Binds @Singleton abstract fun bindEditUploadNotifier(impl: EditUploadNotifierImpl): EditUploadNotifier
+    @Binds @Singleton abstract fun bindFaceDetectorFactory(impl: FaceDetectorFactoryImpl): FaceDetectorFactory
+    @Binds @Singleton abstract fun bindTextRecognizerFactory(impl: TextRecognizerFactoryImpl): TextRecognizerFactory
 }
+
 

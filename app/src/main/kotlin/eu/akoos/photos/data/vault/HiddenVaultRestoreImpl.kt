@@ -31,5 +31,9 @@ import javax.inject.Singleton
 class HiddenVaultRestoreImpl @Inject constructor(
     private val restorer: HiddenVaultRestorer,
 ) : HiddenVaultRestore {
+    override suspend fun restorePhoto(hiddenUri: String, fallbackDisplayName: String?): Boolean =
+        restorer.restorePhoto(hiddenUri, fallbackDisplayName = fallbackDisplayName)
+
     override suspend fun deletePhoto(hiddenUri: String): Boolean = restorer.deletePhoto(hiddenUri)
+    override suspend fun restoreAll(hiddenUris: List<String>): Int = restorer.restoreAll(hiddenUris)
 }

@@ -38,7 +38,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.service.GifExportService
+import eu.akoos.photos.domain.work.BackgroundWork
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -126,6 +126,7 @@ class GifMakerViewModel @Inject constructor(
     // turn a cloud-only video into an on-disk file the local GIF pipeline can read.
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
+    private val backgroundWork: BackgroundWork,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(GifMakerUiState())
@@ -365,12 +366,11 @@ class GifMakerViewModel @Inject constructor(
         // A brief, non-blocking hint that the save continues after the screen closes; the foreground service's
         // notification and the avatar ring carry the rest. save() is a UI callback, so this shows on the main thread.
         Toast.makeText(context, context.getString(R.string.gif_maker_progress), Toast.LENGTH_SHORT).show()
-        GifExportService.start(
-            context,
+        backgroundWork.startGifExport(
             sourceUri = sourceUriStr,
             startMs = startMs,
             endMs = endMs,
-            aspect = aspect,
+            aspect = aspect.name,
             zoom = zoom,
             panX = panX,
             panY = panY,

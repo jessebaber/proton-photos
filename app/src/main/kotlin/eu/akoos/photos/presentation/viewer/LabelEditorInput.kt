@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.viewer
 
-import eu.akoos.photos.data.db.dao.LabelUsage
+import eu.akoos.photos.domain.label.LabelUsage
 import eu.akoos.photos.util.LabelNormalizer
 
 /** What a change to the label field leaves: [commit] is the text before its last comma, ready to add
