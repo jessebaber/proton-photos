@@ -99,7 +99,21 @@ object CatalogMappers {
         excluded: Boolean,
         alreadyInDrive: Boolean,
         albumName: String?,
+        lat: Double? = null,
+        lng: Double? = null,
+        description: String? = null,
     ) = ImportStagedRecord(
-        zipId, entryName, title, dateMs, sizeBytes, thumbPath, excluded, alreadyInDrive, albumName,
+        zipId = zipId,
+        entryName = entryName,
+        title = title,
+        dateMs = dateMs,
+        sizeBytes = sizeBytes,
+        thumbPath = thumbPath,
+        lat = lat,
+        lng = lng,
+        description = description,
+        excluded = excluded,
+        alreadyInDrive = alreadyInDrive,
+        albumName = albumName,
     )
 }

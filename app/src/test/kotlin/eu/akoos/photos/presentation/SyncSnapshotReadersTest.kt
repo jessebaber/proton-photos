@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation
 
-import eu.akoos.photos.data.db.dao.SyncStateLite
+import eu.akoos.photos.domain.catalog.SyncStateLiteRecord
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -126,8 +126,8 @@ class SyncSnapshotReadersTest {
         assertEquals(fullRowOnDeviceIds(none), syncedCloudIdsOnDevice(sync))
         assertEquals(fullRowGalleryHiddenIds(none), sync.hiddenCloudIds)
         assertEquals(fullRowViewerUris(none), syncedLocalUrisByCloudId(sync.rows))
-        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(sync.rows))
-        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), sync.rows))
+        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(lean(none)))
+        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), lean(none)))
         assertEquals(fullRowPendingUris(none), pendingUploadUris(sync.rows))
     }
 
@@ -184,8 +184,8 @@ class SyncSnapshotReadersTest {
             .mapNotNull { it.localUri.takeIf { u -> u.isNotBlank() } }
 
     /** The columns the DAO's lean read projects out of each row, in the same order. */
-    private fun lean(states: List<SyncState>): List<SyncStateLite> =
-        states.map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, it.queued) }
+    private fun lean(states: List<SyncState>): List<SyncStateLiteRecord> =
+        states.map { SyncStateLiteRecord(it.localUri, it.cloudFileId, it.status.name) }
 
     private fun row(uri: String, cloudId: String?, status: SyncStatus, queued: Boolean = false) = SyncState(
         localUri = uri,

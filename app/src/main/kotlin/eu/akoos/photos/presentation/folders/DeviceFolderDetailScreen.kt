@@ -129,8 +129,9 @@ import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.rememberSettingsStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.vault.VaultHideSplit
 import kotlinx.coroutines.flow.map
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
@@ -198,9 +199,10 @@ fun DeviceFolderDetailScreen(
     val gridState = rememberLazyGridState()
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
     val folderCtx = androidx.compose.ui.platform.LocalContext.current
+    val settingsStore = rememberSettingsStore()
     // Opt-in floating day pill while the grid scrolls; default off. Shares the scrubber's date mapping.
-    val showScrollDate by remember {
-        folderCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
+    val showScrollDate by remember(settingsStore) {
+        settingsStore.observe(Settings.SHOW_SCROLL_DATE)
     }.collectAsState(initial = false)
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
@@ -275,10 +277,10 @@ fun DeviceFolderDetailScreen(
     // a flag is what lets the sheet describe the photos the tap was made on. The selection's hide and
     // the whole folder's are separate taps, so each keeps its own.
     var hideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+        mutableStateOf<VaultHideSplit?>(null)
     }
     var folderHideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+        mutableStateOf<VaultHideSplit?>(null)
     }
     val shareCtx = androidx.compose.ui.platform.LocalContext.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)

@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.data.hidden
 
+import eu.akoos.photos.domain.vault.HideConfirmSource
+
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.util.HiddenCaptureTime
@@ -179,8 +181,11 @@ object HiddenFolderRecords {
     data class HideSplit(
         val vaultable: List<VaultTarget>,
         val cloudLinkIds: List<String>,
-    ) {
-        val isEmpty: Boolean get() = vaultable.isEmpty() && cloudLinkIds.isEmpty()
+    ) : HideConfirmSource {
+        override val isEmpty: Boolean get() = vaultable.isEmpty() && cloudLinkIds.isEmpty()
+        override val vaultCount: Int get() = vaultable.size
+        override val cloudCopyCount: Int get() = vaultable.count { it.cloudLinkId != null }
+        override val cloudOnlyCount: Int get() = cloudLinkIds.size
 
         companion object {
             val EMPTY = HideSplit(emptyList(), emptyList())

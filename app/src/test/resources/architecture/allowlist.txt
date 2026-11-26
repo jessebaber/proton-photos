@@ -107,34 +107,6 @@ presentation-service eu/akoos/photos/presentation/gifmaker/GifMakerViewModel.kt
 presentation-worker eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
 
 # stream: feat/presentation-albums
-presentation-data eu/akoos/photos/presentation/albums/AlbumBrowseSource.kt
-presentation-data eu/akoos/photos/presentation/albums/AlbumDetailScreen.kt
-presentation-data eu/akoos/photos/presentation/albums/AlbumDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/albums/AlbumPhotoPickerViewModel.kt
-presentation-data eu/akoos/photos/presentation/albums/AlbumsScreen.kt
-presentation-data eu/akoos/photos/presentation/albums/AlbumsViewModel.kt
-presentation-data eu/akoos/photos/presentation/albums/LibraryTiles.kt
-presentation-data eu/akoos/photos/presentation/albums/PhotoViewChoices.kt
-presentation-data eu/akoos/photos/presentation/folders/DeviceFolderDetailScreen.kt
-presentation-data eu/akoos/photos/presentation/folders/DeviceFolderDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/hidden/HiddenAlbumViewModel.kt
-presentation-data eu/akoos/photos/presentation/importer/ImportAlbumsSummary.kt
-presentation-data eu/akoos/photos/presentation/importer/ImportReviewSection.kt
-presentation-data eu/akoos/photos/presentation/importer/ImportScreen.kt
-presentation-data eu/akoos/photos/presentation/importer/ImportViewModel.kt
-presentation-data eu/akoos/photos/presentation/lock/AppLockManager.kt
-presentation-data eu/akoos/photos/presentation/offline/OfflinePhotosViewModel.kt
-presentation-data eu/akoos/photos/presentation/onboarding/OnboardingScreen.kt
-presentation-data eu/akoos/photos/presentation/onboarding/steps/MlIntroStep.kt
-presentation-data eu/akoos/photos/presentation/picker/ExternalPickHandover.kt
-presentation-data eu/akoos/photos/presentation/share/ShareBackupActivity.kt
-presentation-data eu/akoos/photos/presentation/updater/UpdateOrchestrator.kt
-presentation-data eu/akoos/photos/presentation/whatsnew/WhatsNewScreen.kt
-presentation-service eu/akoos/photos/presentation/onboarding/OnboardingScreen.kt
-presentation-worker eu/akoos/photos/presentation/albums/AlbumDetailViewModel.kt
-presentation-worker eu/akoos/photos/presentation/albums/AlbumsViewModel.kt
-presentation-worker eu/akoos/photos/presentation/folders/DeviceFolderDetailViewModel.kt
-presentation-worker eu/akoos/photos/presentation/importer/ImportViewModel.kt
 
 # stream: feat/presentation-people
 presentation-data eu/akoos/photos/presentation/calendar/CalendarViewModel.kt

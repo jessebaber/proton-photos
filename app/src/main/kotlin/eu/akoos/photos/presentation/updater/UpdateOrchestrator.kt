@@ -22,11 +22,13 @@
 
 package eu.akoos.photos.presentation.updater
 
-import eu.akoos.photos.data.updater.DownloadProgress
-import eu.akoos.photos.data.updater.InstallOutcome
-import eu.akoos.photos.data.updater.StagedUpdateStore
-import eu.akoos.photos.data.updater.UpdateDownloader
-import eu.akoos.photos.data.updater.UpdateInstaller
+import eu.akoos.photos.di.UpdateConfirmationAccess
+import eu.akoos.photos.domain.updater.DownloadProgress
+import eu.akoos.photos.domain.updater.InstallOutcome
+import eu.akoos.photos.domain.updater.StagedUpdates
+import eu.akoos.photos.domain.updater.UpdateDownload
+import eu.akoos.photos.domain.updater.UpdateInstall
+import android.content.Intent
 import eu.akoos.photos.domain.repository.UpdateCheckerRepository
 import eu.akoos.photos.domain.repository.UpdateStatus
 import eu.akoos.photos.presentation.common.UpdatePromptState
@@ -56,9 +58,10 @@ import javax.inject.Singleton
 @Singleton
 class UpdateOrchestrator @Inject constructor(
     private val repository: UpdateCheckerRepository,
-    private val downloader: UpdateDownloader,
-    private val installer: UpdateInstaller,
-    private val stagedUpdates: StagedUpdateStore,
+    private val downloader: UpdateDownload,
+    private val installer: UpdateInstall,
+    private val stagedUpdates: StagedUpdates,
+    private val confirmationAccess: UpdateConfirmationAccess,
 ) {
 
     private val _state = MutableStateFlow<UpdatePromptState?>(null)
@@ -248,6 +251,11 @@ class UpdateOrchestrator @Inject constructor(
      * build the install intent or fall through.
      */
     fun pendingInstallFile(): File? = pendingFile
+
+    /** Confirmation Intent after [installPending] returned PendingUserAction. */
+    fun consumeConfirmationIntent(): Intent? =
+        confirmationAccess.consumeConfirmationIntent()
+
 
     /**
      * Applies the staged APK through the silent PackageInstaller session. The two refusals the

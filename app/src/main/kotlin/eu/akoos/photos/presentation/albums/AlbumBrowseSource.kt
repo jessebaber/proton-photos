@@ -22,11 +22,9 @@
 
 package eu.akoos.photos.presentation.albums
 
-import android.content.Context
-import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.CloudAlbumDao
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -60,11 +58,11 @@ import javax.inject.Singleton
  */
 @Singleton
 class AlbumBrowseSource @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
-    private val cloudAlbumDao: CloudAlbumDao,
+    private val albumCatalog: AlbumCatalog,
     private val driveRepo: DrivePhotoRepository,
     private val localMediaRepo: LocalMediaRepository,
+    private val settingsStore: SettingsStore,
 ) {
 
     /**
@@ -78,7 +76,7 @@ class AlbumBrowseSource @Inject constructor(
     private val cachedCloudAlbums: Flow<Pair<List<Album>, List<Album>>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyList<Album>() to emptyList())
-            else combine(cloudAlbumDao.observeOwned(), driveRepo.observeHiddenAlbumMemberLinkIds()) { _, _ -> }
+            else combine(albumCatalog.observeOwnedAlbums(), driveRepo.observeHiddenAlbumMemberLinkIds()) { _, _ -> }
                 .mapLatest { driveRepo.loadAlbumsCached() to driveRepo.loadSharedWithMeAlbumsCached() }
         }
         .retryOnDbTear("AlbumBrowseSource")
@@ -88,11 +86,10 @@ class AlbumBrowseSource @Inject constructor(
      *  these too. */
     private val deviceFolders: Flow<List<DeviceFolder>> = combine(
         localMediaRepo.observeLocalMedia(),
-        context.settingsDataStore.data
-            .map { prefs ->
-                (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
-                    FolderCoverMap.parse(prefs[SettingsKeys.FOLDER_COVER_URI_MAP])
-            }
+        combine(
+            settingsStore.observe(Settings.HIDDEN_PHOTO_URIS),
+            settingsStore.observe(Settings.FOLDER_COVER_URI_MAP),
+        ) { hiddenUris, coverMap -> hiddenUris to FolderCoverMap.parse(coverMap) }
             .distinctUntilChanged(),
     ) { items, (hiddenUris, pinnedCovers) ->
         DeviceFolderCards.build(items, hiddenUris, pinnedCovers)
@@ -107,16 +104,19 @@ class AlbumBrowseSource @Inject constructor(
     internal val source: Flow<SearchAlbums.Source> = combine(
         cachedCloudAlbums,
         deviceFolders,
-        context.settingsDataStore.data
-            .map { prefs ->
-                SearchAlbums.Source(
-                    hiddenAlbumIds = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet(),
-                    excluded = prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(),
-                    sortMode = AlbumSortMode.fromOrdinal(prefs[SettingsKeys.ALBUMS_SORT_MODE]),
-                    customOrder = decodeAlbumOrder(prefs[SettingsKeys.ALBUMS_CUSTOM_ORDER]),
-                )
-            }
-            .distinctUntilChanged(),
+        combine(
+            settingsStore.observe(Settings.HIDDEN_ALBUM_IDS),
+            settingsStore.observe(Settings.ALBUMS_GRID_EXCLUDED),
+            settingsStore.observe(Settings.ALBUMS_SORT_MODE),
+            settingsStore.observe(Settings.ALBUMS_CUSTOM_ORDER),
+        ) { hidden, excluded, sortMode, customOrder ->
+            SearchAlbums.Source(
+                hiddenAlbumIds = hidden,
+                excluded = excluded,
+                sortMode = AlbumSortMode.fromOrdinal(sortMode),
+                customOrder = decodeAlbumOrder(customOrder),
+            )
+        }.distinctUntilChanged(),
     ) { (cloudAlbums, sharedAlbums), folders, settings ->
         settings.copy(cloudAlbums = cloudAlbums, sharedAlbums = sharedAlbums, deviceFolders = folders)
     }

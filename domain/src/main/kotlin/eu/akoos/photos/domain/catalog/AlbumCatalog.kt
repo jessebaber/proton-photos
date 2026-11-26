@@ -28,5 +28,8 @@ import kotlinx.coroutines.flow.Flow
 interface AlbumCatalog {
     fun observeOwnedAlbums(): Flow<List<CloudAlbumRecord>>
     fun observeAssociatedPhotoLinkIdsForAlbums(albumIds: Set<String>): Flow<List<String>>
+    fun observeAllAssociatedPhotoLinkIds(): Flow<List<String>>
+    fun observeAlbumIdsForPhotos(photoLinkIds: Set<String>): Flow<List<AlbumMembershipRecord>>
     suspend fun membershipLinkIdsForAlbum(albumLinkId: String): List<String>
+    fun observePendingUploadCount(albumLinkId: String, userId: String): Flow<Int>
 }

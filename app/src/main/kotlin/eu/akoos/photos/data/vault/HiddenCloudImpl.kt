@@ -33,7 +33,9 @@ import javax.inject.Singleton
 class HiddenCloudImpl @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : HiddenCloud {
-    override suspend fun hide(linkIds: Collection<String>) = HiddenCloudPhotos.hide(context, linkIds)
+    override suspend fun hide(linkIds: Collection<String>, atMs: Long?) =
+        if (atMs == null) HiddenCloudPhotos.hide(context, linkIds)
+        else HiddenCloudPhotos.hide(context, linkIds, atMs)
     override suspend fun reveal(linkIds: Collection<String>) = HiddenCloudPhotos.reveal(context, linkIds)
     override suspend fun hideAlbums(albumLinkIds: Collection<String>) =
         HiddenCloudPhotos.hideAlbums(context, albumLinkIds)

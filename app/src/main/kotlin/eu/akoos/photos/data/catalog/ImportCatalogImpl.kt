@@ -23,6 +23,10 @@
 package eu.akoos.photos.data.catalog
 
 import eu.akoos.photos.data.db.dao.ImportAlbumMemberDao
+import eu.akoos.photos.data.importer.ImportScanCache
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import eu.akoos.photos.data.db.dao.ImportHistoryDao
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.dao.ImportUploadedDao
@@ -39,6 +43,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ImportCatalogImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val importHistoryDao: ImportHistoryDao,
     private val importStagedDao: ImportStagedDao,
     private val importUploadedDao: ImportUploadedDao,
@@ -62,6 +67,7 @@ class ImportCatalogImpl @Inject constructor(
                 CatalogMappers.importStagedRecord(
                     it.zipId, it.entryName, it.title, it.dateMs, it.sizeBytes,
                     it.thumbPath, it.excluded, it.alreadyInDrive, it.albumName,
+                    lat = it.lat, lng = it.lng, description = it.description,
                 )
             }
         }
@@ -83,10 +89,14 @@ class ImportCatalogImpl @Inject constructor(
 
     override fun observeUploadedByRun(runId: String): Flow<List<ImportUploadedRecord>> =
         importUploadedDao.observeByRun(runId).map { list ->
-            list.map { ImportUploadedRecord(it.runId, it.linkId, it.name, it.alreadyInDrive) }
+            list.map { ImportUploadedRecord(it.runId, it.linkId, it.name, it.alreadyInDrive, it.undone) }
         }
     override suspend fun deleteUploadedRun(runId: String) = importUploadedDao.deleteRun(runId)
     override suspend fun albumCountsForRun(runId: String): List<ImportAlbumCountRecord> =
         importAlbumMemberDao.albumCountsForRun(runId).map { ImportAlbumCountRecord(it.name, it.count) }
     override suspend fun clearAlbumMembersForRun(runId: String) = importAlbumMemberDao.clearForRun(runId)
+
+    override suspend fun clearScanCache(zipUri: String) {
+        ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME)).delete(zipUri)
+    }
 }

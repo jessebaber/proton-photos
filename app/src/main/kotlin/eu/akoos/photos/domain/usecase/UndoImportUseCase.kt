@@ -22,12 +22,14 @@
 
 package eu.akoos.photos.domain.usecase
 
+import kotlin.jvm.JvmName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.ImportUploadedDao
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
+import eu.akoos.photos.domain.catalog.ImportUploadedRecord
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.util.ImportDiagnostics
@@ -210,6 +212,7 @@ private val LEDGER_MOTION = Regex("\\.(mov|mp4)$", RegexOption.IGNORE_CASE)
  * still's and is left out. Each file keeps its own date in the ledger, which can differ between the two
  * halves, so the name alone decides.
  */
+@JvmName("ledgerPhotosEntity")
 internal fun ledgerPhotos(rows: List<ImportUploadedEntity>): List<ImportUploadedEntity> {
     fun stem(row: ImportUploadedEntity) = row.name.orEmpty().substringBeforeLast('.').lowercase(java.util.Locale.ROOT)
     val stills = rows.filter { LEDGER_STILL.containsMatchIn(it.name.orEmpty()) }.groupBy { stem(it) to it.alreadyInDrive }
@@ -223,3 +226,19 @@ internal fun ledgerPhotos(rows: List<ImportUploadedEntity>): List<ImportUploaded
         true
     }
 }
+
+@JvmName("ledgerPhotosRecords")
+internal fun ledgerPhotoRecords(rows: List<ImportUploadedRecord>): List<ImportUploadedRecord> {
+    fun stem(row: ImportUploadedRecord) = row.name.orEmpty().substringBeforeLast('.').lowercase(java.util.Locale.ROOT)
+    val stills = rows.filter { LEDGER_STILL.containsMatchIn(it.name.orEmpty()) }.groupBy { stem(it) to it.alreadyInDrive }
+    val taken = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<ImportUploadedRecord, Boolean>())
+    return rows.filterNot { row ->
+        if (!LEDGER_MOTION.containsMatchIn(row.name.orEmpty())) return@filterNot false
+        val still = stills[stem(row) to row.alreadyInDrive]
+            ?.firstOrNull { it !in taken }
+            ?: return@filterNot false
+        taken += still
+        true
+    }
+}
+
