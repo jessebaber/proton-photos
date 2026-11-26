@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
 import android.content.Context
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
