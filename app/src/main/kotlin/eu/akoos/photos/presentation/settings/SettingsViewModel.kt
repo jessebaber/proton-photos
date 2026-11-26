@@ -2138,7 +2138,7 @@ class SettingsViewModel @Inject constructor(
                 runCatching { PhotoWidgetUpdateWorker.cancelAll(context) }
                 // 1. Stop anything that could re-decrypt content back into the caches we are about
                 //    to wipe, and stop the persistent process-keeper service.
-                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context, workManager)
+                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context)
                 // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
                 //    token disappears (heap can't recover keys; the re-login starts from a clean
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).

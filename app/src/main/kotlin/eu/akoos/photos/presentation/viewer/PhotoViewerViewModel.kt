@@ -106,6 +106,7 @@ import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
+import eu.akoos.photos.domain.catalog.LocationCatalog
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.UserPhotoTags
@@ -261,6 +262,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val forceUploadLocalUris: eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val photoLocationDao: PhotoLocationDao,
+    private val locationCatalog: LocationCatalog,
     private val localTagDao: LocalTagDao,
     private val photoListingDao: PhotoListingDao,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
@@ -1033,9 +1035,9 @@ class PhotoViewerViewModel @Inject constructor(
                     PhotoGpsResolver.localGps(context, item.local.uri, item.local.mimeType)
                 is GalleryItem.Synced ->
                     PhotoGpsResolver.localGps(context, item.local.uri, item.local.mimeType)
-                        ?: userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                        ?: userId?.let { PhotoGpsResolver.cloudGps(locationCatalog, it, item.cloud.linkId) }
                 is GalleryItem.CloudOnly ->
-                    userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                    userId?.let { PhotoGpsResolver.cloudGps(locationCatalog, it, item.cloud.linkId) }
             } ?: metadataGps()
             _detailsGps.value = latLng?.let { DetailsGps(it.first, it.second) }
             if (latLng != null) {

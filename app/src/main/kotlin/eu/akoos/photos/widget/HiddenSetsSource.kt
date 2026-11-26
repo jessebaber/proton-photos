@@ -24,12 +24,12 @@ package eu.akoos.photos.widget
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
-import eu.akoos.photos.data.db.dao.SyncStateDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.repository.SyncStateSnapshot
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.catalog.SyncCatalog
+import eu.akoos.photos.domain.catalog.SyncSnapshot
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -53,9 +53,10 @@ import javax.inject.Inject
 class HiddenSetsSource @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
-    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
-    private val syncStateDao: SyncStateDao,
-    private val syncStateSnapshot: SyncStateSnapshot,
+    private val albumCatalog: AlbumCatalog,
+    private val syncCatalog: SyncCatalog,
+    private val syncSnapshot: SyncSnapshot,
+    private val settingsStore: SettingsStore,
 ) {
 
     /** The hidden sets of whoever is signed in, re-read whenever a hide or a reveal lands. */
@@ -78,7 +79,7 @@ class HiddenSetsSource @Inject constructor(
                         if (hiddenCloudIds.isEmpty()) {
                             flowOf(emptySet())
                         } else {
-                            syncStateSnapshot.observe(userId).map { snapshot ->
+                            syncSnapshot.observe(userId).map { snapshot ->
                                 hiddenTwinUris(
                                     snapshot.rows.asSequence().map { it.localUri to it.cloudFileId },
                                     hiddenCloudIds,
@@ -97,22 +98,44 @@ class HiddenSetsSource @Inject constructor(
      * in, so a guest's screen works on the device alone.
      */
     private fun observeFor(userId: UserId?): Flow<WidgetHiddenSets> {
-        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val prefs = context.settingsDataStore.data
-        val albumMembers = prefs
-            .map { it[SettingsKeys.HIDDEN_ALBUM_IDS].orEmpty() }
+        val account = userId?.id ?: LOCAL_PARTITION
+        val albumMembers = settingsStore.observe(Settings.HIDDEN_ALBUM_IDS)
             .distinctUntilChanged()
             .flatMapLatest { albumIds ->
                 if (albumIds.isEmpty()) flowOf(emptySet())
-                else albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(albumIds).map { it.toSet() }
+                else albumCatalog.observeAssociatedPhotoLinkIdsForAlbums(albumIds).map { it.toSet() }
             }
         // Every hide and reveal rewrites the vault's records in settings, so a settings change is when
         // the vault's rows are read again. The read is indexed down to the vault's handful of rows.
-        val withVaultedRows = prefs.mapLatest { p ->
-            p to syncStateDao.getVaulted(account).mapNotNull { it.cloudFileId }
+        val withVaultedRows = combine(
+            settingsStore.observe(Settings.HIDDEN_CLOUD_PHOTO_IDS),
+            settingsStore.observe(Settings.HIDDEN_URI_CLOUD_ID_MAP),
+            settingsStore.observe(Settings.HIDDEN_ALBUM_IDS),
+            settingsStore.observe(Settings.HIDDEN_FOLDER_NAMES),
+        ) { cloudIds, uriMap, albumIds, folderNames ->
+            Quadruple(cloudIds, uriMap, albumIds, folderNames)
+        }.mapLatest { (cloudIds, uriMap, albumIds, folderNames) ->
+            val vaulted = syncCatalog.getVaulted(account).mapNotNull { it.cloudFileId }
+            SettingsHidden(cloudIds, uriMap, albumIds, folderNames) to vaulted
         }
-        return combine(withVaultedRows, albumMembers) { (p, vaultedRowCloudIds), members ->
-            widgetHiddenSets(p, members, vaultedRowCloudIds)
+        return combine(withVaultedRows, albumMembers) { (settings, vaultedRowCloudIds), members ->
+            widgetHiddenSets(
+                individuallyHidden = settings.cloudIds,
+                hiddenUriCloudIdMap = settings.uriMap,
+                hiddenAlbumIds = settings.albumIds,
+                hiddenFolderNames = settings.folderNames,
+                hiddenAlbumMembers = members,
+                vaultedRowCloudIds = vaultedRowCloudIds,
+            )
         }.distinctUntilChanged()
     }
 }
+
+private data class SettingsHidden(
+    val cloudIds: Set<String>,
+    val uriMap: Set<String>,
+    val albumIds: Set<String>,
+    val folderNames: Set<String>,
+)
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)

@@ -20,8 +20,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.util
+package eu.akoos.photos.data.ml
 
+import eu.akoos.photos.util.MAX_PERSISTED_RETRIES
+import eu.akoos.photos.util.RetryRecord
+import eu.akoos.photos.util.epochFromElapsed
 import eu.akoos.photos.data.repository.drive.PhotoUnavailableException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart

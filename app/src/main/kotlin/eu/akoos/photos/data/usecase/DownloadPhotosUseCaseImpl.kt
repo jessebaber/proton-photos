@@ -37,6 +37,8 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.api.dto.BatchLinkDto
+import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.data.repository.PhotoLocationResolver
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository

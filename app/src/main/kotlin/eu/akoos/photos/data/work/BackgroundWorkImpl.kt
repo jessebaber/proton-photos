@@ -36,6 +36,7 @@ import eu.akoos.photos.util.ModelDownloadKind as UtilModelDownloadKind
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.ImportWorker
+import eu.akoos.photos.worker.MetadataEditWorker
 import eu.akoos.photos.worker.StageImportWorker
 import eu.akoos.photos.worker.SyncWorker
 import eu.akoos.photos.worker.UpdateCheckWorker
@@ -101,6 +102,16 @@ class BackgroundWorkImpl @Inject constructor(
     override fun startBackgroundSync() = BackgroundSyncService.start(context)
     override fun stopBackgroundSync() = BackgroundSyncService.stop(context)
 
+    override fun cancelAccountSessionWork() {
+        SyncWorker.cancel(workManager)
+        workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT)
+        workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER)
+        workManager.cancelAllWorkByTag(AlbumDownloadWorker.TAG)
+        workManager.cancelAllWorkByTag(ImportWorker.TAG)
+        workManager.cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)
+        BackgroundSyncService.stop(context)
+    }
+
     override fun startGifExport(
         sourceUri: String,
         startMs: Long,
@@ -141,4 +152,5 @@ class BackgroundWorkImpl @Inject constructor(
 
     override fun startScreenshotOverlay() = ScreenshotOverlayService.start(context)
     override fun stopScreenshotOverlay() = ScreenshotOverlayService.stop(context)
+
 }

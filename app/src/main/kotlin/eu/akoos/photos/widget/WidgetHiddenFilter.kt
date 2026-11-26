@@ -22,11 +22,10 @@
 
 package eu.akoos.photos.widget
 
-import androidx.datastore.preferences.core.Preferences
-import eu.akoos.photos.data.db.entity.CloudAlbumEntity
-import eu.akoos.photos.data.db.entity.PhotoPickerRow
-import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.domain.catalog.CloudAlbumRecord
+import eu.akoos.photos.domain.catalog.PhotoPickerRowRecord
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.vault.HiddenCloudIds
 
 /**
  * Everything a home-screen widget may never show, read from the records the app's own hide filters
@@ -53,42 +52,32 @@ internal fun widgetHiddenCloudIds(
     vaultedCloudIds: Set<String>,
 ): Set<String> = individuallyHidden + hiddenAlbumMembers + vaultedCloudIds
 
-/**
- * The Drive copies of vaulted photos, from both records that name one: the `"vaultUri|cloudLinkId"`
- * entries a hide writes to settings, and the cloud ids on the vault's own sync rows.
- */
+/** Delegates to [HiddenCloudIds.vaultedCloudIds]. */
 internal fun vaultedCloudIds(
     hiddenUriCloudIdEntries: Set<String>,
     vaultedRowCloudIds: Collection<String>,
-): Set<String> {
-    val ids = HashSet<String>(hiddenUriCloudIdEntries.size + vaultedRowCloudIds.size)
-    for (entry in hiddenUriCloudIdEntries) {
-        val linkId = entry.substringAfter('|', "")
-        if (linkId.isNotBlank()) ids += linkId
-    }
-    vaultedRowCloudIds.filterTo(ids) { it.isNotBlank() }
-    return ids
-}
+): Set<String> = HiddenCloudIds.vaultedCloudIds(hiddenUriCloudIdEntries, vaultedRowCloudIds)
 
 /**
  * The hidden sets as of one read of the settings, given the two parts that live in the database
  * instead: the members of the hidden albums and the cloud ids on the vault's sync rows.
  */
 internal fun widgetHiddenSets(
-    prefs: Preferences,
+    individuallyHidden: Set<String>,
+    hiddenUriCloudIdMap: Set<String>,
+    hiddenAlbumIds: Set<String>,
+    hiddenFolderNames: Set<String>,
     hiddenAlbumMembers: Set<String>,
     vaultedRowCloudIds: Collection<String>,
 ): WidgetHiddenSets = WidgetHiddenSets(
-    cloudIds = widgetHiddenCloudIds(
-        individuallyHidden = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS].orEmpty(),
+    cloudIds = HiddenCloudIds.fromParts(
+        individuallyHidden = individuallyHidden,
         hiddenAlbumMembers = hiddenAlbumMembers,
-        vaultedCloudIds = vaultedCloudIds(
-            prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP].orEmpty(),
-            vaultedRowCloudIds,
-        ),
+        hiddenUriCloudIdEntries = hiddenUriCloudIdMap,
+        vaultedRowCloudIds = vaultedRowCloudIds,
     ),
-    albumIds = prefs[SettingsKeys.HIDDEN_ALBUM_IDS].orEmpty(),
-    folderNames = prefs[SettingsKeys.HIDDEN_FOLDER_NAMES].orEmpty(),
+    albumIds = hiddenAlbumIds,
+    folderNames = hiddenFolderNames,
 )
 
 /** The modes that draw decrypted cloud photos, which need a signed-in account behind them. */
@@ -112,7 +101,7 @@ internal fun followedAlbumLinkIds(
     else visibleCloudLinkIds(memberLinkIds, hidden)
 
 /** The cloud photos the picker offers. */
-internal fun visiblePickerRows(rows: List<PhotoPickerRow>, hidden: WidgetHiddenSets): List<PhotoPickerRow> =
+internal fun visiblePickerRows(rows: List<PhotoPickerRowRecord>, hidden: WidgetHiddenSets): List<PhotoPickerRowRecord> =
     if (hidden.cloudIds.isEmpty()) rows else rows.filterNot { it.linkId in hidden.cloudIds }
 
 /**
@@ -121,9 +110,9 @@ internal fun visiblePickerRows(rows: List<PhotoPickerRow>, hidden: WidgetHiddenS
  * Albums grid shows when no visible cover resolves.
  */
 internal fun visibleCloudAlbums(
-    albums: List<CloudAlbumEntity>,
+    albums: List<CloudAlbumRecord>,
     hidden: WidgetHiddenSets,
-): List<CloudAlbumEntity> = albums.mapNotNull { album ->
+): List<CloudAlbumRecord> = albums.mapNotNull { album ->
     when {
         album.linkId in hidden.albumIds -> null
         album.coverLinkId != null && album.coverLinkId in hidden.cloudIds -> album.copy(coverLinkId = null)

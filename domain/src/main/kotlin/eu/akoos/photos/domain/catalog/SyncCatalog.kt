@@ -25,4 +25,6 @@ package eu.akoos.photos.domain.catalog
 /** Sync-state vaulted-row reads widgets and settings use. */
 interface SyncCatalog {
     suspend fun getVaulted(accountId: String): List<SyncStateLiteRecord>
+    /** (localUri, cloudFileId) pairs for the given device URIs. */
+    suspend fun cloudPairs(accountId: String, localUris: List<String>): List<SyncStateLiteRecord>
 }

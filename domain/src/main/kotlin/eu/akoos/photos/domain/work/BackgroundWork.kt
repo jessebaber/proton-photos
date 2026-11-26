@@ -58,6 +58,9 @@ interface BackgroundWork {
     fun startBackgroundSync()
     fun stopBackgroundSync()
 
+    /** Cancel sync/import/album-download/metadata-edit work and stop the sync service. */
+    fun cancelAccountSessionWork()
+
     fun startGifExport(
         sourceUri: String,
         startMs: Long,

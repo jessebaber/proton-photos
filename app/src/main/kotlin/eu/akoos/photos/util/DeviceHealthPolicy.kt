@@ -47,8 +47,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -215,6 +215,7 @@ private const val INTERACTION_WINDOW_MS = 3_000L
 class DeviceHealthPolicy @Inject constructor(
     @ApplicationContext context: Context,
     networkObserver: NetworkObserver,
+    settingsStore: SettingsStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -290,8 +291,7 @@ class DeviceHealthPolicy @Inject constructor(
     }
 
     /** Whether the user limited the face and photo-search scans to when the phone is charging. */
-    val mlChargingOnly: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.ML_ONLY_WHILE_CHARGING] == true }
+    val mlChargingOnly: StateFlow<Boolean> = settingsStore.observe(Settings.ML_ONLY_WHILE_CHARGING)
         .catch { emit(false) }
         .stateIn(scope, SharingStarted.Eagerly, false)
 

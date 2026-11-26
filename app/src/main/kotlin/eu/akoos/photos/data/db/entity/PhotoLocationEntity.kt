@@ -62,4 +62,4 @@ fun PhotoLocationEntity.isNullIsland(): Boolean = latitude == 0.0 && longitude =
  * photo without a real position shows no place instead of the sea off West Africa.
  */
 fun isUsableGpsFix(latitude: Double, longitude: Double): Boolean =
-    latitude in -90.0..90.0 && longitude in -180.0..180.0 && !(latitude == 0.0 && longitude == 0.0)
+    eu.akoos.photos.domain.entity.isUsableGpsFix(latitude, longitude)

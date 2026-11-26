@@ -212,7 +212,7 @@ class MainActivity : AppCompatActivity() {
         if (!cleanup.claim(userId.id)) return
         try {
             if (persist) signOutStep { cleanup.markPending(app, userId.id) }
-            cleanup.stopBackgroundWork(app, workManager)
+            cleanup.stopBackgroundWork(app)
             val vault = try {
                 policy.afterSignOut(userId.id)
             } catch (e: Exception) {

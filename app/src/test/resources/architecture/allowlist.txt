@@ -158,24 +158,3 @@ presentation-data eu/akoos/photos/presentation/search/SearchFilter.kt
 presentation-data eu/akoos/photos/presentation/search/SearchScreen.kt
 presentation-data eu/akoos/photos/presentation/search/SearchViewModel.kt
 
-# stream: feat/presentation-shell
-data-widget eu/akoos/photos/data/mlsync/FaceSnapshotExporter.kt
-data-widget eu/akoos/photos/data/repository/DrivePhotoRepositoryImpl.kt
-presentation-data eu/akoos/photos/navigation/NavGraph.kt
-presentation-data eu/akoos/photos/widget/HiddenSetsSource.kt
-presentation-data eu/akoos/photos/widget/PhotoWidgetConfigActivity.kt
-presentation-data eu/akoos/photos/widget/PhotoWidgetConfigViewModel.kt
-presentation-data eu/akoos/photos/widget/PhotoWidgetUpdater.kt
-presentation-data eu/akoos/photos/widget/WidgetHiddenFilter.kt
-util-data eu/akoos/photos/util/DeviceHealthPolicy.kt
-util-data eu/akoos/photos/util/ExifHelper.kt
-util-data eu/akoos/photos/util/MlSourceRetry.kt
-util-data eu/akoos/photos/util/OnThisDayHelper.kt
-util-data eu/akoos/photos/util/OutgoingPhotoUris.kt
-util-data eu/akoos/photos/util/PhotoGpsResolver.kt
-util-data eu/akoos/photos/util/SignOutCleanup.kt
-util-data eu/akoos/photos/util/ThankYouController.kt
-util-presentation eu/akoos/photos/util/LabelNormalizer.kt
-util-presentation eu/akoos/photos/util/ShareIntentBuilder.kt
-util-service eu/akoos/photos/util/SignOutCleanup.kt
-util-worker eu/akoos/photos/util/SignOutCleanup.kt

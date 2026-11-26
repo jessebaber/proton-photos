@@ -32,6 +32,10 @@ import eu.akoos.photos.data.catalog.LocationCatalogImpl
 import eu.akoos.photos.data.catalog.PeopleCatalogImpl
 import eu.akoos.photos.data.catalog.PhotoCatalogImpl
 import eu.akoos.photos.data.catalog.SyncCatalogImpl
+import eu.akoos.photos.data.catalog.SyncSnapshotImpl
+import eu.akoos.photos.data.downloads.PhotoDownloadsImpl
+import eu.akoos.photos.data.upload.LocalOverwriteImpl
+import eu.akoos.photos.widget.PhotoWidgetSignOut
 import eu.akoos.photos.data.hidden.VaultPasswordStore
 import eu.akoos.photos.data.label.LabelBackupImpl
 import eu.akoos.photos.data.label.PhotoLabelsImpl
@@ -64,6 +68,10 @@ import eu.akoos.photos.domain.catalog.LocationCatalog
 import eu.akoos.photos.domain.catalog.PeopleCatalog
 import eu.akoos.photos.domain.catalog.PhotoCatalog
 import eu.akoos.photos.domain.catalog.SyncCatalog
+import eu.akoos.photos.domain.catalog.SyncSnapshot
+import eu.akoos.photos.domain.downloads.PhotoDownloads
+import eu.akoos.photos.domain.upload.LocalOverwrite
+import eu.akoos.photos.domain.widget.WidgetSignOut
 import eu.akoos.photos.domain.label.LabelBackup
 import eu.akoos.photos.domain.label.PhotoLabels
 import eu.akoos.photos.domain.ml.FaceIndexing
@@ -137,6 +145,11 @@ abstract class PresentationFacadesModule {
     @Binds @Singleton abstract fun bindLocationCatalog(impl: LocationCatalogImpl): LocationCatalog
     @Binds @Singleton abstract fun bindImportCatalog(impl: ImportCatalogImpl): ImportCatalog
     @Binds @Singleton abstract fun bindSyncCatalog(impl: SyncCatalogImpl): SyncCatalog
+    @Binds @Singleton abstract fun bindSyncSnapshot(impl: SyncSnapshotImpl): SyncSnapshot
+
+    @Binds @Singleton abstract fun bindPhotoDownloads(impl: PhotoDownloadsImpl): PhotoDownloads
+    @Binds @Singleton abstract fun bindLocalOverwrite(impl: LocalOverwriteImpl): LocalOverwrite
+    @Binds @Singleton abstract fun bindWidgetSignOut(impl: PhotoWidgetSignOut): WidgetSignOut
 
     @Binds @Singleton abstract fun bindBackgroundWork(impl: BackgroundWorkImpl): BackgroundWork
 }

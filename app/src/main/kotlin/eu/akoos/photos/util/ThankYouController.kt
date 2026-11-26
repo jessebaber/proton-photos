@@ -25,9 +25,9 @@ package eu.akoos.photos.util
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
-import eu.akoos.photos.data.preferences.setThanks250Seen
-import eu.akoos.photos.data.preferences.thanks250Seen
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,6 +50,7 @@ import javax.inject.Singleton
 @Singleton
 class ThankYouController @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
     @AppScope private val appScope: CoroutineScope,
 ) {
     private val _visible = MutableStateFlow(false)
@@ -61,7 +62,7 @@ class ThankYouController @Inject constructor(
 
     /** Whether the real one-time show is due: the stable 2.5.0 build, not shown before. */
     suspend fun shouldShow(): Boolean =
-        BuildConfig.VERSION_NAME == "2.5.0" && !context.thanks250Seen.first()
+        BuildConfig.VERSION_NAME == "2.5.0" && !settingsStore.get(Settings.THANKS_2_5_0_SEEN)
 
     /**
      * Show the real one-time popup and mark it seen at once, so it appears a single time in the app's
@@ -71,7 +72,7 @@ class ThankYouController @Inject constructor(
     fun showReal(thenWhatsNew: Boolean) {
         chainWhatsNew = thenWhatsNew
         _visible.value = true
-        appScope.launch { context.setThanks250Seen(true) }
+        appScope.launch { settingsStore.set(Settings.THANKS_2_5_0_SEEN, true) }
     }
 
     /**

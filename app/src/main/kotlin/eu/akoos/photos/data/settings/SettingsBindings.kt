@@ -156,6 +156,7 @@ object SettingsBindings {
             bind(Settings.STRIP_TIMESTAMP, SettingsKeys.STRIP_TIMESTAMP)
             bind(Settings.SYNC_FOLDER_NAMES, SettingsKeys.SYNC_FOLDER_NAMES)
             bind(Settings.SYNC_WIFI_ONLY, SettingsKeys.SYNC_WIFI_ONLY)
+            bind(Settings.THANKS_2_5_0_SEEN, SettingsKeys.THANKS_2_5_0_SEEN)
             bind(Settings.THEME_MODE, SettingsKeys.THEME_MODE)
             bind(Settings.THEME_PALETTE, SettingsKeys.THEME_PALETTE)
             bind(Settings.TIMELINE_EXCLUDED_ALBUM_IDS, SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS)

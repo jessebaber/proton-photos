@@ -27,13 +27,13 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
-import eu.akoos.photos.data.hidden.HiddenStorageManager
-import eu.akoos.photos.data.offline.OfflineStorageManager
-import eu.akoos.photos.data.repository.drive.PhotoDownloadService
+import eu.akoos.photos.domain.downloads.PhotoDownloads
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.offline.OfflineStorage
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.vault.HiddenStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -52,8 +52,9 @@ class OutgoingPhotoUris @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cloudRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
-    private val hiddenStorage: HiddenStorageManager,
-    private val offlineStore: OfflineStorageManager,
+    private val hiddenStorage: HiddenStorage,
+    private val offlineStore: OfflineStorage,
+    private val photoDownloads: PhotoDownloads,
 ) {
 
     /** The uri for [item], stripped per [stripConfig] (null passes the original through). */
@@ -77,7 +78,7 @@ class OutgoingPhotoUris @Inject constructor(
             offlineStore.findBlob(photo.linkId)
                 ?.takeIf { it.length() > 0 }
                 ?.let { blob ->
-                    PhotoDownloadService.fullResFile(context, photo)?.also { dest ->
+                    photoDownloads.fullResFile(photo)?.also { dest ->
                         if (!dest.exists() || dest.length() == 0L) {
                             dest.parentFile?.mkdirs()
                             blob.copyTo(dest, overwrite = true)

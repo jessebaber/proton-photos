@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.util
+package eu.akoos.photos.data.ml
 
 import eu.akoos.photos.data.repository.drive.PhotoUnavailableException
 import me.proton.core.network.domain.ApiException

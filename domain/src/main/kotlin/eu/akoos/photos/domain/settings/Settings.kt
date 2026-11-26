@@ -156,6 +156,7 @@ object Settings {
     val STRIP_TIMESTAMP: Setting<Boolean> = Setting("strip_timestamp", false)
     val SYNC_FOLDER_NAMES: Setting<Set<String>?> = Setting("sync_folder_names", null)
     val SYNC_WIFI_ONLY: Setting<Boolean> = Setting("sync_wifi_only", true)
+    val THANKS_2_5_0_SEEN: Setting<Boolean> = Setting("thanks_2_5_0_seen", false)
     val THEME_MODE: Setting<String?> = Setting("theme_mode", null)
     val THEME_PALETTE: Setting<String> = Setting("theme_palette", "default")
     val TIMELINE_EXCLUDED_ALBUM_IDS: Setting<Set<String>> = Setting("timeline_excluded_album_ids", emptySet())
@@ -290,6 +291,7 @@ object Settings {
         STRIP_TIMESTAMP,
         SYNC_FOLDER_NAMES,
         SYNC_WIFI_ONLY,
+        THANKS_2_5_0_SEEN,
         THEME_MODE,
         THEME_PALETTE,
         TIMELINE_EXCLUDED_ALBUM_IDS,

@@ -41,13 +41,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
-import eu.akoos.photos.data.db.dao.PhotoListingDao
-import eu.akoos.photos.data.db.dao.SyncStateDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.catalog.SyncCatalog
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.thumbnails.ThumbnailDecrypt
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import java.io.File
 import java.io.FileOutputStream
@@ -76,11 +75,11 @@ object PhotoWidgetUpdater {
     @EntryPoint
     @InstallIn(SingletonComponent::class)
     interface CloudDeps {
-        fun thumbnailScheduler(): ThumbnailDecryptScheduler
-        fun photoListingDao(): PhotoListingDao
+        fun thumbnailDecrypt(): ThumbnailDecrypt
         fun accountManager(): AccountManager
-        fun albumPhotoMembershipDao(): AlbumPhotoMembershipDao
-        fun syncStateDao(): SyncStateDao
+        fun albumCatalog(): AlbumCatalog
+        fun syncCatalog(): SyncCatalog
+        fun settingsStore(): SettingsStore
     }
 
     // ── Public entry point ────────────────────────────────────────────────────
@@ -116,7 +115,7 @@ object PhotoWidgetUpdater {
                 clearBitmapState(context, glanceId, appWidgetId)
                 return@withContext
             }
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             // Deliberately not caught on its own: an update that cannot tell what is hidden draws
             // nothing new and leaves it to the next cycle.
             val hidden = readHiddenSets(context, deps, account)
@@ -141,7 +140,7 @@ object PhotoWidgetUpdater {
             val twinUris = if (!mode.isCloud && hidden.cloudIds.isNotEmpty()) {
                 val window = windowIndices(photos.size, start, HIDDEN_SKIP_WINDOW).map { photos[it] }
                 hiddenTwinUris(
-                    deps.syncStateDao().cloudPairs(account, window).asSequence()
+                    deps.syncCatalog().cloudPairs(account, window).asSequence()
                         .map { it.localUri to it.cloudFileId },
                     hidden.cloudIds,
                 )
@@ -232,13 +231,21 @@ object PhotoWidgetUpdater {
      * in, so a guest's device widget keeps working.
      */
     private suspend fun readHiddenSets(context: Context, deps: CloudDeps, account: String): WidgetHiddenSets {
-        val prefs = context.settingsDataStore.data.first()
+        val store = deps.settingsStore()
+        val hiddenAlbumIds = store.get(Settings.HIDDEN_ALBUM_IDS)
         val albumMembers = HashSet<String>()
-        for (albumLinkId in prefs[SettingsKeys.HIDDEN_ALBUM_IDS].orEmpty()) {
-            albumMembers += deps.albumPhotoMembershipDao().getPhotoLinkIds(albumLinkId)
+        for (albumLinkId in hiddenAlbumIds) {
+            albumMembers += deps.albumCatalog().membershipLinkIdsForAlbum(albumLinkId)
         }
-        val vaultedRowCloudIds = deps.syncStateDao().getVaulted(account).mapNotNull { it.cloudFileId }
-        return widgetHiddenSets(prefs, albumMembers, vaultedRowCloudIds)
+        val vaultedRowCloudIds = deps.syncCatalog().getVaulted(account).mapNotNull { it.cloudFileId }
+        return widgetHiddenSets(
+            individuallyHidden = store.get(Settings.HIDDEN_CLOUD_PHOTO_IDS),
+            hiddenUriCloudIdMap = store.get(Settings.HIDDEN_URI_CLOUD_ID_MAP),
+            hiddenAlbumIds = hiddenAlbumIds,
+            hiddenFolderNames = store.get(Settings.HIDDEN_FOLDER_NAMES),
+            hiddenAlbumMembers = albumMembers,
+            vaultedRowCloudIds = vaultedRowCloudIds,
+        )
     }
 
     private suspend fun resolvePhotos(
@@ -274,7 +281,7 @@ object PhotoWidgetUpdater {
             val memberLinkIds = cloudAlbumLinkId
                 ?.takeUnless { it in hidden.albumIds }
                 ?.let { albumId ->
-                    runCatching { deps.albumPhotoMembershipDao().getPhotoLinkIds(albumId) }.getOrNull()
+                    runCatching { deps.albumCatalog().membershipLinkIdsForAlbum(albumId) }.getOrNull()
                 }
                 .orEmpty()
             followedAlbumLinkIds(cloudAlbumLinkId, memberLinkIds, hidden)
@@ -396,7 +403,7 @@ object PhotoWidgetUpdater {
      * Load a decrypted thumbnail from the app-private encrypted cache by linkId,
      * scaled to fit within [MAX_BITMAP_PX]. When the thumbnail has not been
      * materialised yet (under the lazy decrypt architecture), we fire a
-     * one-shot decrypt request through [ThumbnailDecryptScheduler] and wait up to
+     * one-shot decrypt request through [ThumbnailDecrypt] and wait up to
      * five seconds for the JPEG to appear before giving up. The widget worker is
      * fine taking a few seconds — it runs in the background, not on a UI thread —
      * and a miss just leaves the widget on its placeholder until the next cycle.
@@ -419,9 +426,7 @@ object PhotoWidgetUpdater {
             // cycle when the entry is missing is harmless.
             val userId = runCatching { deps.accountManager().getPrimaryUserId().first() }.getOrNull()
                 ?: return null
-            val photo = runCatching { deps.photoListingDao().getByLinkId(linkId) }.getOrNull()
-                ?: return null
-            deps.thumbnailScheduler().request(userId, photo)
+            deps.thumbnailDecrypt().requestPinnedCover(userId, linkId)
             withTimeoutOrNull(5_000L) {
                 while (!thumbnailFile.exists()) {
                     delay(100L)

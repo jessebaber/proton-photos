@@ -36,4 +36,9 @@ class SyncCatalogImpl @Inject constructor(
         syncStateDao.getVaulted(accountId).map {
             SyncStateLiteRecord(it.localUri, it.cloudFileId, it.status.name)
         }
+
+    override suspend fun cloudPairs(accountId: String, localUris: List<String>): List<SyncStateLiteRecord> =
+        syncStateDao.cloudPairs(accountId, localUris).map {
+            SyncStateLiteRecord(it.localUri, it.cloudFileId, status = "")
+        }
 }

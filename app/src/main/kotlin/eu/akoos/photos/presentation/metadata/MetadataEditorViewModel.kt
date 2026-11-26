@@ -54,6 +54,7 @@ import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.domain.catalog.LocationCatalog
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.forEachSqlChunk
@@ -307,6 +308,7 @@ class MetadataEditorViewModel @Inject constructor(
     private val writeMetadata: WriteLocalPhotoMetadataUseCase<IntentSender>,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
+    private val locationCatalog: LocationCatalog,
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultEditor: HiddenVaultEditor,
     private val localMediaRepository: LocalMediaRepository,
@@ -1168,9 +1170,9 @@ class MetadataEditorViewModel @Inject constructor(
                 withContext(Dispatchers.IO) { PhotoGpsResolver.localGps(context, item.local.uri, mime, exif) }
             is GalleryItem.Synced ->
                 withContext(Dispatchers.IO) { PhotoGpsResolver.localGps(context, item.local.uri, mime, exif) }
-                    ?: userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                    ?: userId?.let { PhotoGpsResolver.cloudGps(locationCatalog, it, item.cloud.linkId) }
             is GalleryItem.CloudOnly ->
-                userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                userId?.let { PhotoGpsResolver.cloudGps(locationCatalog, it, item.cloud.linkId) }
         }
     }
 }
