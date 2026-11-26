@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.StageProgress
+import eu.akoos.photos.domain.usecase.StagePhase
+import eu.akoos.photos.data.usecase.StageImportUseCase
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.dao.ImportStagedDao

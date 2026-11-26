@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ImportTakeoutUseCase
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.room.Room

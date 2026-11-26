@@ -29,7 +29,7 @@ import coil.imageLoader
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.usecase.StageImportUseCase
+import eu.akoos.photos.data.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.ImportWorker
