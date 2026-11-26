@@ -25,16 +25,16 @@ package eu.akoos.photos.presentation.settings
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import eu.akoos.photos.R
-import eu.akoos.photos.data.mlsync.FaceSnapshotMode
-import eu.akoos.photos.data.mlsync.MlDriveFileKind
-import eu.akoos.photos.data.mlsync.MlRemoteSnapshot
-import eu.akoos.photos.data.mlsync.MlSyncOperation
-import eu.akoos.photos.data.mlsync.MlSyncOutcome
-import eu.akoos.photos.data.mlsync.MlSyncPartStatus
-import eu.akoos.photos.data.mlsync.MlSyncPhase
-import eu.akoos.photos.data.mlsync.MlSyncProgress
-import eu.akoos.photos.data.mlsync.MlSyncResult
-import eu.akoos.photos.data.mlsync.MlSyncState
+import eu.akoos.photos.domain.ml.FaceSnapshotMode
+import eu.akoos.photos.domain.ml.MlDriveFileKind
+import eu.akoos.photos.domain.ml.MlRemoteSnapshot
+import eu.akoos.photos.domain.ml.MlSyncOperation
+import eu.akoos.photos.domain.ml.MlSyncOutcome
+import eu.akoos.photos.domain.ml.MlSyncPartStatus
+import eu.akoos.photos.domain.ml.MlSyncPhase
+import eu.akoos.photos.domain.ml.MlSyncProgress
+import eu.akoos.photos.domain.ml.MlSyncResult
+import eu.akoos.photos.domain.ml.MlSyncState
 
 /*
  * The decisions behind the "Face and search data on Drive" section of the machine-learning settings, kept

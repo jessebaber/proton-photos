@@ -21,7 +21,7 @@
  */
 package eu.akoos.photos.data.face
 
-import eu.akoos.photos.domain.usecase.FaceRegroupOutcome
+import eu.akoos.photos.data.usecase.FaceRegroupOutcome
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

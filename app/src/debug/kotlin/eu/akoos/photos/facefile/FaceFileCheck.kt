@@ -22,6 +22,20 @@
 
 package eu.akoos.photos.facefile
 
+import eu.akoos.photos.data.usecase.writeFaceIndexEnvelope
+
+import eu.akoos.photos.data.usecase.writeBody
+
+import eu.akoos.photos.data.usecase.isPortableFaceKey
+
+import eu.akoos.photos.data.usecase.accountTag
+
+import eu.akoos.photos.data.usecase.ParsedPerson
+
+import eu.akoos.photos.data.usecase.ParsedFace
+
+import eu.akoos.photos.data.usecase.FACE_INDEX_VERSION_V3
+
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
@@ -44,13 +58,6 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceModelAssets
-import eu.akoos.photos.domain.usecase.FACE_INDEX_VERSION_V3
-import eu.akoos.photos.domain.usecase.ParsedFace
-import eu.akoos.photos.domain.usecase.ParsedPerson
-import eu.akoos.photos.domain.usecase.accountTag
-import eu.akoos.photos.domain.usecase.isPortableFaceKey
-import eu.akoos.photos.domain.usecase.writeBody
-import eu.akoos.photos.domain.usecase.writeFaceIndexEnvelope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import me.proton.core.accountmanager.domain.AccountManager

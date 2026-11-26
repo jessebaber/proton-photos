@@ -33,6 +33,7 @@ import kotlinx.coroutines.test.runTest
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.TestDatabase
+import eu.akoos.photos.data.usecase.CloudLinkCheck
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -47,6 +48,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 
 /**
  * Orchestration + safety test for [WriteCloudPhotoMetadataUseCase]. The pipeline TRASHES the cloud

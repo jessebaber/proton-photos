@@ -22,6 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.uploadRewritesBytes
+
+import eu.akoos.photos.data.usecase.ReconcileSyncStateUseCaseImpl
+
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -129,7 +133,7 @@ class ReconcileSyncStateUseCaseTest {
         // cloud-linkId matchers still run, which is what these tests exercise.
         every { mockPrefs.asMap() } returns emptyMap()
 
-        useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope)
+        useCase = ReconcileSyncStateUseCaseImpl(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope)
     }
 
     @After
@@ -556,7 +560,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `a listing read that fails once is read again and the pass completes`() = runTest {
         // Virtual time, so the pause before the second read costs nothing.
         val passScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
-        val retrying = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
+        val retrying = ReconcileSyncStateUseCaseImpl(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
         val local = localItem("uri://1", name = "vacation.jpg", size = 2048L)
         coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } throws
@@ -578,7 +582,7 @@ class ReconcileSyncStateUseCaseTest {
     @Test
     fun `a listing read that keeps failing fails the pass after the last retry and writes nothing`() = runTest {
         val passScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
-        val failing = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
+        val failing = ReconcileSyncStateUseCaseImpl(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
         coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } throws IllegalStateException("store gone")
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())

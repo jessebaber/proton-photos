@@ -112,10 +112,10 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the Activity pending list is the one the full rows give, in the table's order`() {
-        val fromLean = pendingUploadUris(lean(table))
+        val fromRows = pendingUploadUris(table)
 
-        assertEquals(fullRowPendingUris(table), fromLean)
-        assertEquals(listOf("uri://queued-b", "uri://queued-a"), fromLean)
+        assertEquals(fullRowPendingUris(table), fromRows)
+        assertEquals(listOf("uri://queued-b", "uri://queued-a"), fromRows)
     }
 
     @Test
@@ -128,7 +128,7 @@ class SyncSnapshotReadersTest {
         assertEquals(fullRowViewerUris(none), syncedLocalUrisByCloudId(sync.rows))
         assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(sync.rows))
         assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), sync.rows))
-        assertEquals(fullRowPendingUris(none), pendingUploadUris(sync.rows))
+        assertEquals(fullRowPendingUris(none), pendingUploadUris(none))
     }
 
     // The screens' readings of the full rows.

@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.settings.compression
 
-import eu.akoos.photos.data.upload.compression.VideoCompressionPlanner
+import eu.akoos.photos.domain.compression.VideoCompressionPlanner
 import eu.akoos.photos.domain.entity.compression.EncoderCapabilities
 import eu.akoos.photos.domain.entity.compression.VideoBitrateModel
 import eu.akoos.photos.domain.entity.compression.VideoCodec

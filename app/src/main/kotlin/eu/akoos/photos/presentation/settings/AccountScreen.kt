@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Intent
+import eu.akoos.photos.domain.vault.SignOutVaultChoice
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -83,7 +84,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 @Composable
 fun AccountScreen(
     onBack: () -> Unit,
-    onSignOut: (eu.akoos.photos.data.hidden.SignOutVaultChoice) -> Unit,
+    onSignOut: (eu.akoos.photos.domain.vault.SignOutVaultChoice) -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -244,7 +245,7 @@ fun AccountScreen(
                     dismissLabel = stringResource(R.string.sign_out_dialog_cancel),
                     onConfirm = {
                         showSignOutDialog = false
-                        onSignOut(eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE)
+                        onSignOut(eu.akoos.photos.domain.vault.SignOutVaultChoice.DELETE)
                     },
                     onDismiss = { showSignOutDialog = false },
                     destructive = true,

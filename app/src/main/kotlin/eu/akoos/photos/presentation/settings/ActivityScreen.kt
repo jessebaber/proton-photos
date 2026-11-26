@@ -82,7 +82,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
-import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.domain.transfer.TransferHistoryEntry
+import eu.akoos.photos.domain.transfer.TransferKind
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
@@ -541,22 +542,23 @@ private fun TransferRow(label: String, done: Int, total: Int) {
 
 /** One finished transfer: a kind icon, a localized label, and a relative timestamp. */
 @Composable
-private fun HistoryRow(e: TransferCenter.HistoryEntry) {
+private fun HistoryRow(e: TransferHistoryEntry) {
     val colors = AppColors.current
     val icon: ImageVector = when (e.kind) {
-        TransferCenter.Kind.UPLOAD.name -> Icons.Default.CloudUpload
-        TransferCenter.Kind.OFFLINE.name -> Icons.Default.DownloadForOffline
+        TransferKind.UPLOAD.name -> Icons.Default.CloudUpload
+        TransferKind.OFFLINE.name -> Icons.Default.DownloadForOffline
         else -> Icons.Default.CloudDownload
     }
-    val label = when (e.kind) {
-        TransferCenter.Kind.UPLOAD.name -> if (!e.name.isNullOrBlank()) {
-            e.name
+    val entryName = e.name
+    val label: String = when (e.kind) {
+        TransferKind.UPLOAD.name -> if (!entryName.isNullOrBlank()) {
+            entryName
         } else {
             stringResource(R.string.activity_hist_upload, e.count)
         }
-        TransferCenter.Kind.OFFLINE.name -> stringResource(R.string.activity_hist_offline, e.count)
-        else -> if (!e.name.isNullOrBlank()) {
-            stringResource(R.string.activity_hist_download_named, e.count, e.name)
+        TransferKind.OFFLINE.name -> stringResource(R.string.activity_hist_offline, e.count)
+        else -> if (!entryName.isNullOrBlank()) {
+            stringResource(R.string.activity_hist_download_named, e.count, entryName)
         } else {
             stringResource(R.string.activity_hist_download, e.count)
         }
@@ -588,7 +590,7 @@ private fun HistoryRow(e: TransferCenter.HistoryEntry) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 // On its own line, so the label's ellipsis never hides it.
-                if (e.kind == TransferCenter.Kind.UPLOAD.name && e.savedBytes > 0L) {
+                if (e.kind == TransferKind.UPLOAD.name && e.savedBytes > 0L) {
                     Text(
                         stringResource(R.string.activity_hist_saved, formatBytes(e.savedBytes)),
                         color = colors.fgDim,

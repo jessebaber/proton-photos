@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.worker
 
+import eu.akoos.photos.domain.usecase.FreeUpResult
+
 import android.content.Context
 import android.util.Log
 import androidx.datastore.preferences.core.edit
@@ -41,6 +43,7 @@ import kotlinx.coroutines.flow.first
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.util.DeviceHealthPolicy
 import java.util.concurrent.TimeUnit
@@ -49,7 +52,7 @@ import java.util.concurrent.TimeUnit
 class FreeUpSpaceWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
-    private val freeUpSpace: FreeUpSpaceUseCase,
+    private val freeUpSpace: FreeUpSpaceUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val deviceHealth: DeviceHealthPolicy,
 ) : CoroutineWorker(context, params) {
@@ -80,9 +83,9 @@ class FreeUpSpaceWorker @AssistedInject constructor(
             // The automatic sweep protects copies the user placed on the device (downloads, undone
             // deletes); only the manual button reclaims those.
             when (val result = freeUpSpace.sweepConfirmed(userId, olderThanMs, protectDownloaded = true)) {
-                is FreeUpSpaceUseCase.FreeUpResult.Done ->
+                is FreeUpResult.Done ->
                     Log.d(TAG, "Sweep reclaimed ${result.freed} photo(s)")
-                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+                is FreeUpResult.NeedsPermission<PendingIntent> -> {
                     // A worker has no Activity to drive the system delete dialog, so the URIs go on
                     // the batched consent queue that the foreground handler drains.
                     val queued = result.localUris + result.remaining.map { it.localUri }

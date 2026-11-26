@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.IntentSender
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -178,7 +179,7 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
 
     /**
      * Rewrites every EXIF datetime field so nothing left in the file contradicts [captureMs], matching
-     * [WriteLocalPhotoMetadataUseCase]. The offset tags take the offset of the zone the wall clock is
+     * [WriteLocalPhotoMetadataUseCase<IntentSender>]. The offset tags take the offset of the zone the wall clock is
      * read in, so a reader that honours them lands on the same absolute instant; the sub-second tags are
      * cleared, since a hand-picked date has no sub-second part.
      */

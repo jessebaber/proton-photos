@@ -22,37 +22,24 @@
 
 package eu.akoos.photos.presentation.settings
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.repository.drive.LargeLibraryDeviceSimulator
-import eu.akoos.photos.data.repository.drive.LargeLibrarySimulator
+import eu.akoos.photos.domain.debug.DeviceSimState
+import eu.akoos.photos.domain.debug.LargeLibrarySim
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * DEBUG-only ViewModel backing the large-library simulator settings entry. Kept out of the main
- * [SettingsViewModel] so the simulator graph (and its injection of [LargeLibrarySimulator]) only
- * loads when the debug section is actually shown.
- *
- * The device-photo generator's work lives in [LargeLibraryDeviceSimulator]'s own scope, not this
- * ViewModel's, so a run keeps going after Settings closes; this only starts, cancels and mirrors it.
- */
 @HiltViewModel
 class LargeLibrarySimViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val simulator: LargeLibrarySimulator,
-    private val deviceSimulator: LargeLibraryDeviceSimulator,
+    private val settingsStore: SettingsStore,
+    private val simulator: LargeLibrarySim,
 ) : ViewModel() {
 
     data class UiState(
@@ -65,23 +52,23 @@ class LargeLibrarySimViewModel @Inject constructor(
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    val deviceState: StateFlow<LargeLibraryDeviceSimulator.State> = deviceSimulator.state
+    val deviceState: StateFlow<DeviceSimState> = simulator.deviceState
 
     init {
         viewModelScope.launch {
-            val saved = context.settingsDataStore.data.first()[SettingsKeys.SIM_LARGE_LIBRARY_COUNT] ?: 0
+            val saved = settingsStore.get(Settings.SIM_LARGE_LIBRARY_COUNT)
             _state.update { it.copy(count = saved) }
         }
-        deviceSimulator.refreshCount()
+        simulator.refreshDeviceCount()
     }
 
     fun setDeviceTarget(target: Int) = _state.update { it.copy(deviceTarget = target.coerceAtLeast(0)) }
 
-    fun generateDevicePhotos() = deviceSimulator.generate(_state.value.deviceTarget)
+    fun generateDevicePhotos() = simulator.generateDevicePhotos(_state.value.deviceTarget)
 
-    fun removeDevicePhotos() = deviceSimulator.removeAll()
+    fun removeDevicePhotos() = simulator.removeDevicePhotos()
 
-    fun cancelDeviceWork() = deviceSimulator.cancel()
+    fun cancelDeviceWork() = simulator.cancelDeviceWork()
 
     fun setCount(count: Int) = _state.update { it.copy(count = count.coerceAtLeast(0)) }
 
@@ -91,7 +78,7 @@ class LargeLibrarySimViewModel @Inject constructor(
             val n = _state.value.count
             _state.update { it.copy(running = true, message = null) }
             val result = simulator.populate(n)
-            context.settingsDataStore.edit { it[SettingsKeys.SIM_LARGE_LIBRARY_COUNT] = n }
+            settingsStore.set(Settings.SIM_LARGE_LIBRARY_COUNT, n)
             _state.update { it.copy(running = false, message = result.message) }
         }
     }
@@ -100,9 +87,9 @@ class LargeLibrarySimViewModel @Inject constructor(
         if (_state.value.running) return
         viewModelScope.launch {
             _state.update { it.copy(running = true, message = null) }
-            val removed = simulator.clear()
-            context.settingsDataStore.edit { it[SettingsKeys.SIM_LARGE_LIBRARY_COUNT] = 0 }
-            _state.update { it.copy(running = false, count = 0, message = "Cleared $removed simulated photos") }
+            val result = simulator.clear()
+            settingsStore.set(Settings.SIM_LARGE_LIBRARY_COUNT, 0)
+            _state.update { it.copy(running = false, count = 0, message = result.message) }
         }
     }
 }

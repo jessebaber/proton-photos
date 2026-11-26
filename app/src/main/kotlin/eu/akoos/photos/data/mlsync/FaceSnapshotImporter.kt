@@ -37,7 +37,7 @@ import eu.akoos.photos.data.face.clearFaceData
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
-import eu.akoos.photos.domain.usecase.isPortableFaceKey
+import eu.akoos.photos.data.usecase.isPortableFaceKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

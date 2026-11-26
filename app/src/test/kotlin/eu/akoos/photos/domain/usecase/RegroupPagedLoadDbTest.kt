@@ -43,6 +43,8 @@ import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.random.Random
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
+import eu.akoos.photos.data.usecase.compareCodePoints
 
 /**
  * Proves the full regroup's paged read hands the clusterer exactly what the whole-table read did: over a

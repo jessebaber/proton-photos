@@ -23,13 +23,12 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +36,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -60,6 +58,7 @@ import javax.inject.Inject
 @HiltViewModel
 class TimelineFilterViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
     private val localMediaRepo: LocalMediaRepository,
     private val driveRepo: DrivePhotoRepository,
 ) : ViewModel() {
@@ -109,11 +108,10 @@ class TimelineFilterViewModel @Inject constructor(
         viewModelScope.launch {
             // Seed persisted state BEFORE the first media emission so the initial UI already
             // carries it.
-            val seedPrefs = context.settingsDataStore.data.first()
-            excludedNames = seedPrefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet()
-            hideAlbumPhotos = seedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false
-            excludedAlbumIds = seedPrefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-            hiddenAlbumIds = seedPrefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
+            excludedNames = settingsStore.get(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES)
+            hideAlbumPhotos = settingsStore.get(Settings.HIDE_PHOTOS_IN_ALBUMS)
+            excludedAlbumIds = settingsStore.get(Settings.TIMELINE_EXCLUDED_ALBUM_IDS)
+            hiddenAlbumIds = settingsStore.get(Settings.HIDDEN_ALBUM_IDS)
 
             // Cloud album list for the per-album filter — DB-only cached read, offline-safe.
             val albumRows = runCatching { driveRepo.loadAlbumsCached() }.getOrDefault(emptyList())
@@ -135,9 +133,9 @@ class TimelineFilterViewModel @Inject constructor(
             if (hideAlbumPhotos && albumRows.isNotEmpty()) {
                 excludedAlbumIds = albumRows.map { it.linkId }.toSet()
                 hideAlbumPhotos = false
-                context.settingsDataStore.edit {
-                    it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = excludedAlbumIds
-                    it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
+                settingsStore.edit {
+                    set(Settings.TIMELINE_EXCLUDED_ALBUM_IDS, excludedAlbumIds)
+                    set(Settings.HIDE_PHOTOS_IN_ALBUMS, false)
                 }
             }
 
@@ -193,9 +191,9 @@ class TimelineFilterViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            context.settingsDataStore.edit {
-                it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = newSet
-                it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
+            settingsStore.edit {
+                set(Settings.TIMELINE_EXCLUDED_ALBUM_IDS, newSet)
+                set(Settings.HIDE_PHOTOS_IN_ALBUMS, false)
             }
         }
     }
@@ -214,7 +212,7 @@ class TimelineFilterViewModel @Inject constructor(
             s.copy(albums = s.albums.map { a -> a.copy(isExcluded = a.linkId in newSet) })
         }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = newSet }
+            settingsStore.set(Settings.TIMELINE_EXCLUDED_ALBUM_IDS, newSet)
         }
     }
 
@@ -248,7 +246,7 @@ class TimelineFilterViewModel @Inject constructor(
         // Display-only setting — just write the key. The gallery observes it directly and
         // re-filters on the next emission; no reconcile/upload pass is needed.
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] = names }
+            settingsStore.set(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES, names)
         }
     }
 }

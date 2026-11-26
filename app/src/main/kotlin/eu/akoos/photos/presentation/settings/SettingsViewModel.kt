@@ -28,12 +28,9 @@ import android.content.Context
 import android.os.Environment
 import android.os.StatFs
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.WorkManager
 import coil.imageLoader
-import eu.akoos.photos.data.sharedbackup.FaceDataDelete
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -64,60 +61,54 @@ import me.proton.core.telemetry.domain.usecase.IsTelemetryEnabled
 import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
-import eu.akoos.photos.data.db.dao.FaceScanDao
-import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.dao.NotPersonDao
-import eu.akoos.photos.data.db.dao.PersonCoverDao
-import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
-import eu.akoos.photos.data.db.dao.PhotoListingDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.face.FaceEmbeddingModelManager
-import eu.akoos.photos.data.face.FaceModelAssets
-import eu.akoos.photos.data.face.FaceIndexingProgress
-import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.face.FaceIndexingState
-import eu.akoos.photos.data.face.FaceModelManager
-import eu.akoos.photos.data.face.FaceModelPreparation
-import eu.akoos.photos.data.mlsync.MlSyncFacePause
-import eu.akoos.photos.data.mlsync.MlSyncSignOut
-import eu.akoos.photos.data.ocr.OcrModelComponent
-import eu.akoos.photos.data.ocr.OcrModelManager
-import eu.akoos.photos.data.ocr.OcrModelOutcome
-import eu.akoos.photos.data.semantic.SemanticIndexingProgress
-import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
-import eu.akoos.photos.data.semantic.SemanticModelAssets
-import eu.akoos.photos.data.semantic.SemanticModelManager
-import eu.akoos.photos.data.semantic.SemanticModelPreparation
-import eu.akoos.photos.service.ModelDownloadService
+
+import eu.akoos.photos.domain.backup.SharedBackup
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+import eu.akoos.photos.domain.catalog.PhotoCatalog
+import eu.akoos.photos.domain.compression.VideoEncoders
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
+import eu.akoos.photos.domain.ml.FaceIndexing
+import eu.akoos.photos.domain.ml.MlSync
+import eu.akoos.photos.domain.ml.FaceIndexingProgress
+import eu.akoos.photos.domain.ml.FaceIndexingState
+import eu.akoos.photos.domain.ml.FaceModels
+import eu.akoos.photos.domain.ml.OcrModels
+import eu.akoos.photos.domain.ml.SemanticIndexing
+import eu.akoos.photos.domain.ml.SemanticIndexingProgress
+import eu.akoos.photos.domain.ml.SemanticModels
+import eu.akoos.photos.domain.offline.OfflineStorage
+import eu.akoos.photos.domain.settings.AccountCleanup
+import eu.akoos.photos.domain.settings.BootPreferences
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.syncEffectivelyEnabled
+import eu.akoos.photos.domain.trash.CloudTrash
+import eu.akoos.photos.domain.vault.HiddenRescueNames
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.vault.HiddenVaultIndex
+import eu.akoos.photos.domain.vault.HiddenVaultLeftover
+import eu.akoos.photos.domain.vault.HiddenVaultMaintenance
+import eu.akoos.photos.domain.vault.SignOutVaultChoice
+import eu.akoos.photos.domain.vault.VaultSignOut
+import eu.akoos.photos.domain.work.BackgroundWork
+import eu.akoos.photos.domain.work.ModelDownloadKind as BgModelDownloadKind
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.MlWalkGate
 import eu.akoos.photos.util.ModelDownloadKind
 import eu.akoos.photos.util.ModelDownloadPhase
 import eu.akoos.photos.util.ModelDownloadState
-import eu.akoos.photos.data.hidden.HiddenVaultJournal
-import eu.akoos.photos.data.hidden.HiddenVaultLeftovers
-import eu.akoos.photos.data.hidden.HiddenVaultRecords
-import eu.akoos.photos.data.offline.OfflineStorageManager
-import eu.akoos.photos.data.preferences.AccountScopedPreferences
-import eu.akoos.photos.data.preferences.CompressionPreferences
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
-import eu.akoos.photos.data.upload.compression.VideoEncoderCapabilities
 import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.presentation.lock.AppLockSettings
 import eu.akoos.photos.presentation.lock.appLockChangeNeedsAuth
-import eu.akoos.photos.service.ScreenshotOverlayService
 import eu.akoos.photos.domain.entity.UploadCompressionTier
-import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
 import kotlinx.coroutines.flow.combine
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.model.PersonSummary
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
@@ -133,8 +124,6 @@ import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.heavyMlBlockReason
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.widget.PhotoWidgetUpdateWorker
-import eu.akoos.photos.worker.FreeUpSpaceWorker
-import eu.akoos.photos.worker.SyncWorker
 import eu.akoos.photos.util.FaceDiagnostics
 import javax.inject.Inject
 
@@ -172,8 +161,10 @@ internal fun faceScanPausedRow(pauseSwitchOn: Boolean, state: FaceIndexingState)
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val workManager: WorkManager,
-    private val freeUpSpace: FreeUpSpaceUseCase,
+    private val settingsStore: SettingsStore,
+    private val bootPreferences: BootPreferences,
+    private val backgroundWork: BackgroundWork,
+    private val freeUpSpace: FreeUpSpaceUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,
@@ -184,31 +175,31 @@ class SettingsViewModel @Inject constructor(
     private val appLockManager: AppLockManager,
     private val localMediaRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
-    private val photoListingDao: PhotoListingDao,
-    private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
-    private val offlineStore: OfflineStorageManager,
-    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
-    private val hiddenVaultJournal: HiddenVaultJournal,
-    private val hiddenVaultRestorer: eu.akoos.photos.data.hidden.HiddenVaultRestorer,
-    private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val photoCatalog: PhotoCatalog,
+    private val peopleCatalog: PeopleCatalog,
+    private val cloudTrash: CloudTrash,
+    private val offlineStore: OfflineStorage,
+    private val hiddenStorage: HiddenStorage,
+    private val hiddenVaultIndex: HiddenVaultIndex,
+    private val hiddenVaultLeftover: HiddenVaultLeftover,
+    private val hiddenVaultMaintenance: HiddenVaultMaintenance,
+    private val vaultSignOut: VaultSignOut,
+    private val accountCleanup: AccountCleanup,
+    private val faceIndexing: FaceIndexing,
+    private val mlSync: MlSync,
+    private val semanticIndexing: SemanticIndexing,
+    private val faceModels: FaceModels,
+    private val ocrModels: OcrModels,
+    private val semanticModels: SemanticModels,
+    private val sharedBackup: SharedBackup,
+    private val videoEncoders: VideoEncoders,
     private val deviceHealth: DeviceHealthPolicy,
-    private val personDao: PersonDao,
-    private val faceDao: FaceDao,
-    private val imageEmbeddingDao: ImageEmbeddingDao,
-    private val faceScanDao: FaceScanDao,
-    private val personManualPhotoDao: PersonManualPhotoDao,
-    private val notPersonDao: NotPersonDao,
-    private val personCoverDao: PersonCoverDao,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val newsRepository: NewsRepository,
     private val networkObserver: NetworkObserver,
-    private val semanticIndexingScheduler: SemanticIndexingScheduler,
     private val modelDownloadState: ModelDownloadState,
     private val mlWalkGate: MlWalkGate,
-    private val mlSyncSignOut: MlSyncSignOut,
-    private val videoEncoderCapabilities: VideoEncoderCapabilities,
-    private val faceDataDelete: FaceDataDelete,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -223,15 +214,14 @@ class SettingsViewModel @Inject constructor(
     /** Model-presence checks for the per-feature AI gates. Built from [context] rather than injected,
      *  matching the editor and the indexing scheduler, since they carry no state worth sharing and are
      *  only ever asked whether their files are on disk. */
-    private val ocrModelManager by lazy { OcrModelManager(context) }
-    private val faceModelManager by lazy { FaceModelManager(context) }
-    private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
-    private val semanticModelManager by lazy { SemanticModelManager(context) }
+    private val ocrModelManager get() = ocrModels
+    private val faceModelManager get() = faceModels
+    private val semanticModelManager get() = semanticModels
 
     init {
         // The codec chips need this device's encoders: a one-off scan, cached for the process.
         viewModelScope.launch(Dispatchers.Default) {
-            val caps = runCatching { videoEncoderCapabilities.snapshot() }.getOrNull()
+            val caps = runCatching { videoEncoders.snapshot() }.getOrNull()
             _uiState.update { it.copy(encoderCapabilities = caps) }
         }
         // The per-feature enable toggles mirror their durable prefs, so a download that finished on
@@ -241,14 +231,14 @@ class SettingsViewModel @Inject constructor(
         // default when its pref was never written (matching the load path and the viewer's own gate), so
         // the disk check runs off the main thread.
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map {
-                    Triple(
-                        it[SettingsKeys.FACE_ENABLED] == true,
-                        it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
-                        it[SettingsKeys.SEMANTIC_ENABLED] == true,
-                    ) to (it[SettingsKeys.SHARED_BACKUP_ENABLED] == true)
-                }
+            combine(
+                settingsStore.observe(Settings.FACE_ENABLED),
+                settingsStore.observe(Settings.OCR_ENABLED),
+                settingsStore.observe(Settings.SEMANTIC_ENABLED),
+                settingsStore.observe(Settings.SHARED_BACKUP_ENABLED),
+            ) { face, ocr, semantic, backupOn ->
+                Triple(face, ocr ?: ocrModels.filesPresentQuick(), semantic) to backupOn
+            }
                 .distinctUntilChanged()
                 .flowOn(Dispatchers.IO)
                 .collect { (switches, backupOn) ->
@@ -287,19 +277,19 @@ class SettingsViewModel @Inject constructor(
 
     /** Where the background face indexer stands, surfaced verbatim from the scheduler so the AI
      *  settings panel can label its state and offer pause / resume. */
-    val faceIndexingProgress: StateFlow<FaceIndexingProgress> = faceIndexingScheduler.progress
+    val faceIndexingProgress: StateFlow<FaceIndexingProgress> = faceIndexing.progress
 
     /** Where the background semantic indexer stands, surfaced verbatim from the scheduler so the
      *  semantic-search sub-page can label its state and offer pause / resume. Mirrors
      *  [faceIndexingProgress]. */
-    val semanticIndexingProgress: StateFlow<SemanticIndexingProgress> = semanticIndexingScheduler.progress
+    val semanticIndexingProgress: StateFlow<SemanticIndexingProgress> = semanticIndexing.progress
 
     /** How many photos are embedded for the active account, or the guest's local partition. Lets the
      *  status card tell a searchable library from an empty index even before a walk reports progress, so a
      *  settled index that stopped a few un-downloadable photos short still reads as ready, not "not
      *  indexed". Re-resolves on an account switch. */
     val semanticIndexedCount: StateFlow<Int> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId -> imageEmbeddingDao.observeCountForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
+        .flatMapLatest { userId -> photoCatalog.observeEmbeddingCount(userId?.id ?: LOCAL_PARTITION) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
 
     /** Which background ML walk holds the shared model gate right now (or null when free). The face and
@@ -314,7 +304,7 @@ class SettingsViewModel @Inject constructor(
      *  not help. A persistent block (low battery, warm, power saver) disables the action; a transient
      *  interaction pause or a clear device leaves it enabled. */
     val faceIndexingUi: StateFlow<FaceIndexingUi> =
-        combine(faceIndexingScheduler.progress, deviceHealth.snapshot, deviceHealth.mlChargingOnly) { p, snap, chargingOnly ->
+        combine(faceIndexing.progress, deviceHealth.snapshot, deviceHealth.mlChargingOnly) { p, snap, chargingOnly ->
             val blockReason = heavyMlBlockReason(snap, chargingOnly = chargingOnly)
             FaceIndexingUi(
                 state = p.state,
@@ -333,8 +323,7 @@ class SettingsViewModel @Inject constructor(
 
     /** Whether the face scan's pause switch is on, read from the store itself: the scheduler reports Paused
      *  only once a walk in this process has stopped at the switch ([faceScanPausedRow]). */
-    val faceIndexingPaused: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.FACE_INDEXING_PAUSED] == true }
+    val faceIndexingPaused: StateFlow<Boolean> = settingsStore.observe(Settings.FACE_INDEXING_PAUSED)
         .catch { emit(false) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
@@ -347,7 +336,7 @@ class SettingsViewModel @Inject constructor(
             // Count exactly the named people the tiles beside this figure show, so the header and the
             // row agree: unnamed clusters have no tile, and the Unsorted bucket is not a person. A guest
             // counts under the local partition, so the header matches the tiles it sits over.
-            personDao.observeNamedPeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+            peopleCatalog.observeNamedPeopleForUser(userId?.id ?: LOCAL_PARTITION)
                 .retryOnDbTear(PEOPLE_TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(PEOPLE_TEAR_TAG, it) })
                 .map { namedPeopleCount(it) }
         }
@@ -386,7 +375,7 @@ class SettingsViewModel @Inject constructor(
      *  straight from the person rows so the AI-menu row subtitle needs no cover resolution. */
     val faceGroupCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+            peopleCatalog.observePeopleForUser(userId?.id ?: LOCAL_PARTITION)
                 .retryOnDbTear(PEOPLE_TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(PEOPLE_TEAR_TAG, it) })
                 .map { people ->
                     people.count { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
@@ -396,7 +385,7 @@ class SettingsViewModel @Inject constructor(
 
     /** Total faces the scan has detected for the account, a live figure for the status headline. */
     val faceCount: StateFlow<Int> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId -> faceDao.observeFaceCountForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
+        .flatMapLatest { userId -> peopleCatalog.observeFaceCountForUser(userId?.id ?: LOCAL_PARTITION) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
 
     /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
@@ -436,8 +425,7 @@ class SettingsViewModel @Inject constructor(
      */
     private fun observeExcludedFolders() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet() }
+            settingsStore.observe(Settings.EXCLUDED_FOLDER_NAMES)
                 .distinctUntilChanged()
                 .collectLatest { excluded ->
                     _uiState.update { it.copy(excludedFolderNames = excluded) }
@@ -466,12 +454,13 @@ class SettingsViewModel @Inject constructor(
      */
     private fun observeVaultedCount() {
         viewModelScope.launch {
-            hiddenVaultJournal.reconcile()
-            context.settingsDataStore.data
-                .map { prefs ->
-                    (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
-                        HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
-                }
+            hiddenVaultMaintenance.reconcile()
+            combine(
+                settingsStore.observe(Settings.HIDDEN_PHOTO_URIS),
+                settingsStore.observe(Settings.HIDDEN_URI_CLOUD_ID_MAP),
+            ) { indexed, pairs ->
+                indexed to hiddenVaultIndex.pairedUris(pairs)
+            }
                 .distinctUntilChanged()
                 // An unreadable preference store leaves the count at zero, but the confirmation is
                 // still better shown than withheld: a user who cannot sign out has no way forward.
@@ -480,7 +469,7 @@ class SettingsViewModel @Inject constructor(
                     val recorded = indexed.filterTo(HashSet()) { hiddenStorage.isHiddenUri(it) }
                     val everything = try {
                         withContext(Dispatchers.IO) {
-                            HiddenVaultLeftovers.vaultedUris(
+                            hiddenVaultLeftover.vaultedUris(
                                 blobUris = hiddenStorage.vaultBlobUris(),
                                 recordedVaultUris = recorded,
                             )
@@ -513,7 +502,7 @@ class SettingsViewModel @Inject constructor(
      */
     fun refreshVaultDiagnostics() {
         viewModelScope.launch {
-            val snapshot = hiddenVaultJournal.vaultSnapshot()
+            val snapshot = hiddenVaultMaintenance.vaultSnapshot()
             _uiState.update { it.copy(vaultDiagnostics = snapshot) }
         }
     }
@@ -601,7 +590,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Wipes the offline-pinned full-res blobs ([OfflineStorageManager.clearAll]) AND drops the
-     * pin set ([SettingsKeys.OFFLINE_PIN_IDS]) so the two stay consistent — deleting blobs while
+     * pin set ([Settings.OFFLINE_PIN_IDS]) so the two stay consistent — deleting blobs while
      * leaving the set would leave "pinned" photos with no blob backing them. Recomputes
      * `offlineBytes` afterwards so the row reflects the cleared figure.
      */
@@ -609,7 +598,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 offlineStore.clearAll()
-                context.settingsDataStore.edit { it.remove(SettingsKeys.OFFLINE_PIN_IDS) }
+                settingsStore.set(Settings.OFFLINE_PIN_IDS, emptySet())
             }
             refreshLocalStorage()
         }
@@ -885,7 +874,7 @@ class SettingsViewModel @Inject constructor(
                 combine(
                     // Each read of the totals passes over the whole listing, and thumbnail, upload and
                     // backfill writes can land on the table several times a second, so it is paced.
-                    photoListingDao.observeOwnStreamTotals(userId.id).pacedBy(BACKUP_TOTALS_MIN_INTERVAL_MS),
+                    photoCatalog.observeOwnStreamTotals(userId.id).pacedBy(BACKUP_TOTALS_MIN_INTERVAL_MS),
                     syncStateRepo.countPendingUploads(userId),
                 ) { totals, pendingCount ->
                     BackedUpSnapshot(totals.photos, totals.videos, totals.bytes, pendingCount)
@@ -943,7 +932,7 @@ class SettingsViewModel @Inject constructor(
     /** Moves the cached Drive trash count by every trash, restore or permanent delete as it finishes. */
     private fun observeCloudTrashChanges() {
         viewModelScope.launch {
-            cloudTrashService.trashCountChanges.collect { delta ->
+            cloudTrash.trashCountChanges.collect { delta ->
                 _uiState.update { it.copy(cloudTrashCount = shiftedTrashCount(it.cloudTrashCount, delta)) }
             }
         }
@@ -964,7 +953,7 @@ class SettingsViewModel @Inject constructor(
             val last = _uiState.value.lastCloudTrashFetchMs
             if (last > 0L && (now - last) < CLOUD_TRASH_TTL_MS) return@launch
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val result = runCatching { cloudTrashService.getCloudTrash(userId) }
+            val result = runCatching { cloudTrash.getCloudTrash(userId) }
             _uiState.update {
                 it.copy(
                     cloudTrashCount = result.getOrNull()?.size ?: it.cloudTrashCount,
@@ -978,84 +967,80 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             // One-shot migration: if THEME_MODE is absent but the legacy DARK_MODE bool is set,
             // copy the value into the new key and drop the bool so the migration only fires once.
-            val prefs = context.settingsDataStore.data.first()
-            val needsThemeMigration = prefs[SettingsKeys.THEME_MODE] == null &&
-                prefs[SettingsKeys.DARK_MODE] != null
-            val migratedPrefs = if (needsThemeMigration) {
-                val migrated = if (prefs[SettingsKeys.DARK_MODE] == true) "dark" else "light"
-                val written = context.settingsDataStore.edit { mut ->
-                    mut[SettingsKeys.THEME_MODE] = migrated
-                    mut.remove(SettingsKeys.DARK_MODE)
+            val themeMode = settingsStore.get(Settings.THEME_MODE)
+            val darkMode = settingsStore.get(Settings.DARK_MODE)
+            if (themeMode == null && darkMode != null) {
+                val migrated = if (darkMode) "dark" else "light"
+                settingsStore.edit {
+                    set(Settings.THEME_MODE, migrated)
+                    set(Settings.DARK_MODE, null)
                 }
-                // Seed the boot mirror so the next cold start applies the migrated value
-                // without falling back to "system".
-                eu.akoos.photos.data.preferences.ThemePrefsBoot.write(context, migrated)
-                written
-            } else prefs
+                bootPreferences.writeThemeMode(migrated)
+            }
+            val ocrPref = settingsStore.get(Settings.OCR_ENABLED)
             _uiState.update {
                 it.copy(
-                    autoSync = migratedPrefs[SettingsKeys.AUTO_SYNC] ?: true,
-                    syncWifiOnly = migratedPrefs[SettingsKeys.SYNC_WIFI_ONLY] ?: true,
-                    fullresWifiOnly = migratedPrefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true,
-                    backupEverything = migratedPrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false,
-                    excludedFolderNames = migratedPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
-                    autoFreeUp = migratedPrefs[SettingsKeys.AUTO_FREE_UP] ?: false,
-                    freeUpInterval = FreeUpInterval.fromKey(migratedPrefs[SettingsKeys.FREE_UP_INTERVAL]),
-                    themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
-                    palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
-                    amoledBlack = migratedPrefs[SettingsKeys.AMOLED_BLACK] ?: false,
-                    liquidGlass = migratedPrefs[SettingsKeys.LIQUID_GLASS] ?: false,
-                    tintCloudWithAccent = migratedPrefs[SettingsKeys.TINT_CLOUD_WITH_ACCENT] ?: false,
-                    gifAutoplayGrid = migratedPrefs[SettingsKeys.GIF_AUTOPLAY_GRID] ?: false,
-                    gifAutoplayCovers = migratedPrefs[SettingsKeys.GIF_AUTOPLAY_COVERS] ?: false,
-                    aiFeaturesEnabled = migratedPrefs[SettingsKeys.AI_FEATURES_ENABLED] ?: false,
-                    // Absent OCR opt-in defaults to whether the reader's models are already on disk, so
-                    // a device that has fetched them opens with Copy text on rather than off.
-                    ocrEnabled = migratedPrefs[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
-                    faceEnabled = migratedPrefs[SettingsKeys.FACE_ENABLED] ?: false,
-                    faceAutoMerge = migratedPrefs[SettingsKeys.FACE_AUTO_MERGE] ?: false,
-                    semanticEnabled = migratedPrefs[SettingsKeys.SEMANTIC_ENABLED] ?: false,
-                    landingTab = LandingTab.fromIndex(migratedPrefs[SettingsKeys.LANDING_TAB]),
-                    lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
-                    language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
-                    stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false,
-                    compressOnUpload = migratedPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false,
-                    compressVideosOnUpload = migratedPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false,
-                    compressHdrPhotos = migratedPrefs[SettingsKeys.COMPRESS_HDR_PHOTOS] ?: false,
+                    autoSync = settingsStore.get(Settings.AUTO_SYNC),
+                    syncWifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY),
+                    fullresWifiOnly = settingsStore.get(Settings.FULLRES_WIFI_ONLY),
+                    backupEverything = settingsStore.get(Settings.BACKUP_EVERYTHING),
+                    excludedFolderNames = settingsStore.get(Settings.EXCLUDED_FOLDER_NAMES),
+                    autoFreeUp = settingsStore.get(Settings.AUTO_FREE_UP),
+                    freeUpInterval = FreeUpInterval.fromKey(settingsStore.get(Settings.FREE_UP_INTERVAL)),
+                    themeMode = ThemeMode.fromKey(settingsStore.get(Settings.THEME_MODE)),
+                    palette = ThemePalette.fromKey(settingsStore.get(Settings.THEME_PALETTE)),
+                    amoledBlack = settingsStore.get(Settings.AMOLED_BLACK),
+                    liquidGlass = settingsStore.get(Settings.LIQUID_GLASS),
+                    tintCloudWithAccent = settingsStore.get(Settings.TINT_CLOUD_WITH_ACCENT),
+                    gifAutoplayGrid = settingsStore.get(Settings.GIF_AUTOPLAY_GRID),
+                    gifAutoplayCovers = settingsStore.get(Settings.GIF_AUTOPLAY_COVERS),
+                    aiFeaturesEnabled = settingsStore.get(Settings.AI_FEATURES_ENABLED),
+                    ocrEnabled = ocrPref ?: ocrModels.filesPresentQuick(),
+                    faceEnabled = settingsStore.get(Settings.FACE_ENABLED),
+                    faceAutoMerge = settingsStore.get(Settings.FACE_AUTO_MERGE),
+                    semanticEnabled = settingsStore.get(Settings.SEMANTIC_ENABLED),
+                    landingTab = LandingTab.fromIndex(settingsStore.get(Settings.LANDING_TAB)),
+                    lastSyncMs = settingsStore.get(Settings.LAST_SYNC_MS),
+                    language = settingsStore.get(Settings.LANGUAGE),
+                    stripOnUpload = settingsStore.get(Settings.STRIP_ON_UPLOAD),
+                    compressOnUpload = settingsStore.get(Settings.COMPRESS_ON_UPLOAD),
+                    compressVideosOnUpload = settingsStore.get(Settings.COMPRESS_VIDEO_ON_UPLOAD),
+                    compressHdrPhotos = settingsStore.get(Settings.COMPRESS_HDR_PHOTOS),
                     compressTier = UploadCompressionTier.fromOrdinalOrDefault(
-                        migratedPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: UploadCompressionTier.BALANCED.ordinal
+                        settingsStore.get(Settings.COMPRESS_UPLOAD_TIER) ?: UploadCompressionTier.BALANCED.ordinal
                     ),
                     compressTierVideo = UploadCompressionTier.fromOrdinalOrDefault(
-                        migratedPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] ?: UploadCompressionTier.BALANCED.ordinal
+                        settingsStore.get(Settings.COMPRESS_UPLOAD_TIER_VIDEO) ?: UploadCompressionTier.BALANCED.ordinal
                     ),
-                    videoCodec = CompressionPreferences.videoCodec(migratedPrefs),
-                    mirrorStripToLocal = migratedPrefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false,
-                    mirrorCompressToLocal = migratedPrefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false,
-                    renameToCaptureDate = migratedPrefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false,
-                    deleteLocalAfterBackup = migratedPrefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false,
-                    stripGps = migratedPrefs[SettingsKeys.STRIP_GPS] ?: false,
-                    stripCameraInfo = migratedPrefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
-                    stripTimestamp = migratedPrefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
-                    stripSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
-                    stripOnShare = migratedPrefs[SettingsKeys.STRIP_ON_SHARE] ?: false,
-                    stripShareGps = migratedPrefs[SettingsKeys.STRIP_SHARE_GPS] ?: true,
-                    stripShareCameraInfo = migratedPrefs[SettingsKeys.STRIP_SHARE_CAMERA_INFO] ?: false,
-                    stripShareTimestamp = migratedPrefs[SettingsKeys.STRIP_SHARE_TIMESTAMP] ?: false,
-                    stripShareSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] ?: false,
-                    stripShareAuthorship = migratedPrefs[SettingsKeys.STRIP_SHARE_AUTHORSHIP] ?: false,
-                    appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
-                    vaultPasswordSet = migratedPrefs[SettingsKeys.VAULT_PASSWORD_BLOB] != null,
-                    appLockTimeoutSeconds = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS]
-                        ?: migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES]?.let { it * 60 } ?: 0,
-                    clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
-                    screenshotOverlayEnabled = migratedPrefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] ?: false,
-                    showScrollDate = migratedPrefs[SettingsKeys.SHOW_SCROLL_DATE] ?: false,
-                    reverseTimelineOrder = migratedPrefs[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false,
-                    mosaicGrid = migratedPrefs[SettingsKeys.MOSAIC_GRID] ?: false,
-                    seamlessGrid = migratedPrefs[SettingsKeys.SEAMLESS_GRID] ?: false,
-                    gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
-                    gridDefaultColumns = migratedPrefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: 3,
-                    keepScrollOnTabSwitch = migratedPrefs[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] == true,
+                    videoCodec = VideoCodecChoice.fromKey(settingsStore.get(Settings.COMPRESS_VIDEO_CODEC))
+                        ?: VideoCodecChoice.AVC,
+                    mirrorStripToLocal = settingsStore.get(Settings.MIRROR_STRIP_TO_LOCAL),
+                    mirrorCompressToLocal = settingsStore.get(Settings.MIRROR_COMPRESS_TO_LOCAL),
+                    renameToCaptureDate = settingsStore.get(Settings.RENAME_TO_CAPTURE_DATE),
+                    deleteLocalAfterBackup = settingsStore.get(Settings.DELETE_LOCAL_AFTER_BACKUP),
+                    stripGps = settingsStore.get(Settings.STRIP_GPS),
+                    stripCameraInfo = settingsStore.get(Settings.STRIP_CAMERA_INFO),
+                    stripTimestamp = settingsStore.get(Settings.STRIP_TIMESTAMP),
+                    stripSoftwareInfo = settingsStore.get(Settings.STRIP_SOFTWARE_INFO),
+                    stripOnShare = settingsStore.get(Settings.STRIP_ON_SHARE),
+                    stripShareGps = settingsStore.get(Settings.STRIP_SHARE_GPS),
+                    stripShareCameraInfo = settingsStore.get(Settings.STRIP_SHARE_CAMERA_INFO),
+                    stripShareTimestamp = settingsStore.get(Settings.STRIP_SHARE_TIMESTAMP),
+                    stripShareSoftwareInfo = settingsStore.get(Settings.STRIP_SHARE_SOFTWARE_INFO),
+                    stripShareAuthorship = settingsStore.get(Settings.STRIP_SHARE_AUTHORSHIP),
+                    appLockEnabled = settingsStore.get(Settings.APP_LOCK_ENABLED),
+                    vaultPasswordSet = settingsStore.get(Settings.VAULT_PASSWORD_BLOB) != null,
+                    appLockTimeoutSeconds = settingsStore.get(Settings.APP_LOCK_TIMEOUT_SECONDS)
+                        ?: settingsStore.get(Settings.APP_LOCK_TIMEOUT_MINUTES)?.let { m -> m * 60 } ?: 0,
+                    clearCacheOnAppClose = settingsStore.get(Settings.CLEAR_CACHE_ON_APP_CLOSE),
+                    screenshotOverlayEnabled = settingsStore.get(Settings.SCREENSHOT_OVERLAY_ENABLED),
+                    showScrollDate = settingsStore.get(Settings.SHOW_SCROLL_DATE),
+                    reverseTimelineOrder = settingsStore.get(Settings.REVERSE_TIMELINE_ORDER),
+                    mosaicGrid = settingsStore.get(Settings.MOSAIC_GRID),
+                    seamlessGrid = settingsStore.get(Settings.SEAMLESS_GRID),
+                    gridRememberLast = settingsStore.get(Settings.GRID_REMEMBER_LAST),
+                    gridDefaultColumns = settingsStore.get(Settings.GRID_DEFAULT_COLUMNS),
+                    keepScrollOnTabSwitch = settingsStore.get(Settings.KEEP_SCROLL_ON_TAB_SWITCH),
                 )
             }
         }
@@ -1070,20 +1055,20 @@ class SettingsViewModel @Inject constructor(
     private fun resolveFaceRecognitionAvailability() {
         viewModelScope.launch {
             val available =
-                faceModelManager.onDisk() != null && faceEmbeddingModelManager.onDisk() != null
+                faceModels.onDisk() != null && faceModels.embeddingOnDisk() != null
             _uiState.update { it.copy(faceRecognitionAvailable = available) }
         }
     }
 
     fun setAutoSync(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.AUTO_SYNC] = enabled }
+            settingsStore.set(Settings.AUTO_SYNC, enabled)
             _uiState.update { it.copy(autoSync = enabled) }
             // One place arms or tears down ALL background triggers (periodic worker, content
             // observer, opt-in keep-alive service) from the just-written prefs. On disable it also
             // cancels the content observer — leaving it armed would keep firing SyncWorker on every
             // photo write and burn wake-ups even though nothing uploads.
-            SyncWorker.reconcileBackgroundWork(context)
+            backgroundWork.reconcileSyncBackgroundWork()
         }
     }
 
@@ -1093,29 +1078,29 @@ class SettingsViewModel @Inject constructor(
      *  picker behaviour. */
     fun setBackupEverything(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit {
-                it[SettingsKeys.BACKUP_EVERYTHING] = enabled
+            settingsStore.edit {
+                set(Settings.BACKUP_EVERYTHING, enabled)
                 // Backing up everything also makes every folder a Drive album, a folder made later included; the
                 // folders the user switches off stay off.
-                if (enabled) it[SettingsKeys.ALBUM_ALL_BY_DEFAULT] = true
+                if (enabled) set(Settings.ALBUM_ALL_BY_DEFAULT, true)
             }
             _uiState.update { it.copy(backupEverything = enabled) }
             // Turning this on can make backup effectively-on with no folders selected (arm the
             // triggers); turning it off with no folders selected makes it effectively-off (tear
             // them down). reconcile covers both.
-            SyncWorker.reconcileBackgroundWork(context)
+            backgroundWork.reconcileSyncBackgroundWork()
             // Kick a sync run so the new mode takes effect immediately instead of waiting
             // for the next periodic SyncWorker tick.
-            if (syncEffectivelyEnabled(context)) SyncWorker.runNow(context, _uiState.value.syncWifiOnly)
+            if (settingsStore.syncEffectivelyEnabled()) backgroundWork.runSyncNow(_uiState.value.syncWifiOnly)
         }
     }
 
     fun setSyncWifiOnly(wifiOnly: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SYNC_WIFI_ONLY] = wifiOnly }
+            settingsStore.set(Settings.SYNC_WIFI_ONLY, wifiOnly)
             _uiState.update { it.copy(syncWifiOnly = wifiOnly) }
             if (_uiState.value.autoSync) {
-                SyncWorker.schedule(workManager, wifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
+                backgroundWork.scheduleSync(wifiOnly)
             }
         }
     }
@@ -1124,7 +1109,7 @@ class SettingsViewModel @Inject constructor(
      *  download — explicit user actions (Save to device, Edit) ignore this setting. */
     fun setFullresWifiOnly(wifiOnly: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FULLRES_WIFI_ONLY] = wifiOnly }
+            settingsStore.set(Settings.FULLRES_WIFI_ONLY, wifiOnly)
             _uiState.update { it.copy(fullresWifiOnly = wifiOnly) }
         }
     }
@@ -1133,7 +1118,7 @@ class SettingsViewModel @Inject constructor(
      *  folds each named person's closest look-alike cluster in without a per-suggestion confirmation. */
     fun setFaceAutoMerge(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FACE_AUTO_MERGE] = enabled }
+            settingsStore.set(Settings.FACE_AUTO_MERGE, enabled)
             _uiState.update { it.copy(faceAutoMerge = enabled) }
         }
     }
@@ -1174,9 +1159,9 @@ class SettingsViewModel @Inject constructor(
                 // auto-backup switched off. This row is a one-tap action, not a setting: gating it
                 // on the switch would leave a button that reconciles and then quietly does nothing.
                 upload.requestManualRun()
-                SyncWorker.runNow(context, _uiState.value.syncWifiOnly, allowLowBattery = true)
+                backgroundWork.runSyncNow(_uiState.value.syncWifiOnly, allowLowBattery = true)
                 val now = System.currentTimeMillis()
-                context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = now }
+                settingsStore.set(Settings.LAST_SYNC_MS, now)
                 _uiState.update { it.copy(lastSyncMs = now) }
                 // 3. Force-refresh user data so storage bar reflects the new usage.
                 //    ObserveUser emits automatically once GetUser updates the local cache.
@@ -1207,18 +1192,15 @@ class SettingsViewModel @Inject constructor(
     private fun applyFreeUpSchedule() {
         val state = _uiState.value
         if (state.autoFreeUp) {
-            FreeUpSpaceWorker.schedule(
-                workManager,
-                state.freeUpInterval.ms,
-            )
+            backgroundWork.scheduleFreeUpSpace(state.freeUpInterval.ms)
         } else {
-            FreeUpSpaceWorker.cancel(workManager)
+            backgroundWork.cancelFreeUpSpace()
         }
     }
 
     fun setAutoFreeUp(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.AUTO_FREE_UP] = enabled }
+            settingsStore.set(Settings.AUTO_FREE_UP, enabled)
             _uiState.update { it.copy(autoFreeUp = enabled) }
             applyFreeUpSchedule()
         }
@@ -1226,7 +1208,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setFreeUpInterval(interval: FreeUpInterval) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FREE_UP_INTERVAL] = interval.name }
+            settingsStore.set(Settings.FREE_UP_INTERVAL, interval.name)
             _uiState.update { it.copy(freeUpInterval = interval) }
             applyFreeUpSchedule()
         }
@@ -1235,14 +1217,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setThemeMode(mode: ThemeMode) {
         viewModelScope.launch {
-            context.settingsDataStore.edit {
-                it[SettingsKeys.THEME_MODE] = mode.storageKey
-                it.remove(SettingsKeys.DARK_MODE)
+            settingsStore.edit {
+                set(Settings.THEME_MODE, mode.storageKey)
+                set(Settings.DARK_MODE, null)
             }
             // Mirror the value to the boot SharedPreferences cache so the next cold start
             // can apply the theme without blocking on DataStore. See ThemePrefsBoot for
             // why we keep two stores in lockstep instead of relying on DataStore alone.
-            eu.akoos.photos.data.preferences.ThemePrefsBoot.write(context, mode.storageKey)
+            bootPreferences.writeThemeMode(mode.storageKey)
             // We DELIBERATELY skip AppCompatDelegate.setDefaultNightMode here. That call
             // forces an Activity recreate (visible as a scale-from-center animation) any
             // time the new mode differs from the currently-applied one. The Compose tree
@@ -1262,9 +1244,7 @@ class SettingsViewModel @Inject constructor(
      */
     fun setThemePalette(palette: ThemePalette) {
         viewModelScope.launch {
-            context.settingsDataStore.edit {
-                it[SettingsKeys.THEME_PALETTE] = palette.storageKey
-            }
+            settingsStore.set(Settings.THEME_PALETTE, palette.storageKey)
             _uiState.update { it.copy(palette = palette) }
         }
     }
@@ -1276,14 +1256,14 @@ class SettingsViewModel @Inject constructor(
      */
     fun setLiquidGlass(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.LIQUID_GLASS] = enabled }
+            settingsStore.set(Settings.LIQUID_GLASS, enabled)
             _uiState.update { it.copy(liquidGlass = enabled) }
         }
     }
 
     fun setAmoledBlack(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.AMOLED_BLACK] = enabled }
+            settingsStore.set(Settings.AMOLED_BLACK, enabled)
             _uiState.update { it.copy(amoledBlack = enabled) }
         }
     }
@@ -1292,7 +1272,7 @@ class SettingsViewModel @Inject constructor(
      *  the theme, which provides it to the badges through a composition local. */
     fun setTintCloudWithAccent(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] = enabled }
+            settingsStore.set(Settings.TINT_CLOUD_WITH_ACCENT, enabled)
             _uiState.update { it.copy(tintCloudWithAccent = enabled) }
         }
     }
@@ -1301,7 +1281,7 @@ class SettingsViewModel @Inject constructor(
      *  and pick the animated or static image loader accordingly. */
     fun setGifAutoplayGrid(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.GIF_AUTOPLAY_GRID] = enabled }
+            settingsStore.set(Settings.GIF_AUTOPLAY_GRID, enabled)
             _uiState.update { it.copy(gifAutoplayGrid = enabled) }
         }
     }
@@ -1310,7 +1290,7 @@ class SettingsViewModel @Inject constructor(
      *  local and pick the animated or static image loader accordingly. */
     fun setGifAutoplayCovers(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.GIF_AUTOPLAY_COVERS] = enabled }
+            settingsStore.set(Settings.GIF_AUTOPLAY_COVERS, enabled)
             _uiState.update { it.copy(gifAutoplayCovers = enabled) }
         }
     }
@@ -1319,7 +1299,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * Persist the master AI-features opt-in. Off keeps every on-device model unfetched and hides the
      * Copy text and Hide faces entry points; the People grouping added later reads the same gate. The
-     * editor and viewer observe [SettingsKeys.AI_FEATURES_ENABLED] directly, so flipping it takes
+     * editor and viewer observe [Settings.AI_FEATURES_ENABLED] directly, so flipping it takes
      * effect the next time either surface is opened.
      */
     /** Whether the face and photo-search scans are limited to when the phone is charging. */
@@ -1334,22 +1314,22 @@ class SettingsViewModel @Inject constructor(
 
     fun setMlOnlyWhileCharging(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.ML_ONLY_WHILE_CHARGING] = enabled }
+            settingsStore.set(Settings.ML_ONLY_WHILE_CHARGING, enabled)
         }
     }
 
     fun setAiFeaturesEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.AI_FEATURES_ENABLED] = enabled }
+            settingsStore.set(Settings.AI_FEATURES_ENABLED, enabled)
             _uiState.update { it.copy(aiFeaturesEnabled = enabled) }
             if (enabled) {
                 // Opt-in begins indexing straight away, so there is no separate manual start step: new
                 // photos are then picked up automatically by the library's own indexing trigger.
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+                faceIndexing.requestIndex(accountManager.getPrimaryUserId().first())
             } else {
                 // Turning AI off stands any running scan down promptly rather than waiting for its next
                 // per-photo check to notice the flag.
-                faceIndexingScheduler.reset()
+                faceIndexing.reset()
             }
         }
     }
@@ -1370,7 +1350,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val present = withContext(Dispatchers.IO) { ocrModelManager.filesPresentQuick() }
             if (present) {
-                context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = true }
+                settingsStore.set(Settings.OCR_ENABLED, true)
                 _uiState.update { it.copy(ocrEnabled = true, ocrModelDownloadFailed = false) }
             } else {
                 _uiState.update {
@@ -1392,7 +1372,7 @@ class SettingsViewModel @Inject constructor(
     fun disableOcrKeepingModel() {
         _uiState.update { it.copy(ocrModelPrompt = OcrModelPrompt.None) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = false }
+            settingsStore.set(Settings.OCR_ENABLED, false)
             _uiState.update { it.copy(ocrEnabled = false) }
         }
     }
@@ -1412,7 +1392,7 @@ class SettingsViewModel @Inject constructor(
         // Fetched on ModelDownloadService so it survives leaving this screen and shows a notification;
         // the row's state comes back through modelDownloadState (observed in init). On a verified
         // download the service turns Copy text on.
-        ModelDownloadService.start(context, ModelDownloadKind.OCR)
+        backgroundWork.startModelDownload(BgModelDownloadKind.OCR)
     }
 
     /**
@@ -1422,9 +1402,9 @@ class SettingsViewModel @Inject constructor(
     fun confirmOcrModelRemoval() {
         _uiState.update { it.copy(ocrModelPrompt = OcrModelPrompt.None) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = false }
+            settingsStore.set(Settings.OCR_ENABLED, false)
             ocrModelManager.deleteAll()
-            context.settingsDataStore.edit { it[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] = false }
+            settingsStore.set(Settings.OCR_MODEL_DOWNLOAD_ALLOWED, false)
             _uiState.update { it.copy(ocrEnabled = false, ocrModelDownloadFailed = false) }
         }
     }
@@ -1452,10 +1432,10 @@ class SettingsViewModel @Inject constructor(
     private fun enableFace() {
         viewModelScope.launch {
             val present = withContext(Dispatchers.IO) {
-                faceModelManager.onDisk() != null && faceEmbeddingModelManager.onDisk() != null
+                faceModels.onDisk() != null && faceModels.embeddingOnDisk() != null
             }
             if (present) {
-                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
+                settingsStore.set(Settings.FACE_ENABLED, true)
                 _uiState.update {
                     it.copy(
                         faceEnabled = true,
@@ -1464,7 +1444,7 @@ class SettingsViewModel @Inject constructor(
                         faceModelDownloadFailed = false,
                     )
                 }
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+                faceIndexing.requestIndex(accountManager.getPrimaryUserId().first())
             } else {
                 // Note the connection now so the drawer can say the fetch will use mobile data when
                 // Wi-Fi is not there, the same gate sync applies before it moves large data.
@@ -1487,13 +1467,13 @@ class SettingsViewModel @Inject constructor(
     private fun disableFace() {
         viewModelScope.launch {
             val present = withContext(Dispatchers.IO) {
-                faceModelManager.onDisk() != null && faceEmbeddingModelManager.onDisk() != null
+                faceModels.onDisk() != null && faceModels.embeddingOnDisk() != null
             }
             if (present) {
                 _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.Remove) }
             } else {
-                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
-                faceIndexingScheduler.reset()
+                settingsStore.set(Settings.FACE_ENABLED, false)
+                faceIndexing.reset()
                 _uiState.update {
                     it.copy(
                         faceEnabled = false,
@@ -1522,16 +1502,16 @@ class SettingsViewModel @Inject constructor(
         // Fetched on ModelDownloadService so it survives leaving this screen and shows a progress
         // notification; the row's progress and the eventual enable come back through modelDownloadState
         // (observed in init). On a verified download the service turns the feature on and kicks the walk.
-        ModelDownloadService.start(context, ModelDownloadKind.FACE)
+        backgroundWork.startModelDownload(BgModelDownloadKind.FACE)
     }
 
     /** The drawer's Keep action: switch face recognition off but leave the model and the face data. */
     fun disableFaceKeepingData() {
         _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
+            settingsStore.set(Settings.FACE_ENABLED, false)
             _uiState.update { it.copy(faceEnabled = false) }
-            faceIndexingScheduler.reset()
+            faceIndexing.reset()
         }
     }
 
@@ -1544,10 +1524,9 @@ class SettingsViewModel @Inject constructor(
     fun confirmFaceModelRemoval() {
         _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
-            faceIndexingScheduler.wipeFaceData(accountManager.getPrimaryUserId().first(), thenIndex = false)
-            faceModelManager.deleteAll()
-            faceEmbeddingModelManager.deleteAll()
+            settingsStore.set(Settings.FACE_ENABLED, false)
+            faceIndexing.wipeFaceData(accountManager.getPrimaryUserId().first(), thenIndex = false)
+            faceModels.deleteAll()
             _uiState.update { it.copy(faceEnabled = false, faceRecognitionAvailable = false) }
         }
     }
@@ -1588,7 +1567,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val present = withContext(Dispatchers.IO) { semanticModelManager.areModelsPresent() }
             if (present) {
-                context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = true }
+                settingsStore.set(Settings.SEMANTIC_ENABLED, true)
                 _uiState.update {
                     it.copy(
                         semanticEnabled = true,
@@ -1622,7 +1601,7 @@ class SettingsViewModel @Inject constructor(
             if (present) {
                 _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.Remove) }
             } else {
-                context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = false }
+                settingsStore.set(Settings.SEMANTIC_ENABLED, false)
                 _uiState.update {
                     it.copy(semanticEnabled = false, semanticModelPrompt = SemanticModelPrompt.None)
                 }
@@ -1648,7 +1627,7 @@ class SettingsViewModel @Inject constructor(
         // screen and shows a progress notification; the row's progress and the eventual enable come back
         // through modelDownloadState (observed in init). On a verified download the service turns the
         // feature on and kicks the indexer itself.
-        ModelDownloadService.start(context, ModelDownloadKind.SEMANTIC)
+        backgroundWork.startModelDownload(BgModelDownloadKind.SEMANTIC)
     }
 
     /** The drawer's Keep action: switch semantic search off but leave the models and the embeddings in
@@ -1656,7 +1635,7 @@ class SettingsViewModel @Inject constructor(
     fun disableSemanticKeepingModel() {
         _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.None) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = false }
+            settingsStore.set(Settings.SEMANTIC_ENABLED, false)
             _uiState.update { it.copy(semanticEnabled = false) }
         }
     }
@@ -1670,10 +1649,10 @@ class SettingsViewModel @Inject constructor(
     fun confirmSemanticModelRemoval() {
         _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.None) }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = false }
-            semanticIndexingScheduler.reset(accountManager.getPrimaryUserId().first())
+            settingsStore.set(Settings.SEMANTIC_ENABLED, false)
+            semanticIndexing.reset(accountManager.getPrimaryUserId().first())
             semanticModelManager.deleteAll()
-            context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_MODEL_DOWNLOAD_ALLOWED] = false }
+            settingsStore.set(Settings.SEMANTIC_MODEL_DOWNLOAD_ALLOWED, false)
             _uiState.update { it.copy(semanticEnabled = false, semanticModelDownloadFailed = false) }
         }
     }
@@ -1690,7 +1669,7 @@ class SettingsViewModel @Inject constructor(
      * paused, so only an explicit resume here re-arms it.
      */
     fun setFaceIndexingPaused(paused: Boolean) {
-        viewModelScope.launch { faceIndexingScheduler.setPaused(paused) }
+        viewModelScope.launch { faceIndexing.setPaused(paused) }
     }
 
     /**
@@ -1700,8 +1679,8 @@ class SettingsViewModel @Inject constructor(
      */
     fun resumeFaceIndexing() {
         viewModelScope.launch {
-            MlSyncFacePause.lift(context)
-            faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+            mlSync.liftFacePause()
+            faceIndexing.requestIndex(accountManager.getPrimaryUserId().first())
         }
     }
 
@@ -1715,9 +1694,8 @@ class SettingsViewModel @Inject constructor(
     fun resumeFaceIndexingIfNeeded() {
         viewModelScope.launch {
             try {
-                val prefs = context.settingsDataStore.data.first()
-                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
-                    prefs[SettingsKeys.FACE_ENABLED] != true
+                if (!settingsStore.get(Settings.AI_FEATURES_ENABLED) ||
+                    !settingsStore.get(Settings.FACE_ENABLED)
                 ) return@launch
                 cloudRepo.backfillFaces(accountManager.getPrimaryUserId().first())
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1739,11 +1717,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             when {
-                userId != null && _uiState.value.sharedBackupOn && everywhere -> faceDataDelete.everywhere(userId)
-                userId != null && _uiState.value.sharedBackupOn -> faceDataDelete.onlyHere(userId)
+                userId != null && _uiState.value.sharedBackupOn && everywhere -> sharedBackup.deleteFacesEverywhere(userId)
+                userId != null && _uiState.value.sharedBackupOn -> sharedBackup.deleteFacesOnlyHere(userId)
                 // Face recognition stays on, and indexing is automatic, so a fresh walk starts right after
                 // the wipe rather than leaving a bare "0 people" until the gallery is next opened.
-                else -> faceIndexingScheduler.wipeFaceData(userId)
+                else -> faceIndexing.wipeFaceData(userId)
             }
         }
     }
@@ -1757,7 +1735,7 @@ class SettingsViewModel @Inject constructor(
      */
     fun rescanFaces() {
         viewModelScope.launch {
-            faceIndexingScheduler.rescan(accountManager.getPrimaryUserId().first())
+            faceIndexing.rescan(accountManager.getPrimaryUserId().first())
         }
     }
 
@@ -1767,7 +1745,7 @@ class SettingsViewModel @Inject constructor(
      * matching the scheduler, so it never re-arms on its own; only an explicit resume here restarts it.
      */
     fun setSemanticIndexingPaused(paused: Boolean) {
-        viewModelScope.launch { semanticIndexingScheduler.setPaused(paused) }
+        viewModelScope.launch { semanticIndexing.setPaused(paused) }
     }
 
     /**
@@ -1780,9 +1758,8 @@ class SettingsViewModel @Inject constructor(
     fun resumeSemanticIndexingIfNeeded() {
         viewModelScope.launch {
             try {
-                val prefs = context.settingsDataStore.data.first()
-                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
-                    prefs[SettingsKeys.SEMANTIC_ENABLED] != true
+                if (!settingsStore.get(Settings.AI_FEATURES_ENABLED) ||
+                    !settingsStore.get(Settings.SEMANTIC_ENABLED)
                 ) return@launch
                 cloudRepo.backfillSemantic(accountManager.getPrimaryUserId().first())
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1802,8 +1779,8 @@ class SettingsViewModel @Inject constructor(
     fun rescanSemantic() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
-            semanticIndexingScheduler.reset(userId)
-            semanticIndexingScheduler.requestIndex(userId)
+            semanticIndexing.reset(userId)
+            semanticIndexing.requestIndex(userId)
         }
     }
 
@@ -1814,7 +1791,7 @@ class SettingsViewModel @Inject constructor(
      */
     fun clearSemantic() {
         viewModelScope.launch {
-            semanticIndexingScheduler.reset(accountManager.getPrimaryUserId().first())
+            semanticIndexing.reset(accountManager.getPrimaryUserId().first())
         }
     }
 
@@ -1822,28 +1799,28 @@ class SettingsViewModel @Inject constructor(
      *  once on first composition; this setter is for immediate UI feedback in Settings. */
     fun setLandingTab(tab: LandingTab) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.LANDING_TAB] = tab.index }
+            settingsStore.set(Settings.LANDING_TAB, tab.index)
             _uiState.update { it.copy(landingTab = tab) }
         }
     }
 
     fun setGridRememberLast(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.GRID_REMEMBER_LAST] = enabled }
+            settingsStore.set(Settings.GRID_REMEMBER_LAST, enabled)
             _uiState.update { it.copy(gridRememberLast = enabled) }
         }
     }
 
     fun setGridDefaultColumns(columns: Int) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.GRID_DEFAULT_COLUMNS] = columns }
+            settingsStore.set(Settings.GRID_DEFAULT_COLUMNS, columns)
             _uiState.update { it.copy(gridDefaultColumns = columns) }
         }
     }
 
     fun setKeepScrollOnTabSwitch(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] = enabled }
+            settingsStore.set(Settings.KEEP_SCROLL_ON_TAB_SWITCH, enabled)
             _uiState.update { it.copy(keepScrollOnTabSwitch = enabled) }
         }
     }
@@ -1859,85 +1836,85 @@ class SettingsViewModel @Inject constructor(
      */
     fun setLanguage(lang: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.LANGUAGE] = lang }
-            eu.akoos.photos.data.preferences.LanguagePrefsBoot.write(context, lang)
+            settingsStore.set(Settings.LANGUAGE, lang)
+            bootPreferences.writeLanguageTag(lang)
             _uiState.update { it.copy(language = lang) }
         }
     }
 
     fun setStripOnUpload(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_ON_UPLOAD] = enabled }
+            settingsStore.set(Settings.STRIP_ON_UPLOAD, enabled)
             _uiState.update { it.copy(stripOnUpload = enabled) }
         }
     }
 
     fun setCompressOnUpload(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_ON_UPLOAD] = enabled }
+            settingsStore.set(Settings.COMPRESS_ON_UPLOAD, enabled)
             _uiState.update { it.copy(compressOnUpload = enabled) }
         }
     }
 
     fun setCompressHdrPhotos(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_HDR_PHOTOS] = enabled }
+            settingsStore.set(Settings.COMPRESS_HDR_PHOTOS, enabled)
             _uiState.update { it.copy(compressHdrPhotos = enabled) }
         }
     }
 
     fun setCompressVideosOnUpload(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = enabled }
+            settingsStore.set(Settings.COMPRESS_VIDEO_ON_UPLOAD, enabled)
             _uiState.update { it.copy(compressVideosOnUpload = enabled) }
         }
     }
 
     fun setCompressTier(tier: UploadCompressionTier) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_UPLOAD_TIER] = tier.ordinal }
+            settingsStore.set(Settings.COMPRESS_UPLOAD_TIER, tier.ordinal)
             _uiState.update { it.copy(compressTier = tier) }
         }
     }
 
     fun setCompressTierVideo(tier: UploadCompressionTier) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] = tier.ordinal }
+            settingsStore.set(Settings.COMPRESS_UPLOAD_TIER_VIDEO, tier.ordinal)
             _uiState.update { it.copy(compressTierVideo = tier) }
         }
     }
 
     fun setVideoCodec(choice: VideoCodecChoice) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_VIDEO_CODEC] = choice.key }
+            settingsStore.set(Settings.COMPRESS_VIDEO_CODEC, choice.key)
             _uiState.update { it.copy(videoCodec = choice) }
         }
     }
 
     fun setMirrorStripToLocal(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = enabled }
+            settingsStore.set(Settings.MIRROR_STRIP_TO_LOCAL, enabled)
             _uiState.update { it.copy(mirrorStripToLocal = enabled) }
         }
     }
 
     fun setMirrorCompressToLocal(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] = enabled }
+            settingsStore.set(Settings.MIRROR_COMPRESS_TO_LOCAL, enabled)
             _uiState.update { it.copy(mirrorCompressToLocal = enabled) }
         }
     }
 
     fun setRenameToCaptureDate(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.RENAME_TO_CAPTURE_DATE] = enabled }
+            settingsStore.set(Settings.RENAME_TO_CAPTURE_DATE, enabled)
             _uiState.update { it.copy(renameToCaptureDate = enabled) }
         }
     }
 
     fun setDeleteLocalAfterBackup(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = enabled }
+            settingsStore.set(Settings.DELETE_LOCAL_AFTER_BACKUP, enabled)
             _uiState.update { it.copy(deleteLocalAfterBackup = enabled) }
             // Kick off an immediate sync run when the user just turned the toggle on,
             // so the post upload sweep evicts every already SYNCED file without
@@ -1945,78 +1922,78 @@ class SettingsViewModel @Inject constructor(
             // user request: the user expects "Delete after backup" to take visible
             // effect the moment they enable it.
             if (enabled) {
-                val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-                SyncWorker.runNow(context, wifiOnly)
+                val wifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY)
+                backgroundWork.runSyncNow(wifiOnly)
             }
         }
     }
 
     fun setStripGps(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_GPS] = enabled }
+            settingsStore.set(Settings.STRIP_GPS, enabled)
             _uiState.update { it.copy(stripGps = enabled) }
         }
     }
 
     fun setStripCameraInfo(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_CAMERA_INFO] = enabled }
+            settingsStore.set(Settings.STRIP_CAMERA_INFO, enabled)
             _uiState.update { it.copy(stripCameraInfo = enabled) }
         }
     }
 
     fun setStripTimestamp(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_TIMESTAMP] = enabled }
+            settingsStore.set(Settings.STRIP_TIMESTAMP, enabled)
             _uiState.update { it.copy(stripTimestamp = enabled) }
         }
     }
 
     fun setStripSoftwareInfo(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SOFTWARE_INFO] = enabled }
+            settingsStore.set(Settings.STRIP_SOFTWARE_INFO, enabled)
             _uiState.update { it.copy(stripSoftwareInfo = enabled) }
         }
     }
 
     fun setStripOnShare(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_ON_SHARE] = enabled }
+            settingsStore.set(Settings.STRIP_ON_SHARE, enabled)
             _uiState.update { it.copy(stripOnShare = enabled) }
         }
     }
 
     fun setStripShareGps(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_GPS] = enabled }
+            settingsStore.set(Settings.STRIP_SHARE_GPS, enabled)
             _uiState.update { it.copy(stripShareGps = enabled) }
         }
     }
 
     fun setStripShareCameraInfo(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_CAMERA_INFO] = enabled }
+            settingsStore.set(Settings.STRIP_SHARE_CAMERA_INFO, enabled)
             _uiState.update { it.copy(stripShareCameraInfo = enabled) }
         }
     }
 
     fun setStripShareTimestamp(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_TIMESTAMP] = enabled }
+            settingsStore.set(Settings.STRIP_SHARE_TIMESTAMP, enabled)
             _uiState.update { it.copy(stripShareTimestamp = enabled) }
         }
     }
 
     fun setStripShareSoftwareInfo(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] = enabled }
+            settingsStore.set(Settings.STRIP_SHARE_SOFTWARE_INFO, enabled)
             _uiState.update { it.copy(stripShareSoftwareInfo = enabled) }
         }
     }
 
     fun setStripShareAuthorship(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_AUTHORSHIP] = enabled }
+            settingsStore.set(Settings.STRIP_SHARE_AUTHORSHIP, enabled)
             _uiState.update { it.copy(stripShareAuthorship = enabled) }
         }
     }
@@ -2064,7 +2041,7 @@ class SettingsViewModel @Inject constructor(
      *  which reads this flag at ON_STOP. */
     fun setClearCacheOnAppClose(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] = enabled }
+            settingsStore.set(Settings.CLEAR_CACHE_ON_APP_CLOSE, enabled)
             _uiState.update { it.copy(clearCacheOnAppClose = enabled) }
         }
     }
@@ -2074,12 +2051,12 @@ class SettingsViewModel @Inject constructor(
      *  [ScreenshotOverlayService.start] also self-guards it. */
     fun setScreenshotOverlayEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] = enabled }
+            settingsStore.set(Settings.SCREENSHOT_OVERLAY_ENABLED, enabled)
             _uiState.update { it.copy(screenshotOverlayEnabled = enabled) }
             if (enabled) {
-                ScreenshotOverlayService.start(context)
+                backgroundWork.startScreenshotOverlay()
             } else {
-                ScreenshotOverlayService.stop(context)
+                backgroundWork.stopScreenshotOverlay()
             }
         }
     }
@@ -2088,7 +2065,7 @@ class SettingsViewModel @Inject constructor(
      *  observes the key directly; this setter is for immediate UI feedback in Settings. */
     fun setShowScrollDate(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SHOW_SCROLL_DATE] = enabled }
+            settingsStore.set(Settings.SHOW_SCROLL_DATE, enabled)
             _uiState.update { it.copy(showScrollDate = enabled) }
         }
     }
@@ -2097,7 +2074,7 @@ class SettingsViewModel @Inject constructor(
      *  this setter is for immediate UI feedback in Settings. */
     fun setReverseTimelineOrder(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.REVERSE_TIMELINE_ORDER] = enabled }
+            settingsStore.set(Settings.REVERSE_TIMELINE_ORDER, enabled)
             _uiState.update { it.copy(reverseTimelineOrder = enabled) }
         }
     }
@@ -2106,7 +2083,7 @@ class SettingsViewModel @Inject constructor(
      *  this setter is for immediate UI feedback in Settings. */
     fun setMosaicGrid(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.MOSAIC_GRID] = enabled }
+            settingsStore.set(Settings.MOSAIC_GRID, enabled)
             _uiState.update { it.copy(mosaicGrid = enabled) }
         }
     }
@@ -2116,15 +2093,15 @@ class SettingsViewModel @Inject constructor(
     fun setSeamlessGrid(enabled: Boolean) {
         // Mirror to the synchronous boot cache immediately so a grid opened right after the toggle
         // renders the new layout on the first frame, before the DataStore write propagates.
-        eu.akoos.photos.data.preferences.SeamlessGridPrefsBoot.write(context, enabled)
+        bootPreferences.writeSeamlessGrid(enabled)
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SEAMLESS_GRID] = enabled }
+            settingsStore.set(Settings.SEAMLESS_GRID, enabled)
             _uiState.update { it.copy(seamlessGrid = enabled) }
         }
     }
 
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
-    fun signOut(vault: eu.akoos.photos.data.hidden.SignOutVaultChoice = eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE) {
+    fun signOut(vault: SignOutVaultChoice = SignOutVaultChoice.DELETE) {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().firstOrNull()?.let { userId ->
                 // 0. Before anything else, and awaited: stop an ML sync save or restore. It calls into
@@ -2133,11 +2110,11 @@ class SettingsViewModel @Inject constructor(
                 //    the client is freed and the faces are wiped. Then cancel the widget updates, so none
                 //    draws this account's photo onto the home screen while the account is leaving; the
                 //    widgets get them back once the account is gone (PhotoWidgetSignOut).
-                runCatching { mlSyncSignOut.stopFor(userId) }
+                runCatching { vaultSignOut.stopMlSyncFor(userId) }
                 runCatching { PhotoWidgetUpdateWorker.cancelAll(context) }
                 // 1. Stop anything that could re-decrypt content back into the caches we are about
                 //    to wipe, and stop the persistent process-keeper service.
-                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context, workManager)
+                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context, androidx.work.WorkManager.getInstance(context))
                 // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
                 //    token disappears (heap can't recover keys; the re-login starts from a clean
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).
@@ -2146,15 +2123,14 @@ class SettingsViewModel @Inject constructor(
                 val vaultFiles = runCatching { hiddenStorage.vaultBlobUris().size }.getOrDefault(0)
                 var vaultNote = "vault deleted ($vaultFiles files)"
                 val vaultWipe = when (vault) {
-                    eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE -> eu.akoos.photos.domain.repository.VaultWipe.All
-                    eu.akoos.photos.data.hidden.SignOutVaultChoice.MOVE_OUT -> {
+                    SignOutVaultChoice.DELETE -> eu.akoos.photos.domain.repository.VaultWipe.All
+                    SignOutVaultChoice.MOVE_OUT -> {
                         val rescued = runCatching {
-                            hiddenVaultRestorer.rescueDeviceOnly(
-                                eu.akoos.photos.data.hidden.HiddenRescue.SIGN_OUT_FOLDER,
+                            vaultSignOut.rescueDeviceOnly(HiddenRescueNames.SIGN_OUT_FOLDER
                             )
                         }.getOrNull()
-                        vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
-                        eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued)
+                        vaultNote = vaultSignOut.vaultNote(rescued)
+                        vaultSignOut.wipeAfterRescue(rescued)
                     }
                 }
                 cloudRepo.clearCacheForSignOut(userId, vaultWipe)
@@ -2178,11 +2154,11 @@ class SettingsViewModel @Inject constructor(
                 //    inherit the previous account's sync state, folder selection, recent upload
                 //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
                 //    machine-level flags (onboarding-complete, app-lock, update throttle).
-                runCatching { AccountScopedPreferences.clear(context, userId) }
+                runCatching { accountCleanup.clearAccountPreferences(userId) }
                 // The line goes in after the buffers were emptied above, so it opens the next session's log.
                 eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote")
                 // The handler every sign-out reaches must know this one was asked for.
-                eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id)
+                accountCleanup.markUserSignedOut(userId.id)
                 // End the app lock's post-unlock grace in AppLockSession, which holds the lock
                 // timestamps, BEFORE disableAccount triggers the route change, so the stop and
                 // start of the sign-in flow is judged by the lock timeout alone.

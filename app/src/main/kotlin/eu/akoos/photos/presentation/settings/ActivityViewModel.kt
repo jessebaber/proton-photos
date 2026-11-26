@@ -24,10 +24,7 @@ package eu.akoos.photos.presentation.settings
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -44,15 +41,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.db.dao.SyncStateLite
-import eu.akoos.photos.data.repository.SyncStateSnapshot
-import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
-import eu.akoos.photos.util.batteryLowFlow
-import eu.akoos.photos.util.retryOnDbTear
+import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.transfer.TransferActive
+import eu.akoos.photos.domain.transfer.TransferHistoryEntry
+import eu.akoos.photos.domain.transfer.TransferKind
+import eu.akoos.photos.domain.transfer.Transfers
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
-import eu.akoos.photos.worker.AlbumDownloadWorker
+import eu.akoos.photos.domain.work.BackgroundWork
+import eu.akoos.photos.util.batteryLowFlow
+import eu.akoos.photos.util.retryOnDbTear
 import java.util.UUID
 import javax.inject.Inject
 
@@ -60,7 +60,7 @@ import javax.inject.Inject
  * Device uris of the photos waiting to back up, in the table's order: LOCAL_ONLY rows that also carry
  * a queued upload intent, the same set the upload processor selects and the gallery badge counts.
  */
-internal fun pendingUploadUris(rows: List<SyncStateLite>): List<String> =
+internal fun pendingUploadUris(rows: List<SyncState>): List<String> =
     rows.filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
         .mapNotNull { it.localUri.takeIf { u -> u.isNotBlank() } }
 
@@ -74,8 +74,9 @@ internal fun pendingUploadUris(rows: List<SyncStateLite>): List<String> =
 class ActivityViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val upload: UploadPendingUseCase,
-    private val syncStateSnapshot: SyncStateSnapshot,
-    private val transferCenter: TransferCenter,
+    private val syncStateRepo: SyncStateRepository,
+    private val transfers: Transfers,
+    private val backgroundWork: BackgroundWork,
     private val accountManager: AccountManager,
 ) : ViewModel() {
 
@@ -89,11 +90,11 @@ class ActivityViewModel @Inject constructor(
         val uploadEvents: List<UploadEvent> = emptyList(),
         val downloads: List<Download> = emptyList(),
         /** In-flight gallery multi-downloads (not WorkManager) from [TransferCenter]. */
-        val galleryDownloads: List<TransferCenter.Active> = emptyList(),
+        val galleryDownloads: List<TransferActive> = emptyList(),
         /** In-flight "make available offline" batches from [TransferCenter]. */
-        val offlineTransfers: List<TransferCenter.Active> = emptyList(),
+        val offlineTransfers: List<TransferActive> = emptyList(),
         /** In-flight single-photo uploads from [TransferCenter], e.g. the editor's edit-upload. */
-        val uploadTransfers: List<TransferCenter.Active> = emptyList(),
+        val uploadTransfers: List<TransferActive> = emptyList(),
         /** Local URIs of photos that are on the device but not yet backed up (issue #16). */
         val pendingUris: List<String> = emptyList(),
         /** Set when the user stops the backup: the still-pending (queued) photos are suppressed from
@@ -102,7 +103,7 @@ class ActivityViewModel @Inject constructor(
          *  themselves stay pending (their DB rows are untouched) for a later auto-backup. */
         val uploadStopped: Boolean = false,
         /** Persisted log of finished uploads/downloads for the History tab (newest first). */
-        val history: List<TransferCenter.HistoryEntry> = emptyList(),
+        val history: List<TransferHistoryEntry> = emptyList(),
         /** Whether the OS currently counts the battery as low (at or under its 15% floor). */
         val batteryLow: Boolean = false,
     ) {
@@ -164,25 +165,25 @@ class ActivityViewModel @Inject constructor(
                 Download(id = java.util.UUID(0L, 1L), albumName = "Sample album", done = 2, total = 5, coverUri = null),
             ),
             galleryDownloads = listOf(
-                TransferCenter.Active(id = 1L, kind = TransferCenter.Kind.DOWNLOAD, done = 1, total = 4, name = "Photos", items = listOf("sample://dl/1", "sample://dl/2", "sample://dl/3", "sample://dl/4"), cancelable = true),
+                TransferActive(id = 1L, kind = TransferKind.DOWNLOAD, done = 1, total = 4, name = "Photos", items = listOf("sample://dl/1", "sample://dl/2", "sample://dl/3", "sample://dl/4"), cancelable = true),
             ),
             offlineTransfers = listOf(
-                TransferCenter.Active(id = 2L, kind = TransferCenter.Kind.OFFLINE, done = 3, total = 8, cancelable = true),
+                TransferActive(id = 2L, kind = TransferKind.OFFLINE, done = 3, total = 8, cancelable = true),
             ),
             history = listOf(
-                TransferCenter.HistoryEntry(
-                    kind = TransferCenter.Kind.UPLOAD.name, count = 12,
+                TransferHistoryEntry(
+                    kind = TransferKind.UPLOAD.name, count = 12,
                     at = System.currentTimeMillis() - 2 * 60_000L,
                     uris = listOf("sample://h/1", "sample://h/2", "sample://h/3"),
                     savedBytes = 412_000_000L,
                 ),
-                TransferCenter.HistoryEntry(
-                    kind = TransferCenter.Kind.DOWNLOAD.name, name = "Summer 2026", count = 8,
+                TransferHistoryEntry(
+                    kind = TransferKind.DOWNLOAD.name, name = "Summer 2026", count = 8,
                     at = System.currentTimeMillis() - 45 * 60_000L,
                     uris = listOf("sample://h/4", "sample://h/5"),
                 ),
-                TransferCenter.HistoryEntry(
-                    kind = TransferCenter.Kind.OFFLINE.name, count = 5,
+                TransferHistoryEntry(
+                    kind = TransferKind.OFFLINE.name, count = 5,
                     at = System.currentTimeMillis() - 3 * 3_600_000L,
                 ),
             ),
@@ -256,8 +257,8 @@ class ActivityViewModel @Inject constructor(
         // LOCAL_ONLY row with no upload intent is not shown as "pending" here either).
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            syncStateSnapshot.observe(userId)
-                .map { pendingUploadUris(it.rows) }
+            syncStateRepo.observeAll(userId)
+                .map { pendingUploadUris(it) }
                 .flowOn(Dispatchers.Default)
                 .retryOnDbTear("ActivityPending")
                 .collect { pending -> _uiState.update { it.copy(pendingUris = pending) } }
@@ -272,46 +273,42 @@ class ActivityViewModel @Inject constructor(
         // Album downloads run in AlbumDownloadWorker; every instance carries a shared tag, so one
         // tag query surfaces all of them at once with their live done/total and album name.
         viewModelScope.launch {
-            WorkManager.getInstance(context)
-                .getWorkInfosByTagLiveData(AlbumDownloadWorker.TAG)
-                .asFlow()
-                .collect { infos ->
-                    val active = infos
-                        .filter { it.state == WorkInfo.State.RUNNING }
-                        .map { wi ->
-                            Download(
-                                id = wi.id,
-                                albumName = wi.progress.getString(AlbumDownloadWorker.KEY_ALBUM_NAME).orEmpty(),
-                                done = wi.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_DONE, 0),
-                                total = wi.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_TOTAL, 0),
-                                coverUri = wi.progress.getString(AlbumDownloadWorker.KEY_COVER_URI)?.takeIf { it.isNotBlank() },
-                            )
-                        }
-                        .filter { it.total > 0 }
-                    _uiState.update { it.copy(downloads = active) }
-                }
+            backgroundWork.observeAlbumDownloads().collect { list ->
+                val active = list
+                    .map { p ->
+                        Download(
+                            id = UUID.fromString(p.id),
+                            albumName = p.albumName,
+                            done = p.done,
+                            total = p.total,
+                            coverUri = p.coverUri,
+                        )
+                    }
+                    .filter { it.total > 0 }
+                _uiState.update { it.copy(downloads = active) }
+            }
         }
         // Gallery multi-download + offline pin batches run inside a ViewModel scope, so they route
         // their progress through TransferCenter for this screen to render.
         viewModelScope.launch {
-            transferCenter.active.collect { list ->
+            transfers.active.collect { list ->
                 _uiState.update {
                     it.copy(
                         // Named DOWNLOAD transfers are album downloads, already shown as their own
                         // cancelable WorkManager rows (state.downloads); exclude them here so an
                         // album download doesn't appear twice.
                         galleryDownloads = list.filter { t ->
-                            t.kind == TransferCenter.Kind.DOWNLOAD && t.name.isNullOrBlank()
+                            t.kind == TransferKind.DOWNLOAD && t.name.isNullOrBlank()
                         },
-                        offlineTransfers = list.filter { t -> t.kind == TransferCenter.Kind.OFFLINE },
-                        uploadTransfers = list.filter { t -> t.kind == TransferCenter.Kind.UPLOAD },
+                        offlineTransfers = list.filter { t -> t.kind == TransferKind.OFFLINE },
+                        uploadTransfers = list.filter { t -> t.kind == TransferKind.UPLOAD },
                     )
                 }
             }
         }
         // Persisted history for the History tab.
         viewModelScope.launch {
-            transferCenter.history.collect { entries ->
+            transfers.history.collect { entries ->
                 _uiState.update { it.copy(history = entries) }
             }
         }
@@ -319,7 +316,7 @@ class ActivityViewModel @Inject constructor(
 
     /** Cancel a running album download from its row's X button. */
     fun cancelDownload(id: UUID) {
-        WorkManager.getInstance(context).cancelWorkById(id)
+        backgroundWork.cancelWorkById(id.toString())
     }
 
     /** Stop the whole backup upload from the Uploads tab (same effect as the notification's Stop).
@@ -336,11 +333,11 @@ class ActivityViewModel @Inject constructor(
 
     /** Stop a running gallery download or offline batch from its row's X button. */
     fun cancelTransfer(id: Long) {
-        transferCenter.cancel(id)
+        transfers.cancel(id)
     }
 
     /** Wipe the History tab. */
     fun clearHistory() {
-        viewModelScope.launch { transferCenter.clearHistory() }
+        viewModelScope.launch { transfers.clearHistory() }
     }
 }

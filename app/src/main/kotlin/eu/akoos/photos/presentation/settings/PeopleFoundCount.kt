@@ -22,12 +22,12 @@
 
 package eu.akoos.photos.presentation.settings
 
-import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.domain.catalog.PersonRecord
 
 /**
  * How many people the AI panel reports found, matching the named face tiles shown beside the figure:
  * the named clusters only. The single "Unsorted" bucket is not a person, so it is excluded even though
  * it carries faces, and an unnamed cluster is left out since it has no tile of its own.
  */
-internal fun namedPeopleCount(people: List<PersonEntity>): Int =
+internal fun namedPeopleCount(people: List<PersonRecord>): Int =
     people.count { !it.displayName.isNullOrBlank() && !it.isOther }

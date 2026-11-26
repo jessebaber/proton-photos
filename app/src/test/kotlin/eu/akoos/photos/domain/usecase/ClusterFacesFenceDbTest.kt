@@ -45,6 +45,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
 
 /**
  * Runs the people rebuild and the incremental placement against a real in-memory database: a write check

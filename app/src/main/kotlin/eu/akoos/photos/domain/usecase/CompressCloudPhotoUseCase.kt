@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CloudLinkCheck
 import android.content.Context
 import android.net.Uri
 import android.util.Log

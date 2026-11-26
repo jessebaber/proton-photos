@@ -26,7 +26,7 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.entity.SyncStatus
-import eu.akoos.photos.domain.usecase.RekeyPhotoFacesUseCase
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 import eu.akoos.photos.util.flatMapSqlChunks
 import javax.inject.Inject
 

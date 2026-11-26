@@ -27,6 +27,7 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.api.NewsApi
 import eu.akoos.photos.data.api.model.NewsFeed
+import eu.akoos.photos.domain.model.NewsItem
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.NewsInbox
@@ -71,7 +72,7 @@ class NewsRepositoryImpl @Inject constructor(
             val feed = parse(prefs[SettingsKeys.NEWS_CACHE_JSON])
             val read = prefs[SettingsKeys.NEWS_READ_IDS] ?: emptySet()
             NewsInbox(
-                items = feed.items,
+                items = feed.items.map { it.toDomain() },
                 feedbackUrl = feed.feedbackUrl?.takeIf { it.isNotBlank() },
                 feedbackJoinUrl = feed.feedbackJoinUrl?.takeIf { it.isNotBlank() },
                 feedbackEmail = feed.feedbackEmail?.takeIf { it.isNotBlank() },
@@ -123,3 +124,12 @@ class NewsRepositoryImpl @Inject constructor(
         return feed.copy(items = feed.items.filter { it.id.isNotBlank() })
     }
 }
+
+private fun eu.akoos.photos.data.api.model.NewsItem.toDomain(): NewsItem = NewsItem(
+    id = id,
+    date = date,
+    title = title,
+    body = body,
+    important = important,
+    link = link,
+)

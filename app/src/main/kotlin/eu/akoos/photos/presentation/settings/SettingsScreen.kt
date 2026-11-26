@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.settings
 
+import eu.akoos.photos.domain.debug.LARGE_LIBRARY_DEVICE_RELATIVE_PATH
+
 import android.app.Activity
 import android.content.Intent
 import android.os.Build
@@ -128,16 +130,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
-import eu.akoos.photos.data.face.FACE_INDEX_FOREGROUND_THRESHOLD
-import eu.akoos.photos.data.face.FaceIndexingState
-import eu.akoos.photos.data.face.FaceModelAssets
-import eu.akoos.photos.data.ocr.OcrModelAssets
-import eu.akoos.photos.data.semantic.SEMANTIC_INDEX_FOREGROUND_THRESHOLD
-import eu.akoos.photos.data.semantic.SemanticIndexingProgress
-import eu.akoos.photos.data.semantic.SemanticIndexingState
-import eu.akoos.photos.data.semantic.SemanticModelAssets
-import eu.akoos.photos.data.semantic.SemanticStatusLabel
-import eu.akoos.photos.data.semantic.semanticStatusLabel
+import eu.akoos.photos.domain.ml.FACE_INDEX_FOREGROUND_THRESHOLD
+import eu.akoos.photos.domain.ml.FaceIndexingState
+import eu.akoos.photos.domain.ml.FACE_MODEL_TOTAL_DOWNLOAD_BYTES
+import eu.akoos.photos.domain.ml.OCR_MODEL_TOTAL_DOWNLOAD_BYTES
+import eu.akoos.photos.domain.ml.SEMANTIC_INDEX_FOREGROUND_THRESHOLD
+import eu.akoos.photos.domain.ml.SemanticIndexingProgress
+import eu.akoos.photos.domain.ml.SemanticIndexingState
+import eu.akoos.photos.domain.ml.SEMANTIC_MODEL_TOTAL_DOWNLOAD_BYTES
+import eu.akoos.photos.domain.ml.SemanticStatusLabel
+import eu.akoos.photos.domain.ml.semanticStatusLabel
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
@@ -780,7 +782,7 @@ fun SettingsScreen(
             }
             // The shared backup keeps the faces, search, labels and hidden items in step with the account's other
             // devices through Drive: an account and a device the Drive client runs on.
-            val sharedBackupCapable = remember { eu.akoos.photos.data.sdk.SdkGate().isCapable }
+            val sharedBackupCapable = rememberSdkDebugRoutes().isCapable
             if (state.isSignedIn && sharedBackupCapable) SharedBackupCard()
             Spacer(Modifier.height(12.dp))
             SettingsCard {
@@ -801,7 +803,7 @@ fun SettingsScreen(
                 )
             }
             // The Drive SDK switches need an account and a device the SDK runs on.
-            val sdkCapable = remember { eu.akoos.photos.data.sdk.SdkGate().isCapable }
+            val sdkCapable = rememberSdkDebugRoutes().isCapable
             if (state.isSignedIn && sdkCapable) {
                 Spacer(Modifier.height(12.dp))
                 SettingsCard {
@@ -1124,7 +1126,7 @@ fun AiSettingsScreen(
                     title = stringResource(R.string.settings_ai_ocr_download_title),
                     message = stringResource(
                         R.string.settings_ai_ocr_download_message,
-                        formatBytes(OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
+                        formatBytes(OCR_MODEL_TOTAL_DOWNLOAD_BYTES),
                     ),
                     confirmLabel = stringResource(R.string.settings_ai_ocr_download_confirm),
                     dismissLabel = stringResource(R.string.cancel),
@@ -1135,7 +1137,7 @@ fun AiSettingsScreen(
                     title = stringResource(R.string.settings_ai_ocr_remove_title),
                     message = stringResource(
                         R.string.settings_ai_ocr_remove_message,
-                        formatBytes(OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
+                        formatBytes(OCR_MODEL_TOTAL_DOWNLOAD_BYTES),
                     ),
                     confirmLabel = stringResource(R.string.settings_ai_ocr_remove_confirm),
                     dismissLabel = stringResource(R.string.settings_ai_ocr_remove_keep),
@@ -1244,7 +1246,7 @@ fun FaceRecognitionScreen(
                 enabled = !state.faceModelDownloading,
             )
             if (state.faceModelDownloading) {
-                val faceTotalBytes = FaceModelAssets.TOTAL_DOWNLOAD_BYTES
+                val faceTotalBytes = FACE_MODEL_TOTAL_DOWNLOAD_BYTES
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1337,7 +1339,7 @@ fun FaceRecognitionScreen(
                     } else {
                         R.string.settings_ai_face_download_message_metered
                     },
-                    formatBytes(FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    formatBytes(FACE_MODEL_TOTAL_DOWNLOAD_BYTES),
                 ),
                 confirmLabel = stringResource(R.string.settings_ai_face_download_confirm),
                 dismissLabel = stringResource(R.string.cancel),
@@ -1707,7 +1709,7 @@ fun SemanticSearchScreen(
             // so far against the total, so a slow link reads as progress rather than a stall; a failed
             // fetch adds a line saying the switch itself is the retry.
             if (state.semanticModelDownloading) {
-                val semanticTotalBytes = SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+                val semanticTotalBytes = SEMANTIC_MODEL_TOTAL_DOWNLOAD_BYTES
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1779,7 +1781,7 @@ fun SemanticSearchScreen(
                     } else {
                         R.string.settings_ai_semantic_download_message_metered
                     },
-                    formatBytes(SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    formatBytes(SEMANTIC_MODEL_TOTAL_DOWNLOAD_BYTES),
                 ),
                 confirmLabel = stringResource(R.string.settings_ai_semantic_download_confirm),
                 dismissLabel = stringResource(R.string.cancel),
@@ -1790,7 +1792,7 @@ fun SemanticSearchScreen(
                 title = stringResource(R.string.settings_ai_semantic_remove_title),
                 message = stringResource(
                     R.string.settings_ai_semantic_remove_message,
-                    formatBytes(SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    formatBytes(SEMANTIC_MODEL_TOTAL_DOWNLOAD_BYTES),
                 ),
                 confirmLabel = stringResource(R.string.settings_ai_semantic_remove_confirm),
                 dismissLabel = stringResource(R.string.settings_ai_semantic_remove_keep),
@@ -3266,7 +3268,7 @@ private fun LargeLibrarySimCard(
         mutableStateOf(if (state.deviceTarget > 0) state.deviceTarget.toString() else "")
     }
     var confirmDeviceRemove by remember { mutableStateOf(false) }
-    val deviceFolder = eu.akoos.photos.data.repository.drive.LargeLibraryDeviceSim.RELATIVE_PATH
+    val deviceFolder = eu.akoos.photos.domain.debug.LARGE_LIBRARY_DEVICE_RELATIVE_PATH
 
     SectionLabel("Developer, large library simulator")
     Spacer(Modifier.height(8.dp))
