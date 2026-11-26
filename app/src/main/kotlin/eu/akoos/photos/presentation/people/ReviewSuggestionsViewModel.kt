@@ -24,13 +24,23 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.ml.FaceIndexing
+
+import eu.akoos.photos.domain.ml.FaceEdits
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+
 import eu.akoos.photos.domain.usecase.samePersonName
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
-import androidx.room.withTransaction
-import eu.akoos.photos.data.face.PersonNameLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,15 +54,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.AppDatabase
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.NotPersonDao
-import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
-import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.domain.usecase.IgnorePeopleUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.isNameableCluster
@@ -72,13 +75,9 @@ class ReviewSuggestionsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val appDatabase: AppDatabase,
-    private val faceDao: FaceDao,
-    private val personDao: PersonDao,
-    private val personManualPhotoDao: PersonManualPhotoDao,
-    private val notPersonDao: NotPersonDao,
+    private val peopleCatalog: PeopleCatalog,
     private val ignorePeople: IgnorePeopleUseCase,
-    private val faceEdits: FaceEditCounter,
+    private val faceEdits: FaceEdits,
 ) : ViewModel() {
 
     /** One-shot user feedback (a string res id) for a bulk action that otherwise finishes with no
@@ -139,33 +138,33 @@ class ReviewSuggestionsViewModel @Inject constructor(
         if (clusterIds.isEmpty() || typed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+                val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
                 // A person already of this name, also one differing only in case, takes them in under its spelling.
-                val existing = personDao.namedPeopleForUser(account).filter { samePersonName(it.displayName, typed) }
+                val existing = peopleCatalog.namedPeopleForUser(account).filter { samePersonName(it.displayName, typed) }
                     .let { same -> same.firstOrNull { it.displayName?.trim() == typed } ?: same.maxByOrNull { it.faceCount } }
                 val name = existing?.displayName?.trim() ?: typed
                 val target = existing?.id
-                    ?: clusterIds.maxByOrNull { faceDao.faceCountForPerson(account, it) }
+                    ?: clusterIds.maxByOrNull { peopleCatalog.faceCountForPerson(account, it) }
                     ?: return@launch
-                val faceIds = clusterIds.flatMap { faceDao.faceIdsForPerson(account, it) }
-                val manual = personManualPhotoDao.photoKeysForNameList(account, name)
+                val faceIds = clusterIds.flatMap { peopleCatalog.faceIdsForPerson(account, it) }
+                val manual = peopleCatalog.photoKeysForNameList(account, name)
                 // One transaction, so the people streams read the merged state once instead of after every
                 // statement, and a failure part-way leaves the clusters as they were.
                 faceEdits.edit {
-                    appDatabase.withTransaction {
+                    peopleCatalog.withTransaction {
                         if (faceIds.isNotEmpty()) {
-                            faceDao.reassignFacesToPerson(faceIds, target)
-                            faceDao.labelFacesByIds(faceIds, name)
+                            peopleCatalog.reassignFacesToPerson(faceIds, target)
+                            peopleCatalog.labelFacesByIds(faceIds, name)
                         }
-                        personDao.updateName(target, name)
+                        peopleCatalog.updatePersonName(target, name)
                         if (existing == null) {
-                            PersonNameLog.named(appDatabase.personNameDao(), account, name, System.currentTimeMillis())
+                            peopleCatalog.notePersonNamed(account, name, System.currentTimeMillis())
                         }
-                        val count = (faceDao.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
-                        val cover = faceDao.topFaceForPerson(account, target)
-                        personDao.updateCoverAndCount(target, cover, count)
-                        for (id in clusterIds) if (id != target) personDao.updateCoverAndCount(id, null, 0)
-                        personDao.deleteEmpty(account)
+                        val count = (peopleCatalog.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
+                        val cover = peopleCatalog.topFaceForPerson(account, target)
+                        peopleCatalog.updateCoverAndCount(target, cover, count)
+                        for (id in clusterIds) if (id != target) peopleCatalog.updateCoverAndCount(id, null, 0)
+                        peopleCatalog.deleteEmptyPeople(account)
                     }
                 }
                 _message.value = R.string.person_msg_merged
@@ -187,7 +186,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
         if (clusterIds.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+                val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
                 ignorePeople(account, clusterIds)
                 _message.value = R.string.person_msg_dismissed
             } catch (e: CancellationException) {

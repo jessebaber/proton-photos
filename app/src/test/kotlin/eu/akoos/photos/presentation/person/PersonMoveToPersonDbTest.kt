@@ -31,9 +31,15 @@ import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.catalog.PeopleCatalogImpl
 import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.data.ml.FaceEditsImpl
+import eu.akoos.photos.domain.ml.FaceIndexing
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -92,29 +98,39 @@ class PersonMoveToPersonDbTest {
         val accounts = mockk<AccountManager>(relaxed = true)
         every { accounts.getPrimaryUserId() } returns flowOf(UserId(acct))
         val edits = FaceEditCounter()
+        val faceIndexing = mockk<FaceIndexing>(relaxed = true)
+        every { faceIndexing.requestRecluster(any()) } answers { scheduler.requestRecluster(firstArg()) }
+        val settings = mockk<SettingsStore>(relaxed = true)
+        coEvery { settings.get(Settings.AI_FEATURES_ENABLED) } returns true
+        coEvery { settings.get(Settings.FACE_ENABLED) } returns true
+        coEvery { settings.get(Settings.FACE_AUTO_MERGE) } returns false
         return PersonDetailViewModel(
             accountManager = accounts,
-            faceDao = db.faceDao(),
-            personDao = db.personDao(),
-            personManualPhotoDao = db.personManualPhotoDao(),
-            notPersonDao = db.notPersonDao(),
-            personCoverDao = db.personCoverDao(),
-            faceCurationTimeDao = db.faceCurationTimeDao(),
-            clusterSummaryDao = db.clusterSummaryDao(),
+            peopleCatalog = PeopleCatalogImpl(
+                db = db,
+                personDao = db.personDao(),
+                faceDao = db.faceDao(),
+                notPersonDao = db.notPersonDao(),
+                personManualPhotoDao = db.personManualPhotoDao(),
+                personCoverDao = db.personCoverDao(),
+                faceCurationTimeDao = db.faceCurationTimeDao(),
+                clusterSummaryDao = db.clusterSummaryDao(),
+            ),
             notThisPerson = mockk(relaxed = true),
             getGalleryItems = mockk(relaxed = true),
             observePeopleUseCase = mockk(relaxed = true),
             assignPersonName = mockk(relaxed = true),
-            faceIndexingScheduler = scheduler,
+            faceIndexing = faceIndexing,
             ignorePeople = mockk(relaxed = true),
             renamePerson = mockk(relaxed = true),
             assignFacesToPerson = AssignFacesToPersonUseCaseImpl(
                 db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.personCoverDao(), db.notPersonDao(),
                 db.clusterSummaryDao(), scheduler, db, edits,
             ),
-            faceEdits = edits,
+            faceEdits = FaceEditsImpl(edits),
             personCentroids = mockk(relaxed = true),
             selectionFactory = mockk(relaxed = true),
+            settingsStore = settings,
             context = context,
         )
     }

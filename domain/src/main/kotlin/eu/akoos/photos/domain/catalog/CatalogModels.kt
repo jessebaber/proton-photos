@@ -96,6 +96,7 @@ data class FaceBoxRecord(
     val right: Float,
     val bottom: Float,
     val personId: Long?,
+    val score: Float = 0f,
 )
 
 data class NotPersonRecord(
@@ -110,6 +111,8 @@ data class PhotoLocationRecord(
     val latitude: Double,
     val longitude: Double,
 )
+
+fun PhotoLocationRecord.isNullIsland(): Boolean = latitude == 0.0 && longitude == 0.0
 
 data class DayMetaRecord(
     val date: String,
@@ -180,6 +183,7 @@ data class PerceptualHashLiteRecord(
     val h2: Long,
     val h3: Long,
     val quality: Int,
+    val color: ByteArray,
     val freshness: String,
 )
 
@@ -187,3 +191,40 @@ data class PhotoPickerRowRecord(
     val linkId: String,
     val thumbnailUrl: String?,
 )
+data class FaceOnPhotoRecord(
+    val id: String,
+    val photoKey: String,
+    val personId: Long?,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val score: Float,
+)
+
+data class RejectedFaceRecord(
+    val id: String,
+    val photoKey: String,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+data class NotPersonFaceRecord(
+    val personName: String,
+    val faceId: String,
+    val photoKey: String,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+data class PersonManualPhotoRecord(
+    val userId: String,
+    val personName: String,
+    val photoKey: String,
+)
+
+class FaceVectorRecord(val id: String, val embedding: ByteArray)

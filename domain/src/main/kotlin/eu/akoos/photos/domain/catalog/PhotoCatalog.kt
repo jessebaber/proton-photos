@@ -34,6 +34,7 @@ interface PhotoCatalog {
     suspend fun getUserTagsCsv(uri: String): String?
 
     fun observePerceptualHashes(algo: Int): Flow<List<PerceptualHashLiteRecord>>
+    suspend fun deletePerceptualHashesByKeys(keys: List<String>)
     suspend fun embeddingCount(userId: String): Int
     suspend fun hasFaceScans(userId: String): Boolean
     suspend fun clearFaceScans(userId: String)

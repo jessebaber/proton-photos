@@ -24,16 +24,20 @@
 
 package eu.akoos.photos.presentation.memories
 
+import eu.akoos.photos.domain.thumbnails.ThumbnailUrls
+
+import eu.akoos.photos.domain.thumbnails.ThumbnailDecrypt
+
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
-import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -84,8 +88,9 @@ class MemoriesViewModel @Inject constructor(
     observePeopleUseCase: ObservePeopleUseCase,
     observePlacesUseCase: ObservePlacesUseCase,
     accountManager: AccountManager,
-    private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
-    private val thumbnailUrlStore: ThumbnailUrlStore,
+    private val thumbnailDecrypt: ThumbnailDecrypt,
+    private val thumbnailUrls: ThumbnailUrls,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -103,8 +108,10 @@ class MemoriesViewModel @Inject constructor(
                 val memories = combine(getGalleryItems.invokeLocalOnly(), context.onThisDayWindowDays()) { all, days ->
                     MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all, days), seasons = buckets(all))
                 }
-                val people = context.settingsDataStore.data
-                    .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+                val people = combine(
+            settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+            settingsStore.observe(Settings.FACE_ENABLED),
+        ) { ai, face -> ai && face }
                     .distinctUntilChanged()
                     .flatMapLatest { enabled ->
                         if (!enabled) flowOf(emptyList<PersonUi>())
@@ -119,8 +126,10 @@ class MemoriesViewModel @Inject constructor(
                 // People show in the Collection only with AI on, the same opt-in the rest of the
                 // grouping honours; the face crop needs the feed's original dimensions, so the use
                 // case is handed the same library flow.
-                val people = context.settingsDataStore.data
-                    .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+                val people = combine(
+            settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+            settingsStore.observe(Settings.FACE_ENABLED),
+        ) { ai, face -> ai && face }
                     .distinctUntilChanged()
                     .flatMapLatest { enabled ->
                         if (!enabled) flowOf(emptyList<PersonUi>())
@@ -135,7 +144,7 @@ class MemoriesViewModel @Inject constructor(
                         val covers = coverLinkIds(state)
                         if (covers != lastPinnedCovers) {
                             lastPinnedCovers = covers
-                            thumbnailDecryptScheduler.pinCovers(userId, covers)
+                            thumbnailDecrypt.pinCovers(userId, covers)
                         }
                     }
                     // The cards draw their cover imperatively (a bitmap built outside any Compose
@@ -143,7 +152,7 @@ class MemoriesViewModel @Inject constructor(
                     // store's freshly-decrypted URL onto the cloud-only cover items so they render,
                     // and repaint live when a decrypt lands after the screen opened. The card set is
                     // a handful of items, so the extra re-emit per store change is cheap.
-                    .combine(thumbnailUrlStore.urls) { state, urls -> state.withThumbnails(urls) }
+                    .combine(thumbnailUrls.urls) { state, urls -> state.withThumbnails(urls) }
             }
         }
         // The busiest cities ride alongside the day/season/people groupings. ObservePlacesUseCase reads

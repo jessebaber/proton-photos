@@ -24,6 +24,18 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.label.PhotoLabels
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+
 import android.content.Context
 import android.content.res.Configuration
 import android.net.Uri
@@ -60,17 +72,7 @@ import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.hidden.HiddenStorageManager
-import eu.akoos.photos.data.offline.OfflineStorageManager
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
-import eu.akoos.photos.data.db.dao.CloudAlbumDao
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -147,35 +149,30 @@ class SearchViewModel @Inject constructor(
     private val selectionFactory: GalleryItemSelectionController.Factory,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val semanticSearchUseCase: SemanticSearchUseCase,
-    private val faceDao: FaceDao,
+    private val peopleCatalog: PeopleCatalog,
     private val moveController: MoveToFolderController,
     private val driveRepo: DrivePhotoRepository,
     private val albumBrowseSource: AlbumBrowseSource,
-    private val albumMembershipDao: AlbumPhotoMembershipDao,
-    private val labelRepo: PhotoLabelRepository,
+    private val albumCatalog: AlbumCatalog,
+    private val labelRepo: PhotoLabels,
     private val placeIndex: PhotoPlaceIndex,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     /** Hidden vault filter — same DataStore key the gallery uses. Without this the
      *  search page surfaces hidden photos via name / date / content-filter matches,
      *  defeating the point of the Hidden vault. */
-    private val hiddenUrisFlow = context.settingsDataStore.data.map {
-        it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    private val hiddenUrisFlow = settingsStore.observe(Settings.HIDDEN_PHOTO_URIS)
 
     /** Cloud linkIds pinned for offline — the Offline category chip filters results to these.
      *  Same DataStore key the gallery and album-detail surfaces read. */
-    private val offlinePinIdsFlow = context.settingsDataStore.data.map {
-        it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-    }
+    private val offlinePinIdsFlow = settingsStore.observe(Settings.OFFLINE_PIN_IDS)
 
     /** MediaStore uris hearted on the device, the half of the Favourites chip Drive cannot answer,
      *  since a photo that was never backed up has no PhotoTag to carry one. Same DataStore key the
      *  gallery reads, so the chip narrows to the same photos on both surfaces. */
-    private val favoriteIdsFlow = context.settingsDataStore.data.map {
-        it[SettingsKeys.FAVORITE_IDS] ?: emptySet()
-    }
+    private val favoriteIdsFlow = settingsStore.observe(Settings.FAVORITE_IDS)
 
     private fun List<GalleryItem>.dropHidden(hiddenUris: Set<String>): List<GalleryItem> =
         filter { item ->
@@ -196,8 +193,10 @@ class SearchViewModel @Inject constructor(
 
     /** The AI master + face toggles both on, the one gate [faceEnabled], [people] and
      *  [peopleSuggestions] share. */
-    private val faceSwitchesOn: Flow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+    private val faceSwitchesOn: Flow<Boolean> = combine(
+        settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+        settingsStore.observe(Settings.FACE_ENABLED),
+    ) { ai, face -> ai && face }
         .distinctUntilChanged()
 
     /** Whether on-device face grouping is switched on (the AI master + face toggles). Drives the
@@ -238,7 +237,7 @@ class SearchViewModel @Inject constructor(
         when {
             scope == null -> flowOf(null)
             scope.cloudLinkId != null ->
-                albumMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(setOf(scope.cloudLinkId!!))
+                albumCatalog.observeAssociatedPhotoLinkIdsForAlbums(setOf(scope.cloudLinkId!!))
                     .map<List<String>, ScopeFilter?> { ScopeFilter(it.toSet(), null) }
                     .catch { emit(ScopeFilter(emptySet(), null)) }
             else -> flowOf(ScopeFilter(null, scope.folder))
@@ -391,8 +390,10 @@ class SearchViewModel @Inject constructor(
 
     /** The AI master switch and semantic search both on. The whole semantic feed hangs off this, the
      *  same gate shape the [people] rail uses, so a semantic-off session adds nothing to [results]. */
-    private val semanticEnabled = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
+    private val semanticEnabled = combine(
+        settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+        settingsStore.observe(Settings.SEMANTIC_ENABLED),
+    ) { ai, sem -> ai && sem }
         .distinctUntilChanged()
 
     /** The content-search feed: whether a search is still running for the current query, and the
@@ -543,15 +544,13 @@ class SearchViewModel @Inject constructor(
      *  and whether face grouping is on, the gate the People tile has there. */
     private data class TileSettings(val order: String?, val hidden: Set<String>, val faceOn: Boolean)
 
-    private val tileSettings: Flow<TileSettings> = context.settingsDataStore.data
-        .map {
-            TileSettings(
-                order = it[SettingsKeys.ALBUMS_TILE_ORDER],
-                hidden = it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet(),
-                faceOn = it[SettingsKeys.FACE_ENABLED] ?: false,
-            )
-        }
-        .distinctUntilChanged()
+    private val tileSettings: Flow<TileSettings> = combine(
+        settingsStore.observe(Settings.ALBUMS_TILE_ORDER),
+        settingsStore.observe(Settings.ALBUMS_TILE_HIDDEN),
+        settingsStore.observe(Settings.FACE_ENABLED),
+    ) { order, hidden, faceOn ->
+        TileSettings(order = order, hidden = hidden, faceOn = faceOn)
+    }.distinctUntilChanged()
 
     /** The shortcut tiles the typed query names, offered under the same rules the Albums tab shows them
      *  by: its order, a tile the user hid stays out, People needs face grouping, and Shared and Offline
@@ -591,9 +590,9 @@ class SearchViewModel @Inject constructor(
                 _personSelection.value = PersonSelection()
                 return@launch
             }
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
             val keys = try {
-                faceDao.photoKeysForPerson(account, personId).first().toSet()
+                peopleCatalog.photoKeysForPerson(account, personId).first().toSet()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -665,8 +664,10 @@ class SearchViewModel @Inject constructor(
     }
 
     /** The chips the category rail shows, in its order, so only a chip the page offers is selected. */
-    private val railCategories: Flow<List<GalleryFilter>> = context.settingsDataStore.data
-        .map { visibleCategories(it[SettingsKeys.CATEGORY_RAIL_ORDER], it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()) }
+    private val railCategories: Flow<List<GalleryFilter>> = combine(
+        settingsStore.observe(Settings.CATEGORY_RAIL_ORDER),
+        settingsStore.observe(Settings.CATEGORY_RAIL_HIDDEN),
+    ) { order, hidden -> visibleCategories(order, hidden) }
         .distinctUntilChanged()
 
     init {

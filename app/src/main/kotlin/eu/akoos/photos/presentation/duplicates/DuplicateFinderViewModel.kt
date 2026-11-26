@@ -22,6 +22,14 @@
 
 package eu.akoos.photos.presentation.duplicates
 
+import eu.akoos.photos.domain.duplicates.PerceptualHashing
+
+import eu.akoos.photos.domain.duplicates.LocalContentHashes
+
+import eu.akoos.photos.domain.catalog.PhotoCatalog
+
+import eu.akoos.photos.domain.catalog.PerceptualHashLiteRecord
+
 import eu.akoos.photos.domain.usecase.DeletePhotoResult
 
 import android.util.Log
@@ -47,10 +55,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.db.dao.PerceptualHashDao
-import eu.akoos.photos.data.db.dao.PerceptualHashLite
-import eu.akoos.photos.data.repository.LocalContentHashFiller
-import eu.akoos.photos.data.repository.drive.PerceptualHashScheduler
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -74,7 +78,7 @@ private data class LeanHash(val fingerprint: PdqHash.Fingerprint, val freshness:
 private data class Sources(
     val items: List<GalleryItem>,
     val localHashes: Map<String, String>,
-    val hashRows: List<PerceptualHashLite>,
+    val hashRows: List<PerceptualHashLiteRecord>,
     val deleted: Set<String>,
 )
 
@@ -115,9 +119,9 @@ class DuplicateFinderViewModel @Inject constructor(
     private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
-    private val perceptualHashDao: PerceptualHashDao,
-    private val perceptualHashScheduler: PerceptualHashScheduler,
-    private val localContentHashFiller: LocalContentHashFiller,
+    private val photoCatalog: PhotoCatalog,
+    private val perceptualHashing: PerceptualHashing,
+    private val localContentHashes: LocalContentHashes,
     private val ignoreStore: DuplicateIgnoreStore,
 ) : ViewModel() {
 
@@ -236,8 +240,8 @@ class DuplicateFinderViewModel @Inject constructor(
                     else getGalleryItems.invoke(userId)
                 combine(
                     libraryFlow,
-                    localContentHashFiller.hashes,
-                    perceptualHashDao.observeLite(PdqHash.ALGO_VERSION),
+                    localContentHashes.hashes,
+                    photoCatalog.observePerceptualHashes(PdqHash.ALGO_VERSION),
                     recentlyDeleted,
                 ) { items, localHashes, hashRows, deleted ->
                     Sources(items, localHashes, hashRows, deleted)
@@ -302,10 +306,10 @@ class DuplicateFinderViewModel @Inject constructor(
                     lastScheduledItems = items
                     // A guest (null userId) hashes its local files the same way; the scheduler only
                     // needs an account to warm a cold cloud thumbnail, which a guest never has.
-                    perceptualHashScheduler.request(items, primaryUserId)
+                    perceptualHashing.request(items, primaryUserId)
                     // Fill the exact-duplicate device hashes on device, with or without an account, so
                     // the "Identical" groups cover local files the backup pipeline never hashed.
-                    localContentHashFiller.request(items)
+                    localContentHashes.request(items)
                 }
             }
         }
@@ -316,7 +320,7 @@ class DuplicateFinderViewModel @Inject constructor(
      * excluded (a backed-up pair, not two copies); the remaining LocalOnly / CloudOnly candidates
      * are looked up by stable id in [storedHashes], split device/cloud so groups stay homogeneous,
      * and clustered by [group]. Anything not yet hashed is simply absent here and gets filled in by
-     * [perceptualHashScheduler] in the background, this re-runs as the cache Flow re-emits. While
+     * [perceptualHashing] in the background, this re-runs as the cache Flow re-emits. While
      * any candidate still lacks a fresh stored hash the scan is reported as in progress.
      *
      * A photo already in an exact group ([exactIds]) is skipped, so an exact duplicate is shown only
@@ -736,7 +740,7 @@ class DuplicateFinderViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> item.cloud.linkId
             }
         }
-        runCatching { perceptualHashDao.deleteByKeys(keys) }
+        runCatching { photoCatalog.deletePerceptualHashesByKeys(keys) }
             .onFailure { Log.w(TAG, "perceptual-hash evict failed: ${it.message}") }
     }
 }

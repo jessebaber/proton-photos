@@ -91,6 +91,14 @@ import eu.akoos.photos.domain.vault.HiddenVaultRestore
 import eu.akoos.photos.domain.vault.VaultPassword
 import eu.akoos.photos.domain.work.BackgroundWork
 import javax.inject.Singleton
+import eu.akoos.photos.data.ml.FaceEditsImpl
+import eu.akoos.photos.domain.ml.FaceEdits
+import eu.akoos.photos.data.location.LocalExifBackfillImpl
+import eu.akoos.photos.domain.location.LocalExifBackfill
+import eu.akoos.photos.data.duplicates.PerceptualHashingImpl
+import eu.akoos.photos.domain.duplicates.PerceptualHashing
+import eu.akoos.photos.data.duplicates.LocalContentHashesImpl
+import eu.akoos.photos.domain.duplicates.LocalContentHashes
 
 /**
  * Binds presentation-facing domain facades to their data implementations.
@@ -139,5 +147,9 @@ abstract class PresentationFacadesModule {
     @Binds @Singleton abstract fun bindSyncCatalog(impl: SyncCatalogImpl): SyncCatalog
 
     @Binds @Singleton abstract fun bindBackgroundWork(impl: BackgroundWorkImpl): BackgroundWork
+    @Binds @Singleton abstract fun bindFaceEdits(impl: FaceEditsImpl): FaceEdits
+    @Binds @Singleton abstract fun bindLocalExifBackfill(impl: LocalExifBackfillImpl): LocalExifBackfill
+    @Binds @Singleton abstract fun bindPerceptualHashing(impl: PerceptualHashingImpl): PerceptualHashing
+    @Binds @Singleton abstract fun bindLocalContentHashes(impl: LocalContentHashesImpl): LocalContentHashes
 }
 

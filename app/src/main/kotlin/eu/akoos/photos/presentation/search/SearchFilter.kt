@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.search
 
-import eu.akoos.photos.data.label.LabelKeyReconciler
+import eu.akoos.photos.domain.label.LabelKeyReconciler
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.gallery.ContentFilter

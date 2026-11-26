@@ -40,7 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.hidden.HiddenFolderRecords
+import eu.akoos.photos.domain.vault.HideConfirmSource
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.SheetBg
@@ -129,7 +129,7 @@ fun ConfirmSheet(
  */
 @Composable
 fun HideConfirmSheet(
-    split: HiddenFolderRecords.HideSplit?,
+    split: HideConfirmSource?,
     title: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,

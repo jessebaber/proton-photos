@@ -83,10 +83,8 @@ presentation-worker eu/akoos/photos/presentation/settings/SyncFoldersViewModel.k
 # stream: feat/presentation-media
 presentation-crypto eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
 presentation-data eu/akoos/photos/presentation/common/AddLabelsAction.kt
-presentation-data eu/akoos/photos/presentation/common/ConfirmSheet.kt
 presentation-data eu/akoos/photos/presentation/common/FavoriteSelection.kt
 presentation-data eu/akoos/photos/presentation/common/GalleryItemSelectionController.kt
-presentation-data eu/akoos/photos/presentation/common/HideConfirmation.kt
 presentation-data eu/akoos/photos/presentation/common/MoveToFolderController.kt
 presentation-data eu/akoos/photos/presentation/common/UndoController.kt
 presentation-data eu/akoos/photos/presentation/editor/PhotoEditorViewModel.kt
@@ -137,26 +135,6 @@ presentation-worker eu/akoos/photos/presentation/folders/DeviceFolderDetailViewM
 presentation-worker eu/akoos/photos/presentation/importer/ImportViewModel.kt
 
 # stream: feat/presentation-people
-presentation-data eu/akoos/photos/presentation/calendar/CalendarViewModel.kt
-presentation-data eu/akoos/photos/presentation/calendar/DayDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/duplicates/DuplicateFinderViewModel.kt
-presentation-data eu/akoos/photos/presentation/duplicates/DuplicateIgnoreStore.kt
-presentation-data eu/akoos/photos/presentation/location/LocationDetailScreen.kt
-presentation-data eu/akoos/photos/presentation/location/LocationDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/map/MapViewModel.kt
-presentation-data eu/akoos/photos/presentation/memories/MemoriesViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/AddToPersonFaceViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/FaceExclusionsViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/NameOrMergeViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/PeopleDisplay.kt
-presentation-data eu/akoos/photos/presentation/people/PeopleViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/ReviewSuggestionsViewModel.kt
-presentation-data eu/akoos/photos/presentation/person/FindMorePhotosViewModel.kt
-presentation-data eu/akoos/photos/presentation/person/PersonDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/search/PhotoPlaceIndex.kt
-presentation-data eu/akoos/photos/presentation/search/SearchFilter.kt
-presentation-data eu/akoos/photos/presentation/search/SearchScreen.kt
-presentation-data eu/akoos/photos/presentation/search/SearchViewModel.kt
 
 # stream: feat/presentation-shell
 data-widget eu/akoos/photos/data/mlsync/FaceSnapshotExporter.kt
