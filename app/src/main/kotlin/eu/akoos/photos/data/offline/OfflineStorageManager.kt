@@ -29,6 +29,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import eu.akoos.photos.domain.offline.OfflineStorage
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,33 +47,33 @@ import javax.inject.Singleton
 @Singleton
 class OfflineStorageManager @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : OfflineStorage {
     private val offlineDir: File
         get() = File(context.filesDir, "offline").also { it.mkdirs() }
 
     /** Canonical blob path for [linkId] with extension [ext] — matches the full-res cache stem. */
-    fun blobFile(linkId: String, ext: String): File = File(offlineDir, "$linkId.$ext")
+    override fun blobFile(linkId: String, ext: String): File = File(offlineDir, "$linkId.$ext")
 
     /**
      * The existing non-empty offline blob for [linkId] regardless of extension, or null when
      * nothing is pinned for it. Matches on the `<linkId>.` filename prefix so a blob stored
      * under any mime extension is found.
      */
-    fun findBlob(linkId: String): File? {
+    override fun findBlob(linkId: String): File? {
         val prefix = "$linkId."
         return offlineDir.listFiles()
             ?.firstOrNull { it.isFile && !it.name.endsWith(".tmp") && it.name.startsWith(prefix) && it.length() > 0 }
     }
 
     /** True when a non-empty offline blob exists for [linkId]. */
-    fun isOffline(linkId: String): Boolean = findBlob(linkId) != null
+    override fun isOffline(linkId: String): Boolean = findBlob(linkId) != null
 
     /**
      * Copies [source] into offline storage under `<linkId>.<source.extension>` and returns the
      * stored file. Writes to a `.tmp` sibling first, then atomically renames, so a crash
      * mid-copy never leaves a truncated blob that [findBlob] would treat as complete.
      */
-    suspend fun store(linkId: String, source: File): File = withContext(Dispatchers.IO) {
+    override suspend fun store(linkId: String, source: File): File = withContext(Dispatchers.IO) {
         val ext = source.extension.ifBlank { "bin" }
         val dest = blobFile(linkId, ext)
         val tmp = File(offlineDir, "$linkId.$ext.tmp")
@@ -94,7 +95,7 @@ class OfflineStorageManager @Inject constructor(
     }
 
     /** Removes the offline blob (and any leftover `.tmp`) for [linkId]. */
-    fun delete(linkId: String) {
+    override fun delete(linkId: String) {
         val prefix = "$linkId."
         offlineDir.listFiles()
             ?.filter { it.isFile && it.name.startsWith(prefix) }
@@ -102,14 +103,14 @@ class OfflineStorageManager @Inject constructor(
     }
 
     /** Total bytes occupied by every offline blob. */
-    fun computeSizeBytes(): Long =
+    override fun computeSizeBytes(): Long =
         offlineDir.listFiles()
             ?.filter { it.isFile }
             ?.sumOf { runCatching { it.length() }.getOrDefault(0L) }
             ?: 0L
 
     /** Drops every offline blob. */
-    fun clearAll() {
+    override fun clearAll() {
         offlineDir.deleteRecursively()
     }
 
@@ -118,7 +119,7 @@ class OfflineStorageManager @Inject constructor(
      * that point at bytes which are no longer here. Used on sign-out, where both the blobs and the
      * pin list belong to the account that is going away.
      */
-    suspend fun clearAllAndUnpin() {
+    override suspend fun clearAllAndUnpin() {
         clearAll()
         runCatching { context.settingsDataStore.edit { it.remove(SettingsKeys.OFFLINE_PIN_IDS) } }
     }
