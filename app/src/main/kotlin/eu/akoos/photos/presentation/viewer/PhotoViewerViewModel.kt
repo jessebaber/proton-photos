@@ -2235,7 +2235,7 @@ class PhotoViewerViewModel @Inject constructor(
                 // The file is live in MediaStore, so a GPS strip also has to drop the fix stored for
                 // it; otherwise the map and the place groupings keep plotting the coordinates the
                 // photo no longer carries.
-                invalidateStrippedLocations(config, listOf(uri))
+                invalidateStrippedLocations(config.stripGps, listOf(uri))
             }
             is StripResult.NeedsPermission -> {
                 // Android 11+ scoped storage: the file is not app-owned (e.g. a camera-roll photo).

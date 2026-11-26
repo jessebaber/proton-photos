@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
+
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider

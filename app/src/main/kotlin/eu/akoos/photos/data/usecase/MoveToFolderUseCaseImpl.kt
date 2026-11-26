@@ -24,6 +24,9 @@ package eu.akoos.photos.data.usecase
 
 import eu.akoos.photos.domain.usecase.MoveToFolderResult
 
+import eu.akoos.photos.data.usecase.FolderMoveAlbumFollow
+import eu.akoos.photos.data.usecase.MovedPhoto
+
 import android.app.RecoverableSecurityException
 import android.content.ContentValues
 import android.content.Context

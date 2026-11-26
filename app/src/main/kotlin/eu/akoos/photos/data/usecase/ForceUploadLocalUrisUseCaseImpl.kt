@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -53,19 +55,19 @@ import javax.inject.Singleton
  *     freshly uploaded file joins [albumLinkId] once its cloud id is known.
  */
 @Singleton
-class ForceUploadLocalUrisUseCase @Inject constructor(
+class ForceUploadLocalUrisUseCaseImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncStateRepo: SyncStateRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val uploadAlbumTargetDao: UploadAlbumTargetDao,
-) {
+) : ForceUploadLocalUrisUseCase {
 
     /** Force [uris] to back up with no album to join. Returns the number of URIs queued. */
-    suspend fun forceUpload(userId: UserId, uris: List<String>): Int =
+    override suspend fun forceUpload(userId: UserId, uris: List<String>): Int =
         run(userId, SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM, uris)
 
     /** Force [uris] to back up and join [albumLinkId] once uploaded. Returns the number queued. */
-    suspend fun queueForAlbum(userId: UserId, albumLinkId: String, uris: List<String>): Int =
+    override suspend fun queueForAlbum(userId: UserId, albumLinkId: String, uris: List<String>): Int =
         run(userId, albumLinkId, uris)
 
     private suspend fun run(userId: UserId, albumLinkId: String, uris: List<String>): Int {

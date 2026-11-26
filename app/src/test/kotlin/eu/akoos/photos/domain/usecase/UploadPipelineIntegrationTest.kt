@@ -22,7 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ForceUploadLocalUrisUseCaseImpl
 import eu.akoos.photos.data.usecase.ReconcileSyncStateUseCaseImpl
+import eu.akoos.photos.data.usecase.UploadPendingUseCaseImpl
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
@@ -160,7 +163,7 @@ class UploadPipelineIntegrationTest {
         // Relaxed so the album-changed signal a join sends can be counted with verify.
         albumEvents = mockk(relaxed = true)
 
-        uploadUseCase = UploadPendingUseCase(
+        uploadUseCase = UploadPendingUseCaseImpl(
             syncStateRepo = syncRepo,
             localRepo = local,
             cloudRepo = cloud,
@@ -177,7 +180,7 @@ class UploadPipelineIntegrationTest {
             albumListEvents = albumEvents,
         )
         reconcileUseCase = ReconcileSyncStateUseCaseImpl(local, cloud, syncRepo, fakeCloudListing(), context, appScope)
-        forceUploadUseCase = ForceUploadLocalUrisUseCase(context, syncRepo, cloud, targetDao)
+        forceUploadUseCase = ForceUploadLocalUrisUseCaseImpl(context, syncRepo, cloud, targetDao)
     }
 
     @After
@@ -605,7 +608,7 @@ class UploadPipelineIntegrationTest {
                 return current.map { it.copy(cloudFileId = null, status = SyncStatus.UPLOADING) }
             }
         }
-        ForceUploadLocalUrisUseCase(context, readMidUpload, cloud, targetDao)
+        ForceUploadLocalUrisUseCaseImpl(context, readMidUpload, cloud, targetDao)
             .queueForAlbum(userId, albumLinkId, listOf(uri))
 
         row(uri)!!.let {

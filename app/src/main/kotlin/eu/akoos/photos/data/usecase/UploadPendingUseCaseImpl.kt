@@ -20,7 +20,19 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.UploadFormatNaming
+
+import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
+
+import eu.akoos.photos.domain.usecase.FOREIGN_ALBUM_JOIN_ATTEMPTS
+import eu.akoos.photos.domain.usecase.ForeignAlbumJoinMisses
+import eu.akoos.photos.domain.usecase.UploadPendingUseCase
+import eu.akoos.photos.domain.usecase.UploadProgress
+import eu.akoos.photos.domain.usecase.UploadStatus
+import eu.akoos.photos.domain.usecase.runUploadWorkers
+import eu.akoos.photos.domain.usecase.uploadDefersForWifiOnly
 
 import eu.akoos.photos.data.usecase.DrivePairLookup
 import eu.akoos.photos.data.usecase.PendingDeleteNotificationUseCase
@@ -67,10 +79,7 @@ import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PerfDiagnostics
-import java.text.SimpleDateFormat
 import java.time.ZoneId
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -90,11 +99,8 @@ private const val VIDEO_PIPELINE_DEPTH = 2
  */
 private const val UPLOAD_PARALLELISM = 3
 
-/** Passes a queued add to an album shared with this user may miss before the pair is let go. */
-internal const val FOREIGN_ALBUM_JOIN_ATTEMPTS = 5
-
 @Singleton
-class UploadPendingUseCase @Inject constructor(
+class UploadPendingUseCaseImpl @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
@@ -109,7 +115,7 @@ class UploadPendingUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
-) {
+) : UploadPendingUseCase {
     private val mutex = Mutex()
 
     private val xAttrBuilder = eu.akoos.photos.data.upload.UploadXAttrBuilder(context)
@@ -158,7 +164,7 @@ class UploadPendingUseCase @Inject constructor(
      * Mark the next batch as user-requested. Called by Sync now before it hands the run to the
      * worker, so a one-off backup still works while auto-backup is switched off.
      */
-    fun requestManualRun() {
+    override fun requestManualRun() {
         manualRunRequested.set(true)
     }
 
@@ -177,7 +183,7 @@ class UploadPendingUseCase @Inject constructor(
      * this entry point is a plain synchronous call from receivers / view models; a de-queue failure is
      * logged, not propagated (a lingering MANUAL flag at worst re-uploads a file the user cancelled).
      */
-    fun requestStop() {
+    override fun requestStop() {
         stopRequested.set(true)
         appScope.launch {
             runCatching { syncStateRepo.clearManualQueue() }
@@ -198,7 +204,7 @@ class UploadPendingUseCase @Inject constructor(
      * the folder's first backup runs waits for that pass and then sees what it uploaded. Returns how many
      * photos were queued.
      */
-    suspend fun backfillFolderAlbum(
+    override suspend fun backfillFolderAlbum(
         userId: UserId,
         bucketName: String,
         onDrive: suspend () -> Map<String, String>,
@@ -289,17 +295,7 @@ class UploadPendingUseCase @Inject constructor(
         extraBufferCapacity = 32,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    val progress: SharedFlow<UploadProgress> = _progress.asSharedFlow()
-
-    /**
-     * Returned to the worker so it can distinguish "0 to upload" (success) from "tried N,
-     * 0 succeeded" (the latter must not silently mark sync as done when every item failed).
-     * [SyncWorker] downgrades the verdict when [successCount] is 0 but [attempted] is
-     * non-zero so WorkManager retries instead of writing LAST_SYNC_MS.
-     */
-    data class Result(val attempted: Int, val successCount: Int) {
-        val allFailed: Boolean get() = attempted > 0 && successCount == 0
-    }
+    override val progress: SharedFlow<UploadProgress> = _progress.asSharedFlow()
 
     /**
      * Run the pending-upload batch. Items inside a single batch run in parallel bounded by
@@ -311,9 +307,9 @@ class UploadPendingUseCase @Inject constructor(
      * a mid-encrypt cancel can't tear down the native PGP runtime. The stop flag is cleared here at
      * the start of every run so a stop requested during an earlier batch does not carry over.
      */
-    suspend operator fun invoke(
+    override suspend operator fun invoke(
         userId: UserId,
-    ): Result = mutex.withLock {
+    ): UploadPendingUseCase.Result = mutex.withLock {
         // The pending count is known only after the selection below, so each return's end mark
         // carries the count the pass attempted.
         PerfDiagnostics.mark("upload:start", 0)
@@ -416,7 +412,7 @@ class UploadPendingUseCase @Inject constructor(
             Log.d(UPLOAD_TAG, "No backup folders configured, skipping upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
             PerfDiagnostics.mark("upload:end", 0)
-            return@withLock Result(attempted = 0, successCount = 0)
+            return@withLock UploadPendingUseCase.Result(attempted = 0, successCount = 0)
         }
 
         // Wi-Fi-only enforcement for the auto-sync drain (absent key = ON, matching the rest of the
@@ -430,7 +426,7 @@ class UploadPendingUseCase @Inject constructor(
             Log.d(UPLOAD_TAG, "Wi-Fi-only on and not on Wi-Fi — skipping auto-sync upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.WaitingForWifi, 0, 0))
             PerfDiagnostics.mark("upload:end", 0)
-            return@withLock Result(attempted = 0, successCount = 0)
+            return@withLock UploadPendingUseCase.Result(attempted = 0, successCount = 0)
         }
 
         // After a reinstall the cloud listing repopulates page by page; until it has been walked
@@ -451,7 +447,7 @@ class UploadPendingUseCase @Inject constructor(
             Log.d(UPLOAD_TAG, "Cloud listing/pairing not settled yet — deferring bulk upload to avoid duplicates")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.PreparingBackup, 0, 0))
             PerfDiagnostics.mark("upload:end", 0)
-            return@withLock Result(attempted = 0, successCount = 0)
+            return@withLock UploadPendingUseCase.Result(attempted = 0, successCount = 0)
         }
 
         // Recovery for force-queued album-adds. A photo the user added to an album has a row in the
@@ -591,7 +587,7 @@ class UploadPendingUseCase @Inject constructor(
             Log.d(UPLOAD_TAG, "No pending items to upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
             PerfDiagnostics.mark("upload:end", 0)
-            return@withLock Result(attempted = 0, successCount = 0)
+            return@withLock UploadPendingUseCase.Result(attempted = 0, successCount = 0)
         }
         Log.d(UPLOAD_TAG, "Starting upload of ${pending.size} pending item(s)")
 
@@ -693,7 +689,7 @@ class UploadPendingUseCase @Inject constructor(
         val closingStatus = if (storageFullHit.get()) UploadStatus.StorageFull else UploadStatus.Idle
         _progress.tryEmit(UploadProgress("", "", closingStatus, totalCount, totalCount))
         PerfDiagnostics.mark("upload:end", pending.size)
-        Result(attempted = pending.size, successCount = finalSuccess)
+        UploadPendingUseCase.Result(attempted = pending.size, successCount = finalSuccess)
     }
 
     /**
@@ -812,7 +808,7 @@ class UploadPendingUseCase @Inject constructor(
             // runs against the bytes independently, so a stripped + renamed photo still gets erased.
             var mirrorRenameTarget: String? = null
             val renamedItem = if (renameToCaptureDate) {
-                val newName = uploadRenamedName(rawLocalItem.displayName, rawLocalItem.dateTaken, System.currentTimeMillis())
+                val newName = UploadPendingUseCase.uploadRenamedName(rawLocalItem.displayName, rawLocalItem.dateTaken, System.currentTimeMillis())
                 Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
                 if (mirrorStripToLocal) mirrorRenameTarget = newName
                 rawLocalItem.copy(displayName = newName)
@@ -846,7 +842,7 @@ class UploadPendingUseCase @Inject constructor(
             } else {
                 null
             }
-            val resolvedCaptureTime = resolveUploadCaptureTimeMs(
+            val resolvedCaptureTime = UploadPendingUseCase.resolveUploadCaptureTimeMs(
                 mediaStoreDateTakenMs = renamedItem.dateTaken,
                 dateTakenIsExplicit = renamedItem.dateTakenIsExplicit,
                 exifDateTimeOriginalMs = exifDateTimeOriginalMs,
@@ -1071,19 +1067,19 @@ class UploadPendingUseCase @Inject constructor(
             // The removal and the CLOUD_ONLY flip share one non-cancellable window so
             // an interrupt between them cannot leave the row claiming a device copy
             // that is already gone.
-            val removal = resolveDeleteAfterBackupRemoval(
+            val removal = UploadPendingUseCase.resolveDeleteAfterBackupRemoval(
                 sdkInt = Build.VERSION.SDK_INT,
                 deleteLocalAfterBackup = deleteLocalAfterBackup,
                 uploadSucceeded = cloudId.isNotBlank(),
             )
-            if (removal != Removal.NONE) {
+            if (removal != UploadPendingUseCase.Removal.NONE) {
                 withContext(NonCancellable) {
                     val uri = runCatching { Uri.parse(state.localUri) }.getOrNull()
                     if (uri == null) {
                         Log.w(UPLOAD_TAG, "Delete after backup: invalid URI ${state.localUri}")
                     } else {
                         val rows = runCatching {
-                            if (removal == Removal.TRASH) {
+                            if (removal == UploadPendingUseCase.Removal.TRASH) {
                                 context.contentResolver.update(
                                     uri,
                                     ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) },
@@ -1105,7 +1101,7 @@ class UploadPendingUseCase @Inject constructor(
                             // row here would let a later free-up-space pass re-select the same photo
                             // and raise a consent dialog for a file that is no longer on the device.
                             syncStateRepo.upsert(syncedState.copy(status = SyncStatus.CLOUD_ONLY), userId)
-                            val verb = if (removal == Removal.TRASH) "trashed" else "removed"
+                            val verb = if (removal == UploadPendingUseCase.Removal.TRASH) "trashed" else "removed"
                             Log.d(UPLOAD_TAG, "Delete after backup: $verb ${localItem.displayName}")
                         } else {
                             context.settingsDataStore.edit { p ->
@@ -1242,98 +1238,5 @@ class UploadPendingUseCase @Inject constructor(
                 syncStateRepo.markQueued(localUri, source, System.currentTimeMillis())
             }
         }.onFailure { e -> Log.w(UPLOAD_TAG, "Failed to release upload claim for $localUri: ${e.message}") }
-    }
-
-    /** What the delete-after-backup step does with the device copy, decided by [resolveDeleteAfterBackupRemoval]. */
-    enum class Removal {
-        /** Move the device copy to the system trash, recoverable for the OS retention window. */
-        TRASH,
-        /** Remove the device copy outright, with no recovery. */
-        PERMANENT,
-        /** Leave the device copy alone. */
-        NONE,
-    }
-
-    companion object {
-        /**
-         * Whether an upload's device copy is trashed, permanently removed, or kept, the single
-         * safety decision of the delete-after-backup path. Pure and side-effect-free so it can be
-         * pinned by a plain JVM test.
-         *
-         * The device copy is touched only when the user opted into [deleteLocalAfterBackup] AND the
-         * Drive copy is committed ([uploadSucceeded]) — a failed upload must never cost the user the
-         * only copy of a photo. From R the removal goes through the system trash so it stays
-         * recoverable; below R no system trash exists, so the copy can only be removed outright.
-         *
-         * Free-up-space and Hide deliberately do NOT trash and do not route through here:
-         * free-up-space would reclaim zero bytes until the trash retention expires, and a hidden
-         * photo is already preserved in the app-private Hidden vault, so trashing it would surface
-         * it in the device gallery's Recently Deleted.
-         */
-        fun resolveDeleteAfterBackupRemoval(
-            sdkInt: Int,
-            deleteLocalAfterBackup: Boolean,
-            uploadSucceeded: Boolean,
-        ): Removal = when {
-            !deleteLocalAfterBackup || !uploadSucceeded -> Removal.NONE
-            sdkInt >= Build.VERSION_CODES.R -> Removal.TRASH
-            else -> Removal.PERMANENT
-        }
-
-        /**
-         * The capture time an upload stamps onto its Drive copy (PhotoMetaDto.captureTime and the
-         * xAttr ModificationTime), chosen from the sources the caller already holds. Pure and
-         * side-effect-free so the choice can be pinned by a plain JVM test; the EXIF read that
-         * produces [exifDateTimeOriginalMs] stays in the caller because it is I/O.
-         *
-         * Precedence: strip-timestamp floors the time to [nowMs] so the cloud metadata cannot
-         * reconstruct when the shot was taken; otherwise an explicit MediaStore DATE_TAKEN
-         * ([dateTakenIsExplicit]) wins; otherwise a non-explicit MediaStore date falls back to a
-         * positive [exifDateTimeOriginalMs]; with none of those the MediaStore date is kept.
-         */
-        fun resolveUploadCaptureTimeMs(
-            mediaStoreDateTakenMs: Long,
-            dateTakenIsExplicit: Boolean,
-            exifDateTimeOriginalMs: Long?,
-            stripTimestamp: Boolean,
-            nowMs: Long,
-        ): Long {
-            if (stripTimestamp) return nowMs
-            if (!dateTakenIsExplicit && exifDateTimeOriginalMs != null && exifDateTimeOriginalMs > 0L) {
-                return exifDateTimeOriginalMs
-            }
-            return mediaStoreDateTakenMs
-        }
-
-        /**
-         * Whether an upload's mirror step actually rewrote the on-device file GPS-free, which is what
-         * makes that file's stored `photo_location` fix stale. All three have to hold, and each fails
-         * the same way when it does not: [stripGpsOnUpload] is the effective GPS strip (strip-on-upload
-         * with GPS in its set), and with it off the file keeps its coordinates; [mirrorToLocal] gates the
-         * in-place rewrite, and with it off only a temp copy is stripped while the device original is
-         * left whole; [deviceRewriteSucceeded] is the write's own outcome, and the OS can refuse it,
-         * leaving the original intact. A plain strip-on-upload with no mirror therefore never satisfies
-         * this, so its still-located device file keeps its map point.
-         *
-         * Pure and side-effect-free, so the matrix is pinned by a plain JVM test.
-         */
-        fun mirrorRemovedDeviceGps(
-            stripGpsOnUpload: Boolean,
-            mirrorToLocal: Boolean,
-            deviceRewriteSucceeded: Boolean,
-        ): Boolean = stripGpsOnUpload && mirrorToLocal && deviceRewriteSucceeded
-
-        /**
-         * The cloud displayName a rename-on-upload derives from a source's capture timestamp,
-         * formatted `yyyy-MM-dd_HH-mm-ss` and keeping the original extension. A non-positive
-         * [dateTakenMs] (absent MediaStore DATE_TAKEN) falls back to [nowMs]. Pure and
-         * side-effect-free so the naming is pinned by a plain JVM test.
-         */
-        fun uploadRenamedName(displayName: String, dateTakenMs: Long, nowMs: Long): String {
-            val ext = displayName.substringAfterLast('.', "")
-            val captureMs = dateTakenMs.takeIf { it > 0L } ?: nowMs
-            val base = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
-            return if (ext.isNotEmpty()) "$base.$ext" else base
-        }
     }
 }

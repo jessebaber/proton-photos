@@ -23,6 +23,9 @@
 package eu.akoos.photos.domain.usecase
 
 import eu.akoos.photos.data.preferences.AlbumMirrorFolders
+import eu.akoos.photos.data.usecase.albumTickToCarry
+import eu.akoos.photos.data.usecase.folderAlbumToRename
+import eu.akoos.photos.data.usecase.folderMoveAlbumPlan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

@@ -2769,7 +2769,7 @@ class GalleryViewModel @Inject constructor(
             }
             failedCount
         }
-        invalidateStrippedLocations(config, strippedUris)
+        invalidateStrippedLocations(config.stripGps, strippedUris)
         val totalStripped = baseStripped + strippedUris.size
         val totalSkipped  = baseSkipped
         val totalFailed   = baseFailed + failed

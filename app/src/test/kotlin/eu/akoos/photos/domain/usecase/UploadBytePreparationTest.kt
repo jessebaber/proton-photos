@@ -22,6 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ForceUploadLocalUrisUseCaseImpl
+import eu.akoos.photos.data.usecase.UploadPendingUseCaseImpl
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
+
 import android.content.Context
 import android.net.Uri
 import androidx.datastore.preferences.core.MutablePreferences
@@ -147,7 +151,7 @@ class UploadBytePreparationTest {
         val networkObserver = mockk<NetworkObserver>(relaxed = true)
         coEvery { networkObserver.currentlyOnWifi() } returns true
 
-        useCase = UploadPendingUseCase(
+        useCase = UploadPendingUseCaseImpl(
             syncStateRepo = syncRepo,
             localRepo = local,
             cloudRepo = cloud,
