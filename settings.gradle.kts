@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "ProtonPhotos"
 include(":app")
 include(":baseline-profile")
+include(":domain")
