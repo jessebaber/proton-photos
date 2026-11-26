@@ -22,8 +22,8 @@
 
 package eu.akoos.photos.presentation.people
 
-import eu.akoos.photos.data.db.dao.FaceOnPhoto
-import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.domain.catalog.FaceOnPhotoRecord
+import eu.akoos.photos.domain.catalog.PersonRecord
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.presentation.gallery.FaceBox
@@ -44,7 +44,7 @@ class AddToPersonFacesTest {
     private val named = mapOf(anna to "Anna")
 
     private fun face(id: String, personId: Long? = null, score: Float = 0.9f, photo: String = "p") =
-        FaceOnPhoto(id, photo, personId, 0.1f, 0.2f, 0.3f, 0.4f, score)
+        FaceOnPhotoRecord(id, photo, personId, 0.1f, 0.2f, 0.3f, 0.4f, score)
 
     private fun photo(uri: String, taken: Long = 0L) = GalleryItem.LocalOnly(
         LocalMediaItem(
@@ -65,7 +65,7 @@ class AddToPersonFacesTest {
     private fun rowOf(uri: String, faces: List<AddToPersonFaceOption>, chosen: String? = null) =
         AddToPersonPhotoRow(item = photo(uri), faces = faces, chosenFaceId = chosen)
 
-    private fun preselect(vararg faces: FaceOnPhoto) =
+    private fun preselect(vararg faces: FaceOnPhotoRecord) =
         AddToPersonFaces.preselect(AddToPersonFaces.options(faces.toList(), named))
 
     @Test
@@ -99,10 +99,10 @@ class AddToPersonFacesTest {
     @Test
     fun `the named people leave out the Unsorted bucket and blank names`() {
         val people = listOf(
-            PersonEntity(id = 1L, userId = "u", displayName = "Anna"),
-            PersonEntity(id = 2L, userId = "u", displayName = "  "),
-            PersonEntity(id = 3L, userId = "u", displayName = null),
-            PersonEntity(id = 4L, userId = "u", displayName = "Unsorted", isOther = true),
+            PersonRecord(id = 1L, userId = "u", displayName = "Anna"),
+            PersonRecord(id = 2L, userId = "u", displayName = "  "),
+            PersonRecord(id = 3L, userId = "u", displayName = null),
+            PersonRecord(id = 4L, userId = "u", displayName = "Unsorted", isOther = true),
         )
         assertEquals(mapOf(1L to "Anna"), AddToPersonFaces.namedPeople(people))
     }

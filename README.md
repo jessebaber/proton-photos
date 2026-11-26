@@ -62,19 +62,22 @@ apksigner verify --print-certs photosforproton-arm64-v8a-release.apk
 
 ## Architecture
 
-Clean architecture in a single module, with strict one-way layer dependencies:
+Clean architecture across two Gradle modules (`:app` and a pure Kotlin `:domain`), with strict one-way layer dependencies:
 
-| Layer | Holds | Depends on |
+| Layer | Paths | Must not reference |
 |---|---|---|
-| **Presentation** | Jetpack Compose screens, ViewModels, navigation, theme | Domain |
-| **Domain** | Entities, repository interfaces, use cases, pure Kotlin, no Android imports | none |
-| **Data** | Drive API client, crypto wrapper, Room database, DataStore, repository implementations, WorkManager workers | Domain |
+| **Domain** (`:domain`) | `domain/**` | Android or `:app`; the compiler enforces this because neither is on the module classpath |
+| **Presentation-side** | `presentation/**`, `navigation/**`, `widget/**` | `eu.akoos.photos.{data,worker,service,crypto}` |
+| **Data-side** | `data/**`, `worker/**`, `service/**`, `crypto/**` | `eu.akoos.photos.{presentation,navigation,widget}` |
+| **Shared helpers** | `util/**` | data-side and presentation-side packages |
+| **Composition root** | `App.kt`, `MainActivity.kt`, `di/**` | no rule |
 
-Hilt binds the Data implementations to the Domain interfaces; every Proton Drive feature lives under `data/repository/drive/` (detailed below).
+`:domain` purity is enforced by the compiler. The rest is enforced by `ArchitectureBoundaryTest` (empty allowlist under `app/src/test/resources/architecture/allowlist.txt`). Hilt binds Data implementations to Domain interfaces; every Proton Drive feature lives under `data/repository/drive/` (detailed below).
 
 ## Project structure
 
 ```
+domain/               Pure Kotlin domain module (entities, repository interfaces, pure use cases)
 app/src/main/kotlin/eu/akoos/photos/
 ├── presentation/     UI: Composables + ViewModels
 │   ├── auth/         Sign-in
@@ -100,11 +103,7 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── common/       Shared composables (ErrorPopup, ConfirmDialog, EmptyState, ThemedSnackbar)
 │   ├── util/         Presentation-layer helpers (formatters, focus helpers)
 │   └── theme/        Colour tokens + palette factories
-├── domain/           Pure domain layer
-│   ├── entity/
-│   ├── repository/   Interfaces
-│   └── usecase/
-├── data/             Implementations + IO
+├── data/             Implementations + IO (domain interfaces live in the `:domain` module)
 │   ├── api/          Retrofit Drive API + DTOs
 │   ├── crypto/       DriveCryptoHelper (ProtonCore wrapper)
 │   ├── db/           Room DAOs / entities / migrations
@@ -177,7 +176,7 @@ Plus the layers around them:
 - `data/api/`: Retrofit interface + DTOs for `/drive/photos/*`, `/drive/v2/*`, block uploads, sharing endpoints.
 - `data/crypto/DriveCryptoHelper.kt`: thin wrapper over `me.proton.core:crypto*` (no custom crypto primitives; PGP delegated entirely to upstream).
 - `data/db/`: Room schema for the local mutation journal (`PhotoListingEntity`, `SyncStateEntity`) with exported schemas + migrations.
-- `domain/usecase/`: `UploadPendingUseCase`, `ReconcileSyncStateUseCase`, `DownloadPhotosUseCase`, `FreeUpSpaceUseCase`, `DeletePhotoUseCase`, `GetGalleryItemsUseCase`, `CategorizeItem`.
+- `:domain` `usecase/`: `UploadPendingUseCase`, `ReconcileSyncStateUseCase`, `DownloadPhotosUseCase`, `FreeUpSpaceUseCase`, `DeletePhotoUseCase`, `GetGalleryItemsUseCase`, `CategorizeItem` (plus people, places, import and metadata interfaces presentation consumes).
 - `worker/`: `SyncWorker`, `AlbumDownloadWorker`, `FreeUpSpaceWorker`, `CachePruneWorker` (WorkManager + foreground service notifications, battery-aware constraints).
 - `presentation/`: Jetpack Compose UI (gallery, viewer, editor, albums, settings, …) and ViewModels.
 

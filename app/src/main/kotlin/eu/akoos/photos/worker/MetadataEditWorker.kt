@@ -42,7 +42,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import eu.akoos.photos.domain.usecase.CloudPhotoReplacement
+import eu.akoos.photos.data.usecase.CloudPhotoReplacement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -64,7 +64,7 @@ import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.CloudSavePhase
 import eu.akoos.photos.domain.usecase.WriteCloudPhotoMetadataUseCase
-import eu.akoos.photos.domain.usecase.WriteSyncedPhotoMetadataUseCase
+import eu.akoos.photos.data.usecase.WriteSyncedPhotoMetadataUseCase
 
 /** What the drain should do with a row whose use case reported a failure. */
 enum class MetadataDrainDecision { DELETE_PERMANENT, KEEP_AND_RETRY, GIVE_UP_AFTER_MAX }
@@ -231,10 +231,11 @@ class MetadataEditWorker @AssistedInject constructor(
             // run's already-uploaded link (null on the first run); onUploaded persists the new link onto
             // this row the moment the upload returns, so a kill before the re-add and trash resumes from
             // that link instead of re-uploading a second copy.
-            val result: RowResult = if (item.deviceUri != null) {
+            val deviceUri = item.deviceUri
+            val result: RowResult = if (deviceUri != null) {
                 when (
                     val r = writeSynced(
-                        item.photo, item.deviceUri, item.newCaptureMs, item.location,
+                        item.photo, deviceUri, item.newCaptureMs, item.location,
                         item.description, item.artist, item.copyright, onPhase,
                         resumeUploadedLinkId = row.newLinkId,
                         onUploaded = { link -> dao.setNewLinkId(row.linkId, link) },

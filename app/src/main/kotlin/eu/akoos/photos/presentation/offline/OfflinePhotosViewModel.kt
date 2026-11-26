@@ -25,7 +25,6 @@
 package eu.akoos.photos.presentation.offline
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,9 +43,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.offline.OfflineStorageManager
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.offline.OfflineStorage
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -60,19 +59,19 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class OfflinePhotosViewModel @Inject constructor(
+    private val settingsStore: SettingsStore,
+    
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val driveRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
-    private val offlineStore: OfflineStorageManager,
+    private val offlineStore: OfflineStorage,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     // Latest primary userId, captured for the thumbnail-decrypt requests below.
     private var primaryUserId: UserId? = null
 
-    private val offlinePinIdsFlow = context.settingsDataStore.data.map {
-        it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-    }
+    private val offlinePinIdsFlow = settingsStore.observe(Settings.OFFLINE_PIN_IDS)
 
     /** Pinned cloud photos in the gallery's own order (newest-first). A pinned item is a
      *  [GalleryItem.CloudOnly] whose linkId is in OFFLINE_PIN_IDS; the merged feed already drops to
@@ -120,7 +119,7 @@ class OfflinePhotosViewModel @Inject constructor(
 
     /**
      * Removes every selected photo from offline storage: drops their ids from
-     * [SettingsKeys.OFFLINE_PIN_IDS] in one edit and deletes each blob, then clears the selection.
+     * [Settings.OFFLINE_PIN_IDS] in one edit and deletes each blob, then clears the selection.
      * The cloud photos themselves are untouched — only the on-device pin and blob go. The [items]
      * flow observes the pin set, so the removed cells drop out on their own.
      */
@@ -128,10 +127,7 @@ class OfflinePhotosViewModel @Inject constructor(
         val snapshot = selection.value
         if (snapshot.isEmpty()) return
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - snapshot
-            }
+            settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current - snapshot }
             snapshot.forEach { offlineStore.delete(it) }
             clearSelection()
         }

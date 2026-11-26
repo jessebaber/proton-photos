@@ -20,7 +20,7 @@ By contributing you agree that your contributions are licensed under GPL-3.0.
 
 ## Tech stack
 
-- Kotlin, single Gradle module (`app/`)
+- Kotlin, two Gradle modules (`:app` and pure Kotlin `:domain`)
 - Jetpack Compose for UI
 - AndroidX Media3 (ExoPlayer) for video
 - Namespace and applicationId: `eu.akoos.photos`
@@ -42,6 +42,7 @@ By contributing you agree that your contributions are licensed under GPL-3.0.
 Run these and make sure they pass:
 
 ```
+./gradlew :domain:test
 ./gradlew :app:assembleDebug
 ./gradlew :app:lintDebug
 ./gradlew :app:testDebugUnitTest
@@ -113,10 +114,22 @@ Every new source file starts with the GPL-3.0 header:
 The repository pins a SHA-256 for every dependency in `gradle/verification-metadata.xml`, and the build verifies it. If you add or change a dependency (a version in `gradle/libs.versions.toml`, a new library, or an AGP, Kotlin, Gradle, or plugin version), regenerate and commit that file with the change:
 
 ```
-./gradlew --write-verification-metadata sha256 help assembleDebug assembleRelease testDebugUnitTest lintDebug
+./gradlew --write-verification-metadata sha256 help :domain:test assembleDebug assembleRelease testDebugUnitTest lintDebug
 ```
 
 Review the diff so only the changed dependency's hashes move. A verification failure you did not cause by a deliberate dependency change means an artifact's bytes differ from what was pinned; investigate it instead of regenerating to force it through.
+
+## Architecture
+
+| Layer | Paths | Must not reference |
+|---|---|---|
+| Domain (`:domain`) | `domain/**` | Android or `:app` (compiler-enforced: neither is on the classpath) |
+| Presentation-side | `presentation/**`, `navigation/**`, `widget/**` | `eu.akoos.photos.{data,worker,service,crypto}` |
+| Data-side | `data/**`, `worker/**`, `service/**`, `crypto/**` | `eu.akoos.photos.{presentation,navigation,widget}` |
+| Shared helpers | `util/**` | data-side and presentation-side packages |
+| Composition root | `App.kt`, `MainActivity.kt`, `di/**` | no rule |
+
+`:domain` purity is enforced by the compiler. `ArchitectureBoundaryTest` enforces the other rows against an empty allowlist under `app/src/test/resources/architecture/allowlist.txt` — the allowlist only shrinks and must stay empty. When presentation consumes a use case, put an interface in `:domain` and the `Impl` in data (bound with Hilt). Upload and cloud-metadata changes that touch EXIF/GPS stripping need the instrumented strip checks before merge.
 
 ## Commit messages
 

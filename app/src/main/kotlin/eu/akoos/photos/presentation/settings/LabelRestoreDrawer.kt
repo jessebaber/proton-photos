@@ -69,8 +69,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.label.LabelCount
-import eu.akoos.photos.data.label.LabelSavedCopy
+import eu.akoos.photos.domain.label.LabelCount
+import eu.akoos.photos.domain.label.LabelSavedCopy
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton

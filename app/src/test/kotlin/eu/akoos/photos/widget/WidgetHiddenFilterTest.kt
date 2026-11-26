@@ -22,10 +22,8 @@
 
 package eu.akoos.photos.widget
 
-import androidx.datastore.preferences.core.mutablePreferencesOf
-import eu.akoos.photos.data.db.entity.CloudAlbumEntity
-import eu.akoos.photos.data.db.entity.PhotoPickerRow
-import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.domain.catalog.CloudAlbumRecord
+import eu.akoos.photos.domain.catalog.PhotoPickerRowRecord
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -51,7 +49,7 @@ class WidgetHiddenFilterTest {
     )
 
     private fun album(linkId: String, cover: String? = null) =
-        CloudAlbumEntity(linkId = linkId, name = linkId, photoCount = 1, coverLinkId = cover)
+        CloudAlbumRecord(linkId = linkId, name = linkId, photoCount = 1, coverLinkId = cover)
 
     // ── the hidden cloud set ─────────────────────────────────────────────────────────────────────
 
@@ -80,13 +78,14 @@ class WidgetHiddenFilterTest {
 
     @Test
     fun `the hidden sets are read from the same settings the gallery's hide filters read`() {
-        val prefs = mutablePreferencesOf(
-            SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS to setOf("one"),
-            SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP to setOf("file:///vault/x.jpg|vaulted"),
-            SettingsKeys.HIDDEN_ALBUM_IDS to setOf("albumH"),
-            SettingsKeys.HIDDEN_FOLDER_NAMES to setOf("Private"),
+        val sets = widgetHiddenSets(
+            individuallyHidden = setOf("one"),
+            hiddenUriCloudIdMap = setOf("file:///vault/x.jpg|vaulted"),
+            hiddenAlbumIds = setOf("albumH"),
+            hiddenFolderNames = setOf("Private"),
+            hiddenAlbumMembers = setOf("member"),
+            vaultedRowCloudIds = listOf("row"),
         )
-        val sets = widgetHiddenSets(prefs, hiddenAlbumMembers = setOf("member"), vaultedRowCloudIds = listOf("row"))
         assertEquals(setOf("one", "vaulted", "member", "row"), sets.cloudIds)
         assertEquals(setOf("albumH"), sets.albumIds)
         assertEquals(setOf("Private"), sets.folderNames)
@@ -94,7 +93,17 @@ class WidgetHiddenFilterTest {
 
     @Test
     fun `no hidden settings at all read as nothing hidden`() {
-        assertEquals(WidgetHiddenSets(), widgetHiddenSets(mutablePreferencesOf(), emptySet(), emptyList()))
+        assertEquals(
+            WidgetHiddenSets(),
+            widgetHiddenSets(
+                individuallyHidden = emptySet(),
+                hiddenUriCloudIdMap = emptySet(),
+                hiddenAlbumIds = emptySet(),
+                hiddenFolderNames = emptySet(),
+                hiddenAlbumMembers = emptySet(),
+                vaultedRowCloudIds = emptyList(),
+            ),
+        )
     }
 
     // ── cloud modes ──────────────────────────────────────────────────────────────────────────────
@@ -135,7 +144,11 @@ class WidgetHiddenFilterTest {
 
     @Test
     fun `the picker never offers a hidden cloud photo`() {
-        val rows = listOf(PhotoPickerRow("a", null), PhotoPickerRow("b", "file:///b"), PhotoPickerRow("c", null))
+        val rows = listOf(
+            PhotoPickerRowRecord("a", null),
+            PhotoPickerRowRecord("b", "file:///b"),
+            PhotoPickerRowRecord("c", null),
+        )
         val visible = visiblePickerRows(rows, WidgetHiddenSets(cloudIds = setOf("b")))
         assertEquals(listOf("a", "c"), visible.map { it.linkId })
     }

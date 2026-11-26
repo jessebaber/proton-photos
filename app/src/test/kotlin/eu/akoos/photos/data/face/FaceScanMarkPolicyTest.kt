@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.data.face
 
-import eu.akoos.photos.util.SourceMiss
+import eu.akoos.photos.data.ml.SourceMiss
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

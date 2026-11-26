@@ -45,8 +45,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.util.sanitizeErrorMessage
-import eu.akoos.photos.data.repository.drive.CloudTrashService
-import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
+import eu.akoos.photos.domain.trash.CloudTrash
+import eu.akoos.photos.domain.thumbnails.ThumbnailDecrypt
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -56,9 +56,9 @@ import javax.inject.Inject
 class TrashViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
-    private val cloudTrashService: CloudTrashService,
+    private val cloudTrash: CloudTrash,
     private val accountManager: AccountManager,
-    private val thumbnailScheduler: ThumbnailDecryptScheduler,
+    private val thumbnailScheduler: ThumbnailDecrypt,
 ) : ViewModel() {
 
     data class UiState(
@@ -204,7 +204,7 @@ class TrashViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val result = runCatching { cloudTrashService.getCloudTrash(userId) }
+            val result = runCatching { cloudTrash.getCloudTrash(userId) }
             result.fold(
                 onSuccess = { items ->
                     _uiState.update {
@@ -261,7 +261,7 @@ class TrashViewModel @Inject constructor(
         if (linkIds.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val result = runCatching { cloudTrashService.restoreFromCloudTrash(userId, linkIds) }
+            val result = runCatching { cloudTrash.restoreFromCloudTrash(userId, linkIds) }
             result.fold(
                 onSuccess = { outcome ->
                     // Drop only the links the server actually restored; keep rejected ones
@@ -312,7 +312,7 @@ class TrashViewModel @Inject constructor(
         if (linkIds.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val result = runCatching { cloudTrashService.deleteFromCloudForever(userId, linkIds) }
+            val result = runCatching { cloudTrash.deleteFromCloudForever(userId, linkIds) }
             result.fold(
                 onSuccess = { outcome ->
                     // Drop only the links the server actually removed; keep rejected ones

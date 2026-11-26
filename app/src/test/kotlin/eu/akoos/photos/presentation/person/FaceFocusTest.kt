@@ -25,7 +25,7 @@ package eu.akoos.photos.presentation.person
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
-import eu.akoos.photos.data.db.dao.FaceOnPhoto
+import eu.akoos.photos.domain.catalog.FaceBoxRecord
 import eu.akoos.photos.presentation.gallery.cropAlignmentFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -38,7 +38,7 @@ import org.junit.Test
 class FaceFocusTest {
 
     private fun face(photo: String, l: Float, t: Float, r: Float, b: Float, score: Float = 0.9f) =
-        FaceOnPhoto(id = "$photo#$l", photoKey = photo, personId = 1L, boxLeft = l, boxTop = t, boxRight = r, boxBottom = b, score = score)
+        FaceBoxRecord(faceId = "$photo#$l", photoKey = photo, left = l, top = t, right = r, bottom = b, personId = 1L, score = score)
 
     @Test
     fun `a photo is centred on the middle of the person's face`() {

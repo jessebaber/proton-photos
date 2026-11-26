@@ -22,6 +22,19 @@
 
 package eu.akoos.photos.data.face
 
+
+import eu.akoos.photos.data.usecase.backupRekeyPairs
+
+import eu.akoos.photos.data.usecase.IncrementalBatch
+
+import eu.akoos.photos.data.usecase.FaceRegroupOutcome
+
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
+
+import eu.akoos.photos.data.usecase.MigrateGuestFaceDataUseCase
+
+import eu.akoos.photos.data.usecase.AutoMergePeopleUseCase
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -62,8 +75,6 @@ import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
-import eu.akoos.photos.domain.usecase.FaceRegroupOutcome
-import eu.akoos.photos.domain.usecase.IncrementalBatch
 import eu.akoos.photos.domain.usecase.clusterFaces
 import eu.akoos.photos.domain.usecase.cosineSimilarity
 import eu.akoos.photos.domain.usecase.REATTACH_MIN_IOU
@@ -72,7 +83,6 @@ import eu.akoos.photos.domain.usecase.bindReattachLabels
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
@@ -103,7 +113,7 @@ import eu.akoos.photos.data.repository.drive.PhotoDownloadService
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
@@ -116,23 +126,23 @@ import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.MlWalkState
 import eu.akoos.photos.util.MlWalkStateStore
 import eu.akoos.photos.util.NetworkObserver
-import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
+import eu.akoos.photos.data.ml.SOURCE_RETRIES_PER_PASS
 import eu.akoos.photos.util.SessionLease
 import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.elapsedFromEpoch
 import eu.akoos.photos.util.epochFromElapsed
-import eu.akoos.photos.util.SourceMiss
-import eu.akoos.photos.util.SourceMissNote
-import eu.akoos.photos.util.SourcePassTally
-import eu.akoos.photos.util.SourceRetryBook
+import eu.akoos.photos.data.ml.SourceMiss
+import eu.akoos.photos.data.ml.SourceMissNote
+import eu.akoos.photos.data.ml.SourcePassTally
+import eu.akoos.photos.data.ml.SourceRetryBook
 import eu.akoos.photos.util.SyncDiagnostics
 import eu.akoos.photos.util.WalkRestart
-import eu.akoos.photos.util.WalkRetryKick
-import eu.akoos.photos.util.retryKickDelayMs
-import eu.akoos.photos.util.settledLocalMiss
-import eu.akoos.photos.util.sourceMissForDownloadFailure
-import eu.akoos.photos.util.sourceMissForUndecodedDownload
-import eu.akoos.photos.util.sourceMissForUndecodedLocal
+import eu.akoos.photos.data.ml.WalkRetryKick
+import eu.akoos.photos.data.ml.retryKickDelayMs
+import eu.akoos.photos.data.ml.settledLocalMiss
+import eu.akoos.photos.data.ml.sourceMissForDownloadFailure
+import eu.akoos.photos.data.ml.sourceMissForUndecodedDownload
+import eu.akoos.photos.data.ml.sourceMissForUndecodedLocal
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -603,9 +613,9 @@ class FaceIndexingScheduler @Inject constructor(
     // use-case's construction to the first walk, by which point the repository graph is built.
     private val galleryItemsProvider: Provider<GetGalleryItemsUseCase>,
     private val clusterFacesUseCase: ClusterFacesUseCase,
-    private val autoMergePeople: eu.akoos.photos.domain.usecase.AutoMergePeopleUseCase,
-    private val migrateGuestFaceData: eu.akoos.photos.domain.usecase.MigrateGuestFaceDataUseCase,
-    private val rekeyPhotoFaces: eu.akoos.photos.domain.usecase.RekeyPhotoFacesUseCase,
+    private val autoMergePeople: eu.akoos.photos.data.usecase.AutoMergePeopleUseCase,
+    private val migrateGuestFaceData: eu.akoos.photos.data.usecase.MigrateGuestFaceDataUseCase,
+    private val rekeyPhotoFaces: eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase,
     private val deviceHealth: DeviceHealthPolicy,
     private val mlWalkGate: eu.akoos.photos.util.MlWalkGate,
     // Only for the fenced writes (a photo's faces with its scan marker, a batch of markers, a reattach), each
@@ -909,7 +919,7 @@ class FaceIndexingScheduler @Inject constructor(
             // no cloud copy).
             userId?.let { acct ->
                 val syncedPairs = items.filterIsInstance<GalleryItem.Synced>().map { it.local.uri to it.cloud.linkId }
-                eu.akoos.photos.domain.usecase.backupRekeyPairs(syncedPairs, alreadyScanned).forEach { (oldKey, newKey) ->
+                eu.akoos.photos.data.usecase.backupRekeyPairs(syncedPairs, alreadyScanned).forEach { (oldKey, newKey) ->
                     runCatching {
                         if (rekeyPhotoFaces.invoke(acct.id, oldKey, newKey) { writeFence.allows(passToken) }) alreadyScanned.add(newKey)
                     }.onFailure { Log.w(TAG, "face rekey on backup failed: ${it.message}") }

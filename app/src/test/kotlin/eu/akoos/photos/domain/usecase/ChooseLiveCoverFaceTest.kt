@@ -28,6 +28,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
+import eu.akoos.photos.data.usecase.chooseLiveCoverFace
 
 class ChooseLiveCoverFaceTest {
 

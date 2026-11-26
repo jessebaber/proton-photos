@@ -51,9 +51,9 @@ import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.ImportFailureKind
-import eu.akoos.photos.domain.usecase.StageImportUseCase
+import eu.akoos.photos.data.usecase.StageImportUseCase
 import eu.akoos.photos.domain.usecase.StagePhase
-import eu.akoos.photos.domain.usecase.StageProgress
+import eu.akoos.photos.data.usecase.StageProgress
 import eu.akoos.photos.util.ImportEventLog
 import java.util.UUID
 

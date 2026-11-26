@@ -22,22 +22,23 @@
 
 package eu.akoos.photos.presentation.metadata
 
+import eu.akoos.photos.domain.upload.LocalOverwrite
+import eu.akoos.photos.domain.catalog.LocationCatalog
+import eu.akoos.photos.domain.vault.HiddenVaultEdit
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.metadata.FilenameDate
 import android.content.Context
 import android.content.IntentSender
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.PhotoLocationDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.hidden.HiddenStorageManager
-import eu.akoos.photos.data.hidden.HiddenVaultEditor
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -52,6 +53,7 @@ import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.domain.catalog.LocationCatalog
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.forEachSqlChunk
@@ -296,17 +298,19 @@ internal fun dateOverridesAfterEdit(
  * The date and place write the moment their picker closes; a text tag has no such moment, so each
  * text field carries its own apply, and [applyText] is the only thing that writes it. Every write is
  * reflected in the shown state, so the editor never has a separate commit step; foreign-file writes
- * the OS gates raise [MetadataWriteResult.NeedsPermission], which are gathered into one system
+ * the OS gates raise [MetadataWriteResult.NeedsPermission<IntentSender>], which are gathered into one system
  * consent request and replayed once the screen relays the user's approval.
  */
 @HiltViewModel
 class MetadataEditorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val writeMetadata: WriteLocalPhotoMetadataUseCase,
+    private val writeMetadata: WriteLocalPhotoMetadataUseCase<IntentSender>,
     private val accountManager: AccountManager,
-    private val photoLocationDao: PhotoLocationDao,
-    private val hiddenStorage: HiddenStorageManager,
-    private val hiddenVaultEditor: HiddenVaultEditor,
+    private val locationCatalog: LocationCatalog,
+    private val hiddenStorage: HiddenStorage,
+    private val hiddenVaultEditor: HiddenVaultEdit,
+    private val localOverwrite: LocalOverwrite,
+    private val settingsStore: SettingsStore,
     private val localMediaRepository: LocalMediaRepository,
     private val cloudSaveController: CloudMetadataSaveController,
 ) : ViewModel() {
@@ -347,7 +351,7 @@ class MetadataEditorViewModel @Inject constructor(
      *  subtype records under its own key (see [staleLocationIds]). */
     private var boundItems: List<GalleryItem> = emptyList()
 
-    /** The write awaiting a permission retry after [MetadataWriteResult.NeedsPermission], plus the
+    /** The write awaiting a permission retry after [MetadataWriteResult.NeedsPermission<IntentSender>], plus the
      *  exact URIs still to retry once the screen relays the user's consent. */
     private var pendingAction: PendingAction? = null
     private var pendingUris: List<String> = emptyList()
@@ -879,7 +883,7 @@ class MetadataEditorViewModel @Inject constructor(
                 for (uri in uris) {
                     when (val result = writeOne(action, uri)) {
                         is MetadataWriteResult.Success -> succeeded += uri
-                        is MetadataWriteResult.NeedsPermission -> needsPermission += uri to result.intentSender
+                        is MetadataWriteResult.NeedsPermission<IntentSender> -> needsPermission += uri to result.intentSender
                         is MetadataWriteResult.Failed -> failedCount++
                     }
                 }
@@ -947,7 +951,7 @@ class MetadataEditorViewModel @Inject constructor(
         }
     }
 
-    private suspend fun writeOne(action: PendingAction, uri: String): MetadataWriteResult =
+    private suspend fun writeOne(action: PendingAction, uri: String): MetadataWriteResult<IntentSender> =
         when (action) {
             is PendingAction.Date -> writeMetadata.writeCaptureDate(uri, action.ms)
             // The delta is shared, the instant is not: each file is written its own date plus the
@@ -1081,10 +1085,8 @@ class MetadataEditorViewModel @Inject constructor(
         val columnOnly = columnOnlyDateEdits(boundItems, captureMsByUri) { hiddenStorage.isHiddenUri(it) }
         val modifiedByUri = columnOnly.keys.associateWith { localMediaRepository.queryByUri(it)?.dateModified }
         runCatching {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
-                val next = dateOverridesAfterEdit(current, captureMsByUri, columnOnly, modifiedByUri)
-                if (next != current) prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = next
+            settingsStore.update(Settings.DOWNLOAD_DATE_OVERRIDES) { current ->
+                dateOverridesAfterEdit(current, captureMsByUri, columnOnly, modifiedByUri)
             }
         }
     }
@@ -1115,11 +1117,8 @@ class MetadataEditorViewModel @Inject constructor(
         if (captureMsByUri.isEmpty()) return
         val modifiedByUri = captureMsByUri.keys.associateWith { localMediaRepository.queryByUri(it)?.dateModified }
         runCatching {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
-                CaptureDateOverride.upsert(current, captureMsByUri, modifiedByUri)?.let {
-                    prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = it
-                }
+            settingsStore.update(Settings.DOWNLOAD_DATE_OVERRIDES) { current ->
+                CaptureDateOverride.upsert(current, captureMsByUri, modifiedByUri) ?: current
             }
         }
     }
@@ -1148,8 +1147,8 @@ class MetadataEditorViewModel @Inject constructor(
         val ids = staleLocationIds(boundItems, uris.toSet())
         if (ids.isEmpty()) return
         // Signed out, drop the row from the local partition so the backfill re-reads the new place.
-        val userId = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-        runCatching { ids.forEachSqlChunk { photoLocationDao.deleteByIds(userId, it) } }
+        val userId = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+        runCatching { ids.forEachSqlChunk { locationCatalog.deleteLocationsByIds(userId, it) } }
     }
 
     /** Current coordinates on the same resolution order the viewer's details use: a device image reads
@@ -1166,9 +1165,9 @@ class MetadataEditorViewModel @Inject constructor(
                 withContext(Dispatchers.IO) { PhotoGpsResolver.localGps(context, item.local.uri, mime, exif) }
             is GalleryItem.Synced ->
                 withContext(Dispatchers.IO) { PhotoGpsResolver.localGps(context, item.local.uri, mime, exif) }
-                    ?: userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                    ?: userId?.let { locationCatalog.locationForPhoto(it, item.cloud.linkId)?.let { loc -> loc.latitude to loc.longitude } }
             is GalleryItem.CloudOnly ->
-                userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                userId?.let { locationCatalog.locationForPhoto(it, item.cloud.linkId)?.let { loc -> loc.latitude to loc.longitude } }
         }
     }
 }

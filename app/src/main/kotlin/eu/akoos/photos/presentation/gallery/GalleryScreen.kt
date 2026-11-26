@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.domain.vault.VaultHideSplit
+
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -29,7 +31,6 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.glassSource
@@ -37,8 +38,6 @@ import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
@@ -141,6 +140,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import eu.akoos.photos.di.mediaPresentationEntryPoint
+import eu.akoos.photos.domain.settings.Settings
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -424,12 +425,12 @@ fun GalleryScreen(
     // whichever grid is actually showing. The fixed grid keeps using [gridState] unchanged.
     val staggeredState = rememberLazyStaggeredGridState()
     val mosaicGrid by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.MOSAIC_GRID)
     }.collectAsState(initial = false)
     // Opt-in: keep each bottom tab where it was last scrolled when switching between them, so only a
     // re-tap of the already-active tab returns to the top. Off by default, so any tab tap resets to top.
     val keepScrollOnTabSwitch by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] == true }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.KEEP_SCROLL_ON_TAB_SWITCH)
     }.collectAsStateWithLifecycle(false)
     // The scroll state the visible Photos grid is driven by; everything below observes this so the
     // mosaic path is no longer inert.
@@ -469,8 +470,8 @@ fun GalleryScreen(
     LaunchedEffect(Unit) {
         if (landingTabApplied) return@LaunchedEffect
         landingTabApplied = true
-        val landing = context.settingsDataStore.data
-            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 1) }
+        val landing = mediaPresentationEntryPoint(context).settingsStore()
+            .observe(Settings.LANDING_TAB).map { it.coerceIn(0, 1) }
             .first()
         if (landing != selectedTab) {
             selectedTab = landing
@@ -482,7 +483,7 @@ fun GalleryScreen(
     // has to stay current, so picking another landing tab in Settings retargets back straight away
     // rather than at the next start. Initial 0 matches the seeding default.
     val landingTab by remember {
-        context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 1) }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.LANDING_TAB).map { it.coerceIn(0, 1) }
     }.collectAsState(initial = 0)
     // The Albums view filter, and whether it is decided for the current stay on the Albums page (by
     // the entry effect below, or by a pick). Both are saved, so the gallery rebuilt when a pushed screen
@@ -496,7 +497,7 @@ fun GalleryScreen(
         albumFilterSettled = true
         if (picked != AlbumDisplayFilter.Excluded) {
             tabScope.launch {
-                context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
+                mediaPresentationEntryPoint(context).settingsStore().set(Settings.ALBUMS_LAST_FILTER, picked.ordinal)
             }
         }
     }
@@ -504,17 +505,23 @@ fun GalleryScreen(
     // value, as one snapshot. Null until the store delivers, so the entry effect below can wait for the
     // stored values instead of resolving from placeholders.
     val albumsFilterPrefs by remember {
-        context.settingsDataStore.data.map {
+        val store = mediaPresentationEntryPoint(context).settingsStore()
+        kotlinx.coroutines.flow.combine(
+            store.observe(Settings.ALBUMS_DEFAULT_FILTER),
+            store.observe(Settings.ALBUMS_REMEMBER_LAST_FILTER),
+            store.observe(Settings.ALBUMS_LAST_FILTER),
+        ) { def, rem, last ->
             AlbumsFilterPrefs(
-                defaultOrdinal = it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0,
-                rememberLast = it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false,
-                lastOrdinal = it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0,
+                defaultOrdinal = def,
+                rememberLast = rem,
+                lastOrdinal = last,
             )
         }
     }.collectAsState(initial = null)
     // Only drives the sheet's selection; the grid reads this key on its own side.
     val albumsSortMode by remember {
-        context.settingsDataStore.data.map { AlbumSortMode.fromOrdinal(it[SettingsKeys.ALBUMS_SORT_MODE]) }
+        mediaPresentationEntryPoint(context).settingsStore().observe(Settings.ALBUMS_SORT_MODE)
+            .map { AlbumSortMode.fromOrdinal(it) }
     }.collectAsState(initial = AlbumSortMode.Default)
     // How many album covers sit per row on the Albums tab (default 2). Seeded from the synchronous
     // boot mirror so returning to the tab opens at the stored size on the first frame instead of
@@ -759,7 +766,7 @@ fun GalleryScreen(
         if (state.permissionState != PermissionState.Granted) return@LaunchedEffect
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@LaunchedEffect
         val prompted = runCatching {
-            context.settingsDataStore.data.first()[SettingsKeys.MANAGE_MEDIA_PROMPTED] == true
+            mediaPresentationEntryPoint(context).settingsStore().get(Settings.MANAGE_MEDIA_PROMPTED)
         }.getOrDefault(false)
         if (prompted) return@LaunchedEffect
         if (android.provider.MediaStore.canManageMedia(context)) return@LaunchedEffect
@@ -771,7 +778,7 @@ fun GalleryScreen(
             }
         }
         runCatching {
-            context.settingsDataStore.edit { it[SettingsKeys.MANAGE_MEDIA_PROMPTED] = true }
+            mediaPresentationEntryPoint(context).settingsStore().set(Settings.MANAGE_MEDIA_PROMPTED, true)
         }
     }
     // Upload / download / delete failures originate as raw exception messages —
@@ -903,7 +910,7 @@ fun GalleryScreen(
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
     // rather than a flag is what lets the sheet describe the photos the tap was made on.
     var hideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+        mutableStateOf<VaultHideSplit?>(null)
     }
     val multiDeleteState = state.multiDeleteState
 
@@ -1645,12 +1652,12 @@ fun GalleryScreen(
             sortMode = albumsSortMode,
             onViewModeChange = { picked ->
                 tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_VIEW_MODE] = picked.ordinal }
+                    mediaPresentationEntryPoint(context).settingsStore().set(Settings.ALBUMS_VIEW_MODE, picked.ordinal)
                 }
             },
             onSortModeChange = { picked ->
                 tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SORT_MODE] = picked.ordinal }
+                    mediaPresentationEntryPoint(context).settingsStore().set(Settings.ALBUMS_SORT_MODE, picked.ordinal)
                 }
             },
             onOpenMoreSettings = onOpenAlbumsSettings,

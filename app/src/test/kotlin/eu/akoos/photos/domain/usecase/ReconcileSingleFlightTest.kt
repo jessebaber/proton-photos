@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ReconcileSyncStateUseCaseImpl
+
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -136,7 +138,7 @@ class ReconcileSingleFlightTest {
         val listing = mockk<PhotoListingDao>()
         coEvery { listing.getOwnStreamPairingRows(any()) } returns emptyList()
         val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
-        return ReconcileSyncStateUseCase(localRepo, mockk<DrivePhotoRepository>(relaxed = true), syncStateRepo, listing, context, scope)
+        return ReconcileSyncStateUseCaseImpl(localRepo, mockk<DrivePhotoRepository>(relaxed = true), syncStateRepo, listing, context, scope)
     }
 
     @Test

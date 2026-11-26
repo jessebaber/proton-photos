@@ -25,14 +25,15 @@ package eu.akoos.photos.util
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.domain.catalog.LocationCatalog
+import eu.akoos.photos.domain.entity.isUsableGpsFix
 import kotlinx.coroutines.CancellationException
 
 /**
  * Single source of the coordinate ladder the viewer's details place row and the metadata editor's
  * place field both resolve: a device image keeps GPS in its EXIF, a device video in its ISO 6709
  * container tag, and a backed-up / cloud photo in the stored fix the map backfill records
- * ([PhotoLocationEntity]). Pure or context-taking, so it holds no ViewModel state.
+ * (photo locations). Pure or context-taking, so it holds no ViewModel state.
  */
 object PhotoGpsResolver {
 
@@ -68,7 +69,7 @@ object PhotoGpsResolver {
         }.getOrNull()
         val lat = meta?.gpsLatitude ?: return null
         val lng = meta?.gpsLongitude ?: return null
-        return (lat to lng).takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng) }
+        return (lat to lng).takeIf { isUsableGpsFix(lat, lng) }
     }
 
     /**
@@ -102,7 +103,7 @@ object PhotoGpsResolver {
         val m = ISO_6709.find(value) ?: return null
         val lat = m.groupValues[1].toDoubleOrNull() ?: return null
         val lng = m.groupValues[2].toDoubleOrNull() ?: return null
-        return (lat to lng).takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng) }
+        return (lat to lng).takeIf { isUsableGpsFix(lat, lng) }
     }
 
     /**
@@ -110,12 +111,12 @@ object PhotoGpsResolver {
      * has not been located yet. The caller resolves the primary user, so no account state lives here.
      */
     suspend fun cloudGps(
-        dao: PhotoLocationDao,
+        locations: LocationCatalog,
         userId: String,
         linkId: String,
     ): Pair<Double, Double>? {
-        val row = runCatching { dao.getById(userId, linkId) }.getOrNull() ?: return null
+        val row = runCatching { locations.locationForPhoto(userId, linkId) }.getOrNull() ?: return null
         return (row.latitude to row.longitude)
-            .takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(row.latitude, row.longitude) }
+            .takeIf { isUsableGpsFix(row.latitude, row.longitude) }
     }
 }

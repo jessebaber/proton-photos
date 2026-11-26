@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CarryOverToReplacement
+import eu.akoos.photos.data.usecase.CloudPhotoExifRewriter
+import eu.akoos.photos.data.usecase.WriteSyncedPhotoMetadataUseCase
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.mockk.coVerify
@@ -52,6 +55,7 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.security.MessageDigest
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 
 /**
  * Orchestration + safety test for [WriteSyncedPhotoMetadataUseCase]. A Synced edit replaces the cloud

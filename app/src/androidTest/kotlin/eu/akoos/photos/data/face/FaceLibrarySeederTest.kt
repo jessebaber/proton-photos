@@ -47,6 +47,7 @@ import java.nio.ByteOrder
 import java.util.Random
 import kotlin.math.pow
 import kotlin.math.sqrt
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
 
 /**
  * Writes a synthetic big face library into the installed app's own database, so the grouping of a
@@ -361,7 +362,7 @@ class FaceLibrarySeederTest {
     }
 
     /**
-     * Times [eu.akoos.photos.domain.usecase.ClusterFacesUseCase.recountPhotoCounts] over the stored library: zeroes
+     * Times [eu.akoos.photos.data.usecase.ClusterFacesUseCase.recountPhotoCounts] over the stored library: zeroes
      * every cached photo count first, recounts, and compares the result with a direct count of each person's
      * distinct photos. Needs the app process stopped and a DEBUG build installed (a release build renames the class).
      */
@@ -377,7 +378,7 @@ class FaceLibrarySeederTest {
             assertTrue("no faces stored", account != null)
             account!!
             db.openHelper.writableDatabase.execSQL("UPDATE person SET faceCount = 0 WHERE userId = ?", arrayOf(account))
-            val cluster = eu.akoos.photos.domain.usecase.ClusterFacesUseCase(
+            val cluster = eu.akoos.photos.data.usecase.ClusterFacesUseCase(
                 db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
                 db.personCoverDao(), db.clusterSummaryDao(), db,
             )

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.worker
 
+import android.app.PendingIntent
 import androidx.work.NetworkType
 import eu.akoos.photos.presentation.settings.FreeUpInterval
 import org.junit.Assert.assertEquals

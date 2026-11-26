@@ -24,11 +24,13 @@
 
 package eu.akoos.photos.presentation.map
 
+import eu.akoos.photos.domain.thumbnails.ThumbnailUrls
+
+import eu.akoos.photos.domain.location.LocalExifBackfill
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import eu.akoos.photos.data.repository.LocalExifBackfillScheduler
-import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -58,10 +60,10 @@ import javax.inject.Inject
 @HiltViewModel
 class MapViewModel @Inject constructor(
     private val accountManager: AccountManager,
-    private val localExifBackfillScheduler: LocalExifBackfillScheduler,
+    private val localExifBackfill: LocalExifBackfill,
     private val drivePhotoRepository: DrivePhotoRepository,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val thumbnailUrlStore: ThumbnailUrlStore,
+    private val thumbnailUrls: ThumbnailUrls,
     observePlaces: ObservePlacesUseCase,
 ) : ViewModel() {
 
@@ -75,7 +77,7 @@ class MapViewModel @Inject constructor(
      * the flow, and each cloud cover gets its freshly-decrypted URL stamped on, so a cloud-only cover has a
      * source again and a decrypt that lands later repaints the pin.
      */
-    val pins: StateFlow<List<MapPin>> = combine(places, thumbnailUrlStore.urls) { data, urls ->
+    val pins: StateFlow<List<MapPin>> = combine(places, thumbnailUrls.urls) { data, urls ->
         data?.cities.orEmpty().map { city ->
             MapPin(
                 id = "city:${city.countryCode}:${city.city}",
@@ -156,7 +158,7 @@ class MapViewModel @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first()
             // respectHealthGate = false: the user opened the map and wants their pins now, so the walk
             // runs even on a low battery instead of being deferred like the background sync's call.
-            withContext(Dispatchers.IO) { localExifBackfillScheduler.backfillAll(userId, respectHealthGate = false) }
+            withContext(Dispatchers.IO) { localExifBackfill.backfillAll(userId, respectHealthGate = false) }
         }
     }
 

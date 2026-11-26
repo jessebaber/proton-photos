@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.common
 
-import eu.akoos.photos.data.hidden.HiddenFolderRecords
+import eu.akoos.photos.domain.vault.HideConfirmSource
 
 /**
  * Which sentences a hide confirmation is entitled to say about one selection.
@@ -50,14 +50,14 @@ data class HideConfirmWording(
  * describes THESE photos rather than what a hide does in general.
  *
  * Pure: no Context, no resources, no coroutines. The halves come from
- * [HiddenFolderRecords.hideSplit], which is the same decision the hide itself follows, so a
+ * [HiddenFolders.hideSplit], which is the same decision the hide itself follows, so a
  * selection can never be told one thing and have another done to it. The Drive-copy count is read off
  * the pairing each target carries into the vault, which is the very thing a reveal transplants back,
  * so the promise made here is the one the reveal keeps.
  */
-fun hideConfirmWording(split: HiddenFolderRecords.HideSplit): HideConfirmWording =
+fun hideConfirmWording(split: HideConfirmSource): HideConfirmWording =
     HideConfirmWording(
-        vaultCount = split.vaultable.size,
-        cloudCopyCount = split.vaultable.count { it.cloudLinkId != null },
-        cloudOnlyCount = split.cloudLinkIds.size,
+        vaultCount = split.vaultCount,
+        cloudCopyCount = split.cloudCopyCount,
+        cloudOnlyCount = split.cloudOnlyCount,
     )

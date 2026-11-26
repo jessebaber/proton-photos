@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.domain.catalog.PersonRecord
+
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -44,12 +46,18 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.ObservePeopleUseCaseImpl
 
 /**
  * The named-only people stream gives the surfaces that keep named people only exactly what the full stream gave
  * them once filtered the same way: the same people, in the same order, ties, blank names and the Unsorted bucket
  * included, and the single-person stream gives the row the full stream held for that id.
  */
+
+private fun List<PersonEntity>.toRecords(): List<PersonRecord> = map {
+    PersonRecord(it.id, it.userId, it.displayName, it.coverFaceId, it.faceCount, it.updatedAt, it.isOther)
+}
+
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class NamedPeopleStreamDbTest {
@@ -119,14 +127,14 @@ class NamedPeopleStreamDbTest {
             all.filter { !it.isOther && !it.displayName.isNullOrBlank() }.map { it.id },
             named.filter { !it.isOther && !it.displayName.isNullOrBlank() }.map { it.id },
         )
-        assertEquals(namedPeopleCount(all), namedPeopleCount(named))
+        assertEquals(namedPeopleCount(all.toRecords()), namedPeopleCount(named.toRecords()))
         assertTrue(named.none { it.displayName.isNullOrEmpty() || it.userId != acct })
     }
 
     @Test
     fun `the named summaries are the full summaries filtered by name`() = runBlocking {
         val feed = seed()
-        val people = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())
+        val people = ObservePeopleUseCaseImpl(db.personDao(), db.faceDao(), db.personManualPhotoDao())
 
         val full = people(user, flowOf(feed)).first().filter { !it.displayName.isNullOrBlank() }
         val named = people(user, flowOf(feed), namedOnly = true).first().filter { !it.displayName.isNullOrBlank() }

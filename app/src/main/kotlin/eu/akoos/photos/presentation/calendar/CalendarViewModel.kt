@@ -24,6 +24,18 @@
 
 package eu.akoos.photos.presentation.calendar
 
+import eu.akoos.photos.domain.thumbnails.ThumbnailUrls
+
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.LocationCatalog
+
+import eu.akoos.photos.domain.catalog.DayMetaRecord
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -40,12 +52,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.db.dao.DayMetaDao
-import eu.akoos.photos.data.db.entity.DayMetaEntity
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.presentation.util.isoDateFormat
@@ -57,7 +63,7 @@ import java.util.Locale
 import javax.inject.Inject
 
 /**
- * Buckets [GalleryItem]s by ISO date and overlays user-authored [DayMetaEntity] so the
+ * Buckets [GalleryItem]s by ISO date and overlays user-authored [DayMetaRecord] so the
  * Calendar grid knows for each day:
  *  - the auto-picked or user-picked representative thumbnail,
  *  - the day's total photo + video count.
@@ -76,16 +82,15 @@ import javax.inject.Inject
 class CalendarViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
-    private val dayMetaDao: DayMetaDao,
-    private val thumbnailUrlStore: ThumbnailUrlStore,
+    private val locationCatalog: LocationCatalog,
+    private val thumbnailUrls: ThumbnailUrls,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     /** Hidden vault filter — Calendar grid was leaking days that contained only hidden
      *  photos. Same DataStore key the gallery uses. */
-    private val hiddenUrisFlow = context.settingsDataStore.data.map {
-        it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    private val hiddenUrisFlow = settingsStore.observe(Settings.HIDDEN_PHOTO_URIS)
 
     private val _uiState = MutableStateFlow(CalendarUiState())
     val uiState: StateFlow<CalendarUiState> = _uiState.asStateFlow()
@@ -103,14 +108,14 @@ class CalendarViewModel @Inject constructor(
             try {
                 accountManager.getPrimaryUserId()
                     .flatMapLatest { userId ->
-                        primaryUserId = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+                        primaryUserId = userId?.id ?: LOCAL_PARTITION
                         // Build the month grid from the data sources only, so a thumbnail-decrypt
                         // (store change) does not re-run the heavier buildMonths walk. Signed out the
                         // grid is built from the device's own media and the day-meta overlay reads the
                         // local partition, so a guest's day annotations show on the calendar too.
                         val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
                             else getGalleryItems.invoke(userId)
-                        val metasFlow = dayMetaDao.observeAll(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                        val metasFlow = locationCatalog.observeAllDayMeta(userId?.id ?: LOCAL_PARTITION)
                         combine(
                             libraryFlow,
                             metasFlow,
@@ -132,7 +137,7 @@ class CalendarViewModel @Inject constructor(
                     // store's freshly-decrypted URL onto every cloud-only day cover, live, so a
                     // decrypt that lands after the grid built fills the tile. This is a cheap copy
                     // per day, not a rebuild of the grid.
-                    .combine(thumbnailUrlStore.urls) { months, urls -> overlayCovers(months, urls) }
+                    .combine(thumbnailUrls.urls) { months, urls -> overlayCovers(months, urls) }
                     .collect { months ->
                         _uiState.update { it.copy(
                             isLoading = false,
@@ -235,8 +240,8 @@ class CalendarViewModel @Inject constructor(
         // description of a row the bias filtered out; the table is small (one row per annotated
         // day), so loading all of it is cheap and correct.
         val uid = primaryUserId
-        val metaByDate: Map<String, DayMetaEntity> = if (uid != null) {
-            runCatching { dayMetaDao.getAll(uid) }.getOrDefault(emptyList()).associateBy { it.date }
+        val metaByDate: Map<String, DayMetaRecord> = if (uid != null) {
+            runCatching { locationCatalog.getAllDayMeta(uid) }.getOrDefault(emptyList()).associateBy { it.date }
         } else {
             emptyMap()
         }
@@ -273,7 +278,7 @@ class CalendarViewModel @Inject constructor(
 
     private fun buildMonths(
         items: List<GalleryItem>,
-        metas: List<DayMetaEntity>,
+        metas: List<DayMetaRecord>,
     ): List<MonthBucket> {
         if (items.isEmpty()) {
             // With no photos at all we still want SOMETHING to show — render the current

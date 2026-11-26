@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CarryOverToReplacement
+import eu.akoos.photos.data.usecase.CloudPhotoReplacement
 import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider

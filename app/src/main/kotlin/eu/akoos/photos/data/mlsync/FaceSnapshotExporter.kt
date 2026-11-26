@@ -44,7 +44,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
-import eu.akoos.photos.widget.widgetHiddenSets
+import eu.akoos.photos.domain.vault.HiddenCloudIds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -313,7 +313,12 @@ class FaceSnapshotExporter internal constructor(
             albumMembers += appDatabase.albumPhotoMembershipDao().getPhotoLinkIds(albumLinkId)
         }
         val vaultedRowCloudIds = appDatabase.syncStateDao().getVaulted(account).mapNotNull { it.cloudFileId }
-        return widgetHiddenSets(prefs, albumMembers, vaultedRowCloudIds).cloudIds
+        return HiddenCloudIds.fromParts(
+            individuallyHidden = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS].orEmpty(),
+            hiddenAlbumMembers = albumMembers,
+            hiddenUriCloudIdEntries = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP].orEmpty(),
+            vaultedRowCloudIds = vaultedRowCloudIds,
+        )
     }
 
     /** Every named person's id with the name a snapshot carries for them, what a face's person resolves to. */

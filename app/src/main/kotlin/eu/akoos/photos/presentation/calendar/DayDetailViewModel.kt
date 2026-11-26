@@ -24,6 +24,16 @@
 
 package eu.akoos.photos.presentation.calendar
 
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.LocationCatalog
+
+import eu.akoos.photos.domain.catalog.DayMetaRecord
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -40,11 +50,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.db.dao.DayMetaDao
-import eu.akoos.photos.data.db.entity.DayMetaEntity
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.presentation.util.isoDateFormat
@@ -64,7 +69,8 @@ import javax.inject.Inject
 class DayDetailViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
-    private val dayMetaDao: DayMetaDao,
+    private val locationCatalog: LocationCatalog,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -75,9 +81,7 @@ class DayDetailViewModel @Inject constructor(
     /** Hidden vault filter — without this filter the Day detail screen and its
      *  metadata-edit pickers would surface hidden photos by date match. Same DataStore
      *  key the gallery uses. */
-    private val hiddenUrisFlow = context.settingsDataStore.data.map {
-        it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    private val hiddenUrisFlow = settingsStore.observe(Settings.HIDDEN_PHOTO_URIS)
 
     init {
         viewModelScope.launch {
@@ -93,8 +97,8 @@ class DayDetailViewModel @Inject constructor(
                             // guest can annotate a day the same as a signed-in user.
                             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
                                 else getGalleryItems.invoke(userId)
-                            val metaFlow = dayMetaDao.observeByDate(
-                                userId?.id ?: PhotoLocationEntity.LOCAL_USER, date,
+                            val metaFlow = locationCatalog.observeDayMetaByDate(
+                                userId?.id ?: LOCAL_PARTITION, date,
                             )
                             combine(
                                 libraryFlow,
@@ -162,19 +166,19 @@ class DayDetailViewModel @Inject constructor(
         }
     }
 
-    private fun upsertWith(block: (DayMetaEntity?) -> DayMetaEntity) {
+    private fun upsertWith(block: (DayMetaRecord?) -> DayMetaRecord) {
         val date = _selectedDate.value ?: return
         viewModelScope.launch {
             // A guest writes under the local partition, a signed-in user under their own id, so the
             // edit persists either way (was dropped for a guest before).
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val current = dayMetaDao.getByDate(account, date)
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val current = locationCatalog.getDayMetaByDate(account, date)
             val next = block(current).copy(date = date, userId = account)
-            dayMetaDao.upsert(next)
+            locationCatalog.upsertDayMeta(next)
         }
     }
 
-    private fun blank(): DayMetaEntity = DayMetaEntity(
+    private fun blank(): DayMetaRecord = DayMetaRecord(
         date = _selectedDate.value ?: "",
         userId = "",
     )
@@ -195,14 +199,14 @@ data class DayDetailUiState(
     val isLoading: Boolean = true,
     val date: String? = null,
     val items: List<GalleryItem> = emptyList(),
-    val meta: DayMetaEntity? = null,
+    val meta: DayMetaRecord? = null,
 )
 
 /** Combined collector payload — Triple ran out of slots once the hidden-URIs Set joined
  *  the day's items + meta. Named fields make the consumer site read clearly. */
 private data class DayLoadData(
     val items: List<GalleryItem>,
-    val meta: DayMetaEntity?,
+    val meta: DayMetaRecord?,
     val date: String?,
     val hiddenUris: Set<String>,
 )

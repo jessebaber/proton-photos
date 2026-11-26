@@ -24,11 +24,15 @@
 
 package eu.akoos.photos.presentation.people
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.presentation.gallery.toPersonUi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -38,12 +42,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
-import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
-import eu.akoos.photos.presentation.gallery.PersonUi
-import eu.akoos.photos.presentation.gallery.toPersonUi
 import javax.inject.Inject
 
 /**
@@ -58,16 +56,17 @@ class PeopleViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     // People resolve only while the master AI switch and the per-feature face switch are both on; with
     // either off, or signed out, the screen shows nothing and reads no face data. The null seed marks
     // the load before the first emission, so the screen shows a skeleton instead of the empty state.
     val people: StateFlow<List<PersonUi>?> = combine(
-        context.settingsDataStore.data
-            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-            .distinctUntilChanged(),
+        combine(
+            settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+            settingsStore.observe(Settings.FACE_ENABLED),
+        ) { ai, face -> ai && face }.distinctUntilChanged(),
         accountManager.getPrimaryUserId(),
     ) { faceOn, userId -> faceOn to userId }
         .flatMapLatest { (faceOn, userId) ->

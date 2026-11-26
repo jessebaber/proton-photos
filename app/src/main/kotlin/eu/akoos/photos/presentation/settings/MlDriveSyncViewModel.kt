@@ -26,13 +26,12 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import eu.akoos.photos.data.mlsync.FaceSnapshotMode
-import eu.akoos.photos.data.mlsync.MlDriveFileKind
-import eu.akoos.photos.data.mlsync.MlDriveResult
-import eu.akoos.photos.data.mlsync.MlRemoteSnapshot
-import eu.akoos.photos.data.mlsync.MlSyncController
-import eu.akoos.photos.data.mlsync.MlSyncStart
-import eu.akoos.photos.data.mlsync.MlSyncState
+import eu.akoos.photos.domain.ml.FaceSnapshotMode
+import eu.akoos.photos.domain.ml.MlDriveFileKind
+import eu.akoos.photos.domain.ml.MlRemoteSnapshot
+import eu.akoos.photos.domain.ml.MlSync
+import eu.akoos.photos.domain.ml.MlSyncStart
+import eu.akoos.photos.domain.ml.MlSyncState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,7 +85,7 @@ internal sealed interface MlRestoreSheet {
  */
 @HiltViewModel
 class MlDriveSyncViewModel @Inject constructor(
-    private val controller: MlSyncController,
+    private val controller: MlSync,
     private val accountManager: AccountManager,
 ) : ViewModel() {
 
@@ -236,21 +235,19 @@ class MlDriveSyncViewModel @Inject constructor(
         _restoreSheet.value = MlRestoreSheet.Hidden
     }
 
-    private suspend fun listedSheet(userId: UserId): MlRestoreSheet =
-        when (val listed = controller.listRemote(userId)) {
-            is MlDriveResult.Ok -> {
-                val devices = remoteDevices(listed.value)
-                if (devices.isEmpty()) {
-                    MlRestoreSheet.Empty
-                } else {
-                    val initial = initialRestorePick(devices)
-                    val initialKinds = devices.firstOrNull { it.deviceId == initial }?.kinds.orEmpty()
-                    MlRestoreSheet.Pick(devices, initial, initialKinds)
-                }
-            }
-            MlDriveResult.FolderMissing -> MlRestoreSheet.Empty
-            MlDriveResult.NotCapable, MlDriveResult.Conflict, is MlDriveResult.Failed -> MlRestoreSheet.Failed
+    private suspend fun listedSheet(userId: UserId): MlRestoreSheet {
+        val listed = try {
+            controller.listRemote(userId)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return MlRestoreSheet.Failed
         }
+        val devices = remoteDevices(listed)
+        if (devices.isEmpty()) return MlRestoreSheet.Empty
+        val initial = initialRestorePick(devices)
+        val initialKinds = devices.firstOrNull { it.deviceId == initial }?.kinds.orEmpty()
+        return MlRestoreSheet.Pick(devices, initial, initialKinds)
+    }
 
     /** The controller's answer; when it cannot be read the user is asked, so a Replace never runs unasked. */
     private suspend fun needsModeChoice(userId: UserId): Boolean = try {

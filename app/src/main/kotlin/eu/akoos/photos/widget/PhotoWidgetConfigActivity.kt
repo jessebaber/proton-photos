@@ -90,9 +90,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.rememberSettingsStore
+import eu.akoos.photos.domain.catalog.CloudAlbumRecord
 import eu.akoos.photos.domain.entity.LocalAlbum
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.lock.AppLockGate
@@ -144,18 +145,19 @@ class PhotoWidgetConfigActivity : FragmentActivity() {
         setContent {
             // Mirror MainActivity: respect the user's THEME_MODE + THEME_PALETTE so the
             // widget config screen renders in the same theme/accent as the rest of the app.
-            val themeKeyFlow = remember {
-                settingsDataStore.data.map { prefs ->
-                    prefs[SettingsKeys.THEME_MODE]
-                        ?: when (prefs[SettingsKeys.DARK_MODE]) {
-                            true  -> "dark"
-                            false -> "light"
-                            null  -> "dark"
-                        }
-                }
+            val settingsStore = rememberSettingsStore()
+            val themeKey by remember {
+                settingsStore.observe(Settings.THEME_MODE)
+            }.collectAsState(initial = null)
+            val darkMode by remember {
+                settingsStore.observe(Settings.DARK_MODE)
+            }.collectAsState(initial = null)
+            val resolvedThemeKey = themeKey ?: when (darkMode) {
+                true -> "dark"
+                false -> "light"
+                null -> "dark"
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = "dark")
-            val themeMode = ThemeMode.fromKey(themeKey)
+            val themeMode = ThemeMode.fromKey(resolvedThemeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
                 ThemeMode.System -> systemDark
@@ -163,10 +165,9 @@ class PhotoWidgetConfigActivity : FragmentActivity() {
                 ThemeMode.Dark   -> true
             }
 
-            val paletteFlow = remember {
-                settingsDataStore.data.map { it[SettingsKeys.THEME_PALETTE] }
-            }
-            val paletteKey by paletteFlow.collectAsState(initial = null)
+            val paletteKey by remember {
+                settingsStore.observe(Settings.THEME_PALETTE)
+            }.collectAsState(initial = null)
             val palette = ThemePalette.fromKey(paletteKey)
 
             ProtonPhotosTheme(darkTheme = useDark, palette = palette) {
@@ -947,7 +948,7 @@ private fun AlbumRow(
  *  The cover resolves from the decrypted-thumbnail cache the app writes for cloud covers. */
 @Composable
 private fun CloudAlbumRow(
-    album: eu.akoos.photos.data.db.entity.CloudAlbumEntity,
+    album: eu.akoos.photos.domain.catalog.CloudAlbumRecord,
     selected: Boolean,
     onClick: () -> Unit,
 ) {

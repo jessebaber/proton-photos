@@ -1,0 +1,30 @@
+# stream: feat/domain-module
+
+# stream: feat/domain-contracts
+
+# stream: feat/settings-store
+
+# stream: feat/extract-media
+
+# stream: feat/extract-people
+
+# stream: feat/extract-sync
+
+# stream: feat/presentation-facades
+
+# stream: feat/extract-upload
+
+# stream: feat/extract-metadata
+
+# stream: feat/extract-import
+
+# stream: feat/presentation-settings
+
+# stream: feat/presentation-media
+
+# stream: feat/presentation-albums
+
+# stream: feat/presentation-people
+
+# stream: feat/presentation-shell
+

@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.settings
 
-import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.domain.catalog.PersonRecord
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -37,7 +37,7 @@ class PeopleFoundCountTest {
         name: String? = null,
         faceCount: Int = 0,
         isOther: Boolean = false,
-    ) = PersonEntity(userId = "u", displayName = name, faceCount = faceCount, isOther = isOther)
+    ) = PersonRecord(id = 1L, userId = "u", displayName = name, faceCount = faceCount, isOther = isOther)
 
     @Test
     fun counts_only_named_clusters() {

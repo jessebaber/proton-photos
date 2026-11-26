@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.settings
 
-import eu.akoos.photos.data.db.dao.LabelUsage
+import eu.akoos.photos.domain.label.LabelUsage
 import eu.akoos.photos.util.LabelNormalizer
 import org.junit.Assert.assertEquals
 import org.junit.Test

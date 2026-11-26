@@ -61,16 +61,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.rememberSettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.presentation.theme.AppColors
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -113,15 +111,15 @@ internal fun resolveTileOrder(savedCsv: String?): List<LibraryTile> {
  */
 @Composable
 internal fun LibraryTileReorderList(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+    val settingsStore = rememberSettingsStore()
     val scope = rememberCoroutineScope()
     val colors = AppColors.current
 
-    val savedCsv by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_ORDER] }
+    val savedCsv by remember(settingsStore) {
+        settingsStore.observe(Settings.ALBUMS_TILE_ORDER)
     }.collectAsState(initial = null)
-    val hidden by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet() }
+    val hidden by remember(settingsStore) {
+        settingsStore.observe(Settings.ALBUMS_TILE_HIDDEN)
     }.collectAsState(initial = emptySet())
     var order by remember { mutableStateOf<List<LibraryTile>>(emptyList()) }
     LaunchedEffect(savedCsv) { order = resolveTileOrder(savedCsv) }
@@ -130,9 +128,10 @@ internal fun LibraryTileReorderList(modifier: Modifier = Modifier) {
         val snapshot = order
         scope.launch {
             runCatching {
-                context.settingsDataStore.edit {
-                    it[SettingsKeys.ALBUMS_TILE_ORDER] = snapshot.joinToString(",") { tile -> tile.name }
-                }
+                settingsStore.set(
+                    Settings.ALBUMS_TILE_ORDER,
+                    snapshot.joinToString(",") { tile -> tile.name },
+                )
             }
         }
     }
@@ -140,10 +139,8 @@ internal fun LibraryTileReorderList(modifier: Modifier = Modifier) {
     fun toggleHidden(tile: LibraryTile) {
         scope.launch {
             runCatching {
-                context.settingsDataStore.edit {
-                    val current = it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet()
-                    it[SettingsKeys.ALBUMS_TILE_HIDDEN] =
-                        if (tile.name in current) current - tile.name else current + tile.name
+                settingsStore.update(Settings.ALBUMS_TILE_HIDDEN) { current ->
+                    if (tile.name in current) current - tile.name else current + tile.name
                 }
             }
         }

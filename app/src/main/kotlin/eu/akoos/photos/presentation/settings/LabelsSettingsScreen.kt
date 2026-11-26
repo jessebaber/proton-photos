@@ -104,7 +104,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.LabelUsage
+import eu.akoos.photos.domain.label.LabelUsage
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.ConfirmDialog

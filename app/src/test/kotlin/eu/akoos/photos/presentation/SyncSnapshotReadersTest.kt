@@ -22,8 +22,9 @@
 
 package eu.akoos.photos.presentation
 
-import eu.akoos.photos.data.db.dao.SyncStateLite
-import eu.akoos.photos.data.repository.SyncStateSnapshot
+import eu.akoos.photos.domain.catalog.SyncSnapshotRows
+import eu.akoos.photos.domain.catalog.SyncStateLiteRecord
+
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.presentation.albums.albumLocalUrisByLinkId
@@ -46,7 +47,7 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the gallery's on-device set is the one the full rows give`() {
-        val fromLean = syncedCloudIdsOnDevice(SyncStateSnapshot.Rows(lean(table)))
+        val fromLean = syncedCloudIdsOnDevice(SyncSnapshotRows(lean(table)))
 
         assertEquals(fullRowOnDeviceIds(table), fromLean)
         assertEquals(setOf("c-1", "c-2", "c-twin", "c-mixed"), fromLean)
@@ -55,7 +56,7 @@ class SyncSnapshotReadersTest {
     @Test
     fun `with no blank synced uri the gallery takes the snapshot's own synced set`() {
         val noBlankSynced = table.filterNot { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }
-        val sync = SyncStateSnapshot.Rows(lean(noBlankSynced))
+        val sync = SyncSnapshotRows(lean(noBlankSynced))
 
         val fromLean = syncedCloudIdsOnDevice(sync)
 
@@ -65,7 +66,7 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the vaulted set the gallery and the album picker read is the one the full rows give`() {
-        val fromLean = SyncStateSnapshot.Rows(lean(table)).hiddenCloudIds
+        val fromLean = SyncSnapshotRows(lean(table)).hiddenCloudIds
 
         assertEquals(fullRowGalleryHiddenIds(table), fromLean)
         assertEquals(fullRowPickerHiddenIds(table), fromLean)
@@ -112,23 +113,23 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the Activity pending list is the one the full rows give, in the table's order`() {
-        val fromLean = pendingUploadUris(lean(table))
+        val fromRows = pendingUploadUris(table)
 
-        assertEquals(fullRowPendingUris(table), fromLean)
-        assertEquals(listOf("uri://queued-b", "uri://queued-a"), fromLean)
+        assertEquals(fullRowPendingUris(table), fromRows)
+        assertEquals(listOf("uri://queued-b", "uri://queued-a"), fromRows)
     }
 
     @Test
     fun `an empty table reads as nothing on every screen`() {
         val none = emptyList<SyncState>()
-        val sync = SyncStateSnapshot.Rows(emptyList())
+        val sync = SyncSnapshotRows(emptyList())
 
         assertEquals(fullRowOnDeviceIds(none), syncedCloudIdsOnDevice(sync))
         assertEquals(fullRowGalleryHiddenIds(none), sync.hiddenCloudIds)
         assertEquals(fullRowViewerUris(none), syncedLocalUrisByCloudId(sync.rows))
-        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(sync.rows))
-        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), sync.rows))
-        assertEquals(fullRowPendingUris(none), pendingUploadUris(sync.rows))
+        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(lean(none)))
+        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), lean(none)))
+        assertEquals(fullRowPendingUris(none), pendingUploadUris(none))
     }
 
     // The screens' readings of the full rows.
@@ -183,9 +184,9 @@ class SyncSnapshotReadersTest {
         states.filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
             .mapNotNull { it.localUri.takeIf { u -> u.isNotBlank() } }
 
-    /** The columns the DAO's lean read projects out of each row, in the same order. */
-    private fun lean(states: List<SyncState>): List<SyncStateLite> =
-        states.map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, it.queued) }
+    /** Domain lean rows shared by gallery/album/hidden readers. */
+    private fun lean(states: List<SyncState>): List<SyncStateLiteRecord> =
+        states.map { SyncStateLiteRecord(it.localUri, it.cloudFileId, it.status.name) }
 
     private fun row(uri: String, cloudId: String?, status: SyncStatus, queued: Boolean = false) = SyncState(
         localUri = uri,

@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.person
 
-import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.domain.catalog.PersonRecord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -120,7 +120,7 @@ class PersonPageRulesTest {
 
     @Test
     fun `a held suggestion whose group still exists stays until the next lookup`() {
-        assertFalse(dropsHeldSuggestion(candidateRow = PersonEntity(id = 5L, userId = "account")))
+        assertFalse(dropsHeldSuggestion(candidateRow = PersonRecord(id = 5L, userId = "account")))
     }
 
     @Test

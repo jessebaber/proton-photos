@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.domain.thumbnails.ThumbnailUrls
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -63,13 +64,13 @@ import javax.inject.Singleton
 class ThumbnailUrlStore @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     @AppScope appScope: CoroutineScope,
-) {
+) : ThumbnailUrls {
     private val entries = ConcurrentHashMap<String, String>()
 
     private val _urls = MutableStateFlow<Map<String, String>>(LiveUrls(entries))
 
     /** linkId → decrypted `file://` thumbnail URL. Cells read their own entry off this view. */
-    val urls: StateFlow<Map<String, String>> = _urls.asStateFlow()
+    override val urls: StateFlow<Map<String, String>> = _urls.asStateFlow()
 
     private val publisher = CoalescingPublisher(appScope, PUBLISH_WINDOW_MS, ::publish)
 
@@ -81,7 +82,7 @@ class ThumbnailUrlStore @Inject constructor(
     /** Record the freshly-decrypted [url] for [linkId]. Readable through [urls] at once; the change
      *  signal that makes readers recompose is coalesced. Idempotent: re-putting the same value
      *  signals nothing. */
-    fun put(linkId: String, url: String) {
+    override fun put(linkId: String, url: String) {
         if (entries.put(linkId, url) != url) publisher.mark()
     }
 
@@ -89,7 +90,7 @@ class ThumbnailUrlStore @Inject constructor(
      *  re-decrypting. Fills only linkIds no live [put] holds yet (a decrypt can complete before the seed
      *  read returns), so a just-decrypted URL is never clobbered by the older seed row. A [clear] that
      *  lands mid-seed ends it, so a signed-out account's rows are not written back. */
-    suspend fun seed(userId: UserId) {
+    override suspend fun seed(userId: UserId) {
         val seedGeneration = synchronized(lock) { generation }
         val rows = runCatching { photoListingDao.getThumbnailUrlSeed(userId.id) }.getOrDefault(emptyList())
         var added = false
@@ -123,7 +124,7 @@ class ThumbnailUrlStore @Inject constructor(
     /** Drop [linkIds] whose cached thumbnail files were just evicted, so those cells fall back to the
      *  placeholder and re-decrypt on next scroll instead of pointing at a deleted file. No-op when none
      *  of them are in the map. */
-    fun remove(linkIds: Collection<String>) {
+    override fun remove(linkIds: Collection<String>) {
         if (linkIds.isEmpty()) return
         var removed = false
         synchronized(lock) {
@@ -134,7 +135,7 @@ class ThumbnailUrlStore @Inject constructor(
 
     /** Drop everything on sign-out so a re-login (same or different account) starts clean. Published
      *  at once rather than coalesced. */
-    fun clear() {
+    override fun clear() {
         val hadEntries = synchronized(lock) {
             generation++
             val had = entries.isNotEmpty()

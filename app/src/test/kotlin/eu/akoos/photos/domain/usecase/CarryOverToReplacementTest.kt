@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.CarryOverToReplacement
 import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -36,6 +37,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 
 /** A listing with no row for any link, so the replaced photo the caller holds is what the carry-over reads. */
 internal fun noListingRow(): PhotoListingDao = mockk(relaxed = true) {

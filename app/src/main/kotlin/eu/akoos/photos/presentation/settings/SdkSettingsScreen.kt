@@ -39,8 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.R
-import eu.akoos.photos.data.sdk.SdkRoute
-import eu.akoos.photos.data.sdk.SdkRouting
+import eu.akoos.photos.domain.debug.SdkDebugRoute
+import eu.akoos.photos.domain.debug.SdkDebugRoutes
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
@@ -53,21 +53,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * Switches that send parts of the app through Proton's Drive SDK instead of the app's own requests, one
- * per [SdkRoute], all off until turned on. The page also counts, for this run of the app, how many
- * operations went through the SDK and how many fell back to the usual way after an SDK failure.
- */
 @Composable
 fun SdkSettingsScreen(
     onBack: () -> Unit,
     viewModel: SdkSettingsViewModel = hiltViewModel(),
 ) {
     val switchedOn by viewModel.switchedOn.collectAsStateWithLifecycle()
-    // The counts are read again whenever an SDK call or a fallback is counted.
     val activity by SdkDiagnostics.changes.collectAsStateWithLifecycle()
     val counts = remember(activity) {
-        SdkRoute.entries.associateWith { SdkDiagnostics.sdkCount(it.label) to SdkDiagnostics.fallbackCount(it.label) }
+        SdkDebugRoute.entries.associateWith { SdkDiagnostics.sdkCount(it.label) to SdkDiagnostics.fallbackCount(it.label) }
     }
 
     SettingsSubPageScaffold(title = stringResource(R.string.sdk_settings_title), onBack = onBack) {
@@ -77,7 +71,7 @@ fun SdkSettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp),
         )
         SettingsCard {
-            SdkRoute.entries.forEachIndexed { index, route ->
+            SdkDebugRoute.entries.forEachIndexed { index, route ->
                 if (index > 0) RowDivider()
                 ToggleRow(
                     label = stringResource(route.titleRes()),
@@ -96,34 +90,34 @@ fun SdkSettingsScreen(
     }
 }
 
-private fun SdkRoute.titleRes(): Int = when (this) {
-    SdkRoute.TAGS -> R.string.sdk_route_tags
-    SdkRoute.TRASH -> R.string.sdk_route_trash
-    SdkRoute.DOWNLOAD -> R.string.sdk_route_download
-    SdkRoute.UPLOAD -> R.string.sdk_route_upload
-    SdkRoute.ALBUMS -> R.string.sdk_route_albums
-    SdkRoute.EVENTS -> R.string.sdk_route_events
-    SdkRoute.SHARED -> R.string.sdk_route_shared
+private fun SdkDebugRoute.titleRes(): Int = when (this) {
+    SdkDebugRoute.TAGS -> R.string.sdk_route_tags
+    SdkDebugRoute.TRASH -> R.string.sdk_route_trash
+    SdkDebugRoute.DOWNLOAD -> R.string.sdk_route_download
+    SdkDebugRoute.UPLOAD -> R.string.sdk_route_upload
+    SdkDebugRoute.ALBUMS -> R.string.sdk_route_albums
+    SdkDebugRoute.EVENTS -> R.string.sdk_route_events
+    SdkDebugRoute.SHARED -> R.string.sdk_route_shared
 }
 
-private fun SdkRoute.descriptionRes(): Int = when (this) {
-    SdkRoute.TAGS -> R.string.sdk_route_tags_desc
-    SdkRoute.TRASH -> R.string.sdk_route_trash_desc
-    SdkRoute.DOWNLOAD -> R.string.sdk_route_download_desc
-    SdkRoute.UPLOAD -> R.string.sdk_route_upload_desc
-    SdkRoute.ALBUMS -> R.string.sdk_route_albums_desc
-    SdkRoute.EVENTS -> R.string.sdk_route_events_desc
-    SdkRoute.SHARED -> R.string.sdk_route_shared_desc
+private fun SdkDebugRoute.descriptionRes(): Int = when (this) {
+    SdkDebugRoute.TAGS -> R.string.sdk_route_tags_desc
+    SdkDebugRoute.TRASH -> R.string.sdk_route_trash_desc
+    SdkDebugRoute.DOWNLOAD -> R.string.sdk_route_download_desc
+    SdkDebugRoute.UPLOAD -> R.string.sdk_route_upload_desc
+    SdkDebugRoute.ALBUMS -> R.string.sdk_route_albums_desc
+    SdkDebugRoute.EVENTS -> R.string.sdk_route_events_desc
+    SdkDebugRoute.SHARED -> R.string.sdk_route_shared_desc
 }
 
 @HiltViewModel
 class SdkSettingsViewModel @Inject constructor(
-    private val routing: SdkRouting,
+    private val routing: SdkDebugRoutes,
 ) : ViewModel() {
-    val switchedOn: StateFlow<Set<SdkRoute>> =
+    val switchedOn: StateFlow<Set<SdkDebugRoute>> =
         routing.switchedOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    fun setSwitchedOn(route: SdkRoute, on: Boolean) {
+    fun setSwitchedOn(route: SdkDebugRoute, on: Boolean) {
         viewModelScope.launch { routing.setSwitchedOn(route, on) }
     }
 }

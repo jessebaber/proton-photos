@@ -177,12 +177,11 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import eu.akoos.photos.data.hidden.VaultMove
-import eu.akoos.photos.data.image.ULTRA_HDR_TAG
-import eu.akoos.photos.data.image.decodeUltraHdr
-import eu.akoos.photos.data.ocr.OcrModelPreparation
+import eu.akoos.photos.domain.vault.VaultMove
+import eu.akoos.photos.domain.ml.OcrModelPreparation
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.LocalVideoThumb
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail

@@ -30,7 +30,7 @@ import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
 import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
-import eu.akoos.photos.domain.usecase.UploadStructuralStripper
+import eu.akoos.photos.data.usecase.UploadStructuralStripper
 import eu.akoos.photos.util.MetadataStripConfig
 import io.mockk.coEvery
 import io.mockk.coVerify

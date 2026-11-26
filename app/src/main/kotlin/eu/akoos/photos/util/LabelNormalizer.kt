@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.util
 
-import eu.akoos.photos.presentation.search.SearchFilter
+import java.text.Normalizer
 
 /**
  * A comma-separated input split into clean labels. [labels] holds at most [LabelNormalizer.MAX_LABELS]
@@ -79,8 +79,15 @@ object LabelNormalizer {
         return cut.takeIf { it.isNotEmpty() && fold(it).isNotEmpty() }
     }
 
+    private val MARK_REGEX = Regex("\\p{Mn}+")
+
     /** The comparison key of [label]: blanks collapsed, trimmed, lower-cased and stripped of accents. */
-    fun fold(label: String): String = SearchFilter.fold(label.replace(BLANKS, " ").trim())
+    fun fold(label: String): String {
+        val text = label.replace(BLANKS, " ").trim()
+        return Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD)
+            .replace(MARK_REGEX, "")
+            .replace('\u0131', 'i')
+    }
 
     /** Splits [raw] on [SEPARATOR] into clean, distinct labels, capped at [MAX_LABELS]. */
     fun parse(raw: String): ParsedLabels = normalize(raw.split(SEPARATOR))

@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import java.io.File
+import eu.akoos.photos.domain.widget.WidgetSignOut
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -55,10 +56,10 @@ import javax.inject.Singleton
 class PhotoWidgetSignOut @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
-) {
+) : WidgetSignOut {
 
     /** Drops the widgets' photos for [userId]'s sign-out, and gives the updates back once it has left. */
-    suspend fun clear(userId: UserId) = withContext(Dispatchers.IO) {
+    override suspend fun clear(userId: UserId) = withContext(Dispatchers.IO) {
         context.cacheDir
             .listFiles { f: File -> f.name.startsWith(PhotoWidgetUpdater.CACHE_FILE_PREFIX) }
             ?.forEach { it.delete() }

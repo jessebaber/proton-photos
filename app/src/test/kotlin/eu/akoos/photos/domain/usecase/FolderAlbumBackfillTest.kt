@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.DrivePairLookup
+import eu.akoos.photos.data.usecase.FolderAlbumBackfillImpl
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import io.mockk.coEvery
@@ -63,7 +65,7 @@ class FolderAlbumBackfillTest {
             1
         }
 
-        FolderAlbumBackfill(accounts, upload, local, pairs, CoroutineScope(Dispatchers.Unconfined))
+        FolderAlbumBackfillImpl(accounts, upload, local, pairs, CoroutineScope(Dispatchers.Unconfined))
             .onAlbumTurnedOn("PfpTest")
 
         assertEquals(listOf("locked", "pairs"), order)

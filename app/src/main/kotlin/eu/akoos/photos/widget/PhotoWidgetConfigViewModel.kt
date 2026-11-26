@@ -48,10 +48,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.db.dao.CloudAlbumDao
-import eu.akoos.photos.data.db.dao.PhotoListingDao
-import eu.akoos.photos.data.db.entity.CloudAlbumEntity
-import eu.akoos.photos.data.db.entity.PhotoPickerRow
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.catalog.CloudAlbumRecord
+import eu.akoos.photos.domain.catalog.PhotoCatalog
+import eu.akoos.photos.domain.catalog.PhotoPickerRowRecord
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -84,10 +84,10 @@ data class WidgetConfigUiState(
      * means no cell has decrypted this photo yet, so its thumbnail is not in the app cache. The widget
      * worker will request it lazily.
      */
-    val cloudPhotos: List<PhotoPickerRow> = emptyList(),
+    val cloudPhotos: List<PhotoPickerRowRecord> = emptyList(),
     val selectedLinkIds: List<String> = emptyList(),
     /** Cloud albums the widget can follow in [WidgetMode.CLOUD_ALBUM]. */
-    val cloudAlbums: List<CloudAlbumEntity> = emptyList(),
+    val cloudAlbums: List<CloudAlbumRecord> = emptyList(),
     /** linkId of the album chosen for [WidgetMode.CLOUD_ALBUM], or null when none picked. */
     val selectedCloudAlbumLinkId: String? = null,
     /** True until the first cloud-photo emission lands, so the picker can show a spinner
@@ -104,8 +104,8 @@ data class WidgetConfigUiState(
 class PhotoWidgetConfigViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
-    private val photoListingDao: PhotoListingDao,
-    private val cloudAlbumDao: CloudAlbumDao,
+    private val photoCatalog: PhotoCatalog,
+    private val albumCatalog: AlbumCatalog,
     private val hiddenSource: HiddenSetsSource,
     private val driveRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
@@ -216,7 +216,7 @@ class PhotoWidgetConfigViewModel @Inject constructor(
             // Own stream only — photos from shared-with-me albums must not be offered as
             // widget content.
             combine(
-                photoListingDao.observeOwnStreamPickerRows(userId.id),
+                photoCatalog.observeOwnStreamPickerRows(userId.id),
                 hidden.filterNotNull(),
             ) { rows, hiddenSets -> visiblePickerRows(rows, hiddenSets) }
                 // A read that lands mid-write can throw a transient CursorWindow error, so
@@ -247,7 +247,7 @@ class PhotoWidgetConfigViewModel @Inject constructor(
      */
     private fun observeCloudAlbums() {
         viewModelScope.launch {
-            combine(cloudAlbumDao.observeOwned(), hidden.filterNotNull()) { albums, hiddenSets ->
+            combine(albumCatalog.observeOwnedAlbums(), hidden.filterNotNull()) { albums, hiddenSets ->
                 visibleCloudAlbums(albums, hiddenSets)
             }
                 .retryOnDbTear("WidgetConfigVM")

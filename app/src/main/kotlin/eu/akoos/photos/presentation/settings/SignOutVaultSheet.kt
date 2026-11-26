@@ -53,8 +53,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.hidden.HiddenRescue
-import eu.akoos.photos.data.hidden.SignOutVaultChoice
+import eu.akoos.photos.domain.vault.HiddenRescueNames
+import eu.akoos.photos.domain.vault.SignOutVaultChoice
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.SecondaryButton
@@ -110,7 +110,7 @@ internal fun SignOutVaultSheet(
                 description = if (zipped) {
                     stringResource(R.string.sign_out_vault_move_zip_desc)
                 } else {
-                    stringResource(R.string.sign_out_vault_move_desc, HiddenRescue.SIGN_OUT_FOLDER)
+                    stringResource(R.string.sign_out_vault_move_desc, HiddenRescueNames.SIGN_OUT_FOLDER)
                 },
                 onClick = { choice = SignOutVaultChoice.MOVE_OUT },
             )

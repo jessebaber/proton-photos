@@ -34,8 +34,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import eu.akoos.photos.presentation.common.AppModalSheet
 import kotlinx.coroutines.flow.map
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.di.rememberSettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import androidx.annotation.StringRes
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.style.TextAlign
@@ -1513,16 +1513,16 @@ private fun LibraryViewsRow(
     sharedBadge: Boolean,
     onHiddenClick: (() -> Unit)?,
 ) {
-    val context = LocalContext.current
+    val settingsStore = rememberSettingsStore()
     // People needs face grouping switched on, the same gate the category bar's People chip uses.
-    val faceEnabled by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.FACE_ENABLED] ?: false }
+    val faceEnabled by remember(settingsStore) {
+        settingsStore.observe(Settings.FACE_ENABLED)
     }.collectAsState(initial = false)
-    val savedOrder by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_ORDER] }
+    val savedOrder by remember(settingsStore) {
+        settingsStore.observe(Settings.ALBUMS_TILE_ORDER)
     }.collectAsState(initial = null)
-    val hidden by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet() }
+    val hidden by remember(settingsStore) {
+        settingsStore.observe(Settings.ALBUMS_TILE_HIDDEN)
     }.collectAsState(initial = emptySet())
     val tiles = remember(savedOrder, hidden, faceEnabled, onPeopleClick, onOfflineClick, onSharedClick, onHiddenClick) {
         resolveTileOrder(savedOrder).filter { tile ->

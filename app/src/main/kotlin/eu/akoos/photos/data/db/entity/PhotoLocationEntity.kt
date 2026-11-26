@@ -24,6 +24,7 @@ package eu.akoos.photos.data.db.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
 
 /**
  * One GPS fix per photo, the source the map view reads from. [id] is the photo's stable key:
@@ -45,7 +46,7 @@ data class PhotoLocationEntity(
          * collide; because [id] is the sole primary key, a photo's row is owned by whichever partition
          * last backfilled it, and a guest/account switch simply re-reads it once.
          */
-        const val LOCAL_USER = "local"
+        const val LOCAL_USER = LOCAL_PARTITION
     }
 }
 
@@ -61,4 +62,4 @@ fun PhotoLocationEntity.isNullIsland(): Boolean = latitude == 0.0 && longitude =
  * photo without a real position shows no place instead of the sea off West Africa.
  */
 fun isUsableGpsFix(latitude: Double, longitude: Double): Boolean =
-    latitude in -90.0..90.0 && longitude in -180.0..180.0 && !(latitude == 0.0 && longitude == 0.0)
+    eu.akoos.photos.domain.entity.isUsableGpsFix(latitude, longitude)

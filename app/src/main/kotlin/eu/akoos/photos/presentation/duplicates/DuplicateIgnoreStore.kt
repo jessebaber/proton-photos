@@ -22,14 +22,10 @@
 
 package eu.akoos.photos.presentation.duplicates
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
-import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,20 +35,18 @@ import javax.inject.Singleton
  */
 @Singleton
 class DuplicateIgnoreStore @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
 ) {
-    val keys: Flow<Set<String>> = context.settingsDataStore.data
-        .map { it[SettingsKeys.DUPLICATE_IGNORED_GROUPS] ?: emptySet() }
+    val keys: Flow<Set<String>> = settingsStore.observe(Settings.DUPLICATE_IGNORED_GROUPS)
         .distinctUntilChanged()
 
     suspend fun add(key: String) {
-        context.settingsDataStore.edit { it[SettingsKeys.DUPLICATE_IGNORED_GROUPS] = (it[SettingsKeys.DUPLICATE_IGNORED_GROUPS] ?: emptySet()) + key }
+        settingsStore.update(Settings.DUPLICATE_IGNORED_GROUPS) { it + key }
     }
 
     suspend fun remove(toRemove: Collection<String>) {
         if (toRemove.isEmpty()) return
-        context.settingsDataStore.edit {
-            it[SettingsKeys.DUPLICATE_IGNORED_GROUPS] = (it[SettingsKeys.DUPLICATE_IGNORED_GROUPS] ?: emptySet()) - toRemove.toSet()
-        }
+        val drop = toRemove.toSet()
+        settingsStore.update(Settings.DUPLICATE_IGNORED_GROUPS) { it - drop }
     }
 }

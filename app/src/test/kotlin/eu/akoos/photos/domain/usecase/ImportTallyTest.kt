@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.ImportSummary
+import eu.akoos.photos.data.usecase.importTally
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
 import org.junit.Assert.assertEquals

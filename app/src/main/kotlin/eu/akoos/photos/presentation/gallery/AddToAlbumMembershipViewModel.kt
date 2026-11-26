@@ -28,8 +28,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
-import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipLite
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.catalog.AlbumMembershipRecord
 import eu.akoos.photos.util.combineSqlChunks
 import javax.inject.Inject
 
@@ -42,7 +42,7 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class AddToAlbumMembershipViewModel @Inject constructor(
-    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
+    private val albumCatalog: AlbumCatalog,
 ) : ViewModel() {
 
     /**
@@ -57,9 +57,9 @@ class AddToAlbumMembershipViewModel @Inject constructor(
         // The query declares no ORDER BY and the rows are grouped below, so the comparator only has
         // to keep a merged read from reshuffling between emissions.
         else photoLinkIds.combineSqlChunks(
-            compareBy<AlbumPhotoMembershipLite>({ it.albumLinkId }, { it.photoLinkId }),
+            compareBy<AlbumMembershipRecord>({ it.albumLinkId }, { it.photoLinkId }),
         ) { chunk ->
-            albumPhotoMembershipDao.observeAlbumIdsForPhotos(chunk.toSet())
+            albumCatalog.observeAlbumIdsForPhotos(chunk.toSet())
         }
             .map { rows ->
                 rows.groupBy({ it.albumLinkId }, { it.photoLinkId })

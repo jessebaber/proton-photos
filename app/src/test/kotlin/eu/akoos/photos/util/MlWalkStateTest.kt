@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.util
 
+import eu.akoos.photos.data.ml.SOURCE_RETRY_BACKOFF_MS
+import eu.akoos.photos.data.ml.SourceRetryBook
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull

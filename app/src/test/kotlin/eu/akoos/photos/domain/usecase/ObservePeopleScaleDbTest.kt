@@ -45,6 +45,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.ObservePeopleUseCaseImpl
+import eu.akoos.photos.data.usecase.livePhotoCount
 
 /**
  * The people list over a big library: 6,400 people holding 120,000 faces, half of whose stored covers are
@@ -113,7 +115,7 @@ class ObservePeopleScaleDbTest {
                 )
             }
         }
-        val useCase = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())
+        val useCase = ObservePeopleUseCaseImpl(db.personDao(), db.faceDao(), db.personManualPhotoDao())
         // What each named person's page shows, read one person at a time: the counts the list must match.
         val feedIds = feed.mapTo(HashSet()) { it.stableId }
         val wantedCounts = (1..people).filter { it % 10 == 0 }.associate { p ->

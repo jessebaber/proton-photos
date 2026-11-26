@@ -52,6 +52,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import eu.akoos.photos.data.usecase.AssignFacesToPersonUseCaseImpl
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
 
 /**
  * Runs the face assignment against a real in-memory database: a new name yields a person an empty sweep
@@ -77,7 +79,7 @@ class AssignFacesToPersonUseCaseTest {
             .setQueryExecutor { it.run() }
             .build()
         scheduler = mockk<FaceIndexingScheduler>(relaxed = true)
-        assign = AssignFacesToPersonUseCase(
+        assign = AssignFacesToPersonUseCaseImpl(
             db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.personCoverDao(),
             db.notPersonDao(), db.clusterSummaryDao(), scheduler, db,
         )

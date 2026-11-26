@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.settings
 
-import eu.akoos.photos.data.db.dao.LabelUsage
+import eu.akoos.photos.domain.label.LabelUsage
 
 /*
  * The selection on the Labels page, kept pure so each rule runs in a plain JVM test. A selection is the folded

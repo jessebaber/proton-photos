@@ -22,28 +22,23 @@
 
 package eu.akoos.photos.presentation.lock
 
-import android.content.Context
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class AppLockManager @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val settingsStore: SettingsStore,
 ) {
-    val isLockEnabled: Flow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.APP_LOCK_ENABLED] ?: false }
+    val isLockEnabled: Flow<Boolean> = settingsStore.observe(Settings.APP_LOCK_ENABLED)
 
     /**
      * Timeout in seconds between backgrounding the app and re-locking it on resume.
@@ -51,40 +46,29 @@ class AppLockManager @Inject constructor(
      * switch to other apps without re-authenticating on every return. A value saved under the old
      * minutes key migrates read-side (seconds = minutes * 60) when the seconds key is absent.
      */
-    val lockTimeoutSeconds: Flow<Int> = context.settingsDataStore.data
-        .map { prefs -> timeoutSeconds(prefs) }
+    val lockTimeoutSeconds: Flow<Int> = combine(
+        settingsStore.observe(Settings.APP_LOCK_TIMEOUT_SECONDS),
+        settingsStore.observe(Settings.APP_LOCK_TIMEOUT_MINUTES),
+    ) { seconds, minutes ->
+        if (seconds != 0) seconds else (minutes?.times(60) ?: 0)
+    }
 
     /** The enabled flag and the timeout in one read, for the in-memory cache of [AppLockSession]. */
-    val settings: Flow<AppLockSettings> = context.settingsDataStore.data
-        .map { prefs ->
-            AppLockSettings(
-                enabled = prefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
-                timeoutMs = timeoutSeconds(prefs).toLong() * 1000L,
-            )
-        }
-        .distinctUntilChanged()
-
-    private fun timeoutSeconds(prefs: Preferences): Int =
-        prefs[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS]
-            ?: prefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES]?.let { it * 60 }
-            ?: 0
+    val settings: Flow<AppLockSettings> = combine(isLockEnabled, lockTimeoutSeconds) { enabled, timeout ->
+        AppLockSettings(
+            enabled = enabled,
+            timeoutMs = timeout.toLong() * 1000L,
+        )
+    }.distinctUntilChanged()
 
     suspend fun setLockEnabled(enabled: Boolean) {
-        context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_ENABLED] = enabled }
+        settingsStore.set(Settings.APP_LOCK_ENABLED, enabled)
     }
 
     suspend fun setLockTimeoutSeconds(seconds: Int) {
-        val clamped = seconds.coerceAtLeast(0)
-        context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS] = clamped }
+        settingsStore.set(Settings.APP_LOCK_TIMEOUT_SECONDS, seconds.coerceAtLeast(0))
     }
 
-    /**
-     * Sign-out signal for [AppLockSession], which ends its post-unlock grace window so the stop and start
-     * of the sign-in flow is judged by the lock timeout alone. The unlock and the background mark stay as
-     * they are: clearing the mark could leave a backgrounded app open.
-     *
-     * SettingsViewModel.signOut() emits here right before `accountManager.disableAccount`.
-     */
     private val _resetLockTimestamps = MutableSharedFlow<Unit>(
         replay = 0,
         extraBufferCapacity = 1,

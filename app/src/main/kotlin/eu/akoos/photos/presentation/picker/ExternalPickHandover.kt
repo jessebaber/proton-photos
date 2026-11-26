@@ -22,13 +22,16 @@
 
 package eu.akoos.photos.presentation.picker
 
+import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.domain.settings.ShareStripConfig
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.hidden.HiddenStorageManager
-import eu.akoos.photos.data.preferences.currentShareStripConfig
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.currentShareStripConfig
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.util.OutgoingPhotoUris
 import eu.akoos.photos.util.ShareIntentBuilder
@@ -49,7 +52,8 @@ class ExternalPickHandover @Inject constructor(
     @ApplicationContext private val context: Context,
     private val outgoingUris: OutgoingPhotoUris,
     private val hiddenSource: HiddenSetsSource,
-    private val hiddenStorage: HiddenStorageManager,
+    private val hiddenStorage: HiddenStorage,
+    private val settingsStore: SettingsStore,
 ) {
 
     /** What [picks] come to: the answer for the asking app, or why none of them can go to it. */
@@ -58,7 +62,7 @@ class ExternalPickHandover @Inject constructor(
         val twins = hiddenSource.hiddenTwins(flowOf(hidden)).first()
         val items = handoverItems(request, picks, hidden, twins, hiddenStorage::isHiddenUri)
         if (items.isEmpty()) return nothingToHandOver(request, picks)
-        val strip = currentShareStripConfig(context)
+        val strip = settingsStore.currentShareStripConfig()?.toUtil()
         val uris = ArrayList<Uri>()
         val mimes = ArrayList<String>()
         for (item in items) {
@@ -131,3 +135,11 @@ internal fun handoverItems(
     }
     return if (request.allowMultiple) allowed else allowed.take(1)
 }
+
+private fun ShareStripConfig.toUtil() = MetadataStripConfig(
+    stripGps = stripGps,
+    stripCameraInfo = stripCameraInfo,
+    stripTimestamp = stripTimestamp,
+    stripSoftwareInfo = stripSoftwareInfo,
+    stripAuthorship = stripAuthorship,
+)

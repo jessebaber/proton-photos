@@ -67,7 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.domain.usecase.StagePhase
 import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.entity.ImportHistoryEntity
+import eu.akoos.photos.domain.catalog.ImportHistoryRecord
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
@@ -413,19 +413,19 @@ private fun ImportProgressCard(
 
 /**
  * The "Recent imports" list under the picker: a compact header over a card of one row per finished
- * run, newest first. A row with an upload ledger (a [ImportHistoryEntity.runId]) opens its detail on
+ * run, newest first. A row with an upload ledger (a [ImportHistoryRecord.runId]) opens its detail on
  * tap; an older row that predates the ledger carries none and stays inert.
  */
 @Composable
 private fun ImportHistorySection(
-    entries: List<ImportHistoryEntity>,
+    entries: List<ImportHistoryRecord>,
     onOpen: (String) -> Unit,
     onDelete: (Long, String?) -> Unit,
 ) {
     val colors = AppColors.current
     // The run a delete would remove, held while its confirm sheet is open so the tap does not act until
     // the user confirms. Deleting forgets the local record and its undo option; nothing on Drive changes.
-    var pendingDelete by remember { mutableStateOf<ImportHistoryEntity?>(null) }
+    var pendingDelete by remember { mutableStateOf<ImportHistoryRecord?>(null) }
     Text(
         text = stringResource(R.string.import_history_title),
         color = colors.fgMute,
@@ -462,7 +462,7 @@ private fun ImportHistorySection(
  *  ledger opens its detail; a ledger-less older run does not open but can still be deleted. */
 @Composable
 private fun ImportHistoryRow(
-    entry: ImportHistoryEntity,
+    entry: ImportHistoryRecord,
     onOpen: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
