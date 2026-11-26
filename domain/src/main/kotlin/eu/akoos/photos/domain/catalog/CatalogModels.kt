@@ -153,6 +153,9 @@ data class ImportStagedRecord(
     val dateMs: Long? = null,
     val sizeBytes: Long = 0,
     val thumbPath: String? = null,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    val description: String? = null,
     val excluded: Boolean = false,
     val alreadyInDrive: Boolean = false,
     val albumName: String? = null,
@@ -163,6 +166,7 @@ data class ImportUploadedRecord(
     val linkId: String,
     val name: String? = null,
     val alreadyInDrive: Boolean = false,
+    val undone: Boolean = false,
 )
 
 data class ImportAlbumCountRecord(

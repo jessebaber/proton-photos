@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.domain.settings
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+
 /**
  * The device folders whose photos also join a Drive album as they upload.
  * Presentation reads/writes this through [SettingsStore]; data keeps its own Preferences helpers.
@@ -65,3 +68,18 @@ suspend fun SettingsStore.syncEffectivelyEnabled(): Boolean {
     val folders = get(Settings.SYNC_FOLDER_NAMES)
     return autoSync && (backupEverything || !folders.isNullOrEmpty())
 }
+
+/** Live album-mirror rule for screens that combine it with other flows. */
+fun SettingsStore.observeAlbumMirrorFolders(): Flow<AlbumMirrorFolders> =
+    combine(
+        observe(Settings.BACKUP_EVERYTHING),
+        observe(Settings.ALBUM_ALL_BY_DEFAULT),
+        observe(Settings.ALBUM_OPT_IN_FOLDER_NAMES),
+        observe(Settings.ALBUM_OPT_OUT_FOLDER_NAMES),
+    ) { backupEverything, allByDefault, optedIn, optedOut ->
+        AlbumMirrorFolders(
+            optedIn = optedIn,
+            optedOut = optedOut,
+            allByDefault = backupEverything && allByDefault,
+        )
+    }

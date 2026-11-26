@@ -31,4 +31,5 @@ interface AlbumCatalog {
     fun observeAllAssociatedPhotoLinkIds(): Flow<List<String>>
     fun observeAlbumIdsForPhotos(photoLinkIds: Set<String>): Flow<List<AlbumMembershipRecord>>
     suspend fun membershipLinkIdsForAlbum(albumLinkId: String): List<String>
+    fun observePendingUploadCount(albumLinkId: String, userId: String): Flow<Int>
 }

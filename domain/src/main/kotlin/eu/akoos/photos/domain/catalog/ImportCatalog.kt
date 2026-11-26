@@ -44,4 +44,7 @@ interface ImportCatalog {
     suspend fun deleteUploadedRun(runId: String)
     suspend fun albumCountsForRun(runId: String): List<ImportAlbumCountRecord>
     suspend fun clearAlbumMembersForRun(runId: String)
+
+    /** Drop the on-disk takeout scan cache for [zipUri], if any. */
+    suspend fun clearScanCache(zipUri: String)
 }

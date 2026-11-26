@@ -29,7 +29,9 @@ import eu.akoos.photos.domain.updater.UpdateDownload
 import eu.akoos.photos.domain.updater.UpdateInstall
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import android.content.Intent
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -60,15 +62,25 @@ class UpdateDownloadImpl @Inject constructor(
 class UpdateInstallImpl @Inject constructor(
     private val installer: UpdateInstaller,
 ) : UpdateInstall {
+    private val confirmationIntent = AtomicReference<Intent?>(null)
+
+    /** Android host reads this after [installViaSession] returns PendingUserAction. */
+    fun consumeConfirmationIntent(): Intent? = confirmationIntent.getAndSet(null)
+
     override fun canInstall(): Boolean = installer.canInstall()
-    override fun installViaSession(apkFile: File): DomainInstallOutcome =
-        when (val outcome = installer.installViaSession(apkFile)) {
+    override fun installViaSession(apkFile: File): DomainInstallOutcome {
+        confirmationIntent.set(null)
+        return when (val outcome = installer.installViaSession(apkFile)) {
             is InstallOutcome.Committed -> DomainInstallOutcome.Committed
             is InstallOutcome.Success -> DomainInstallOutcome.Success
-            is InstallOutcome.PendingUserAction -> DomainInstallOutcome.PendingUserAction
+            is InstallOutcome.PendingUserAction -> {
+                confirmationIntent.set(outcome.intent)
+                DomainInstallOutcome.PendingUserAction
+            }
             is InstallOutcome.SignatureMismatch -> DomainInstallOutcome.SignatureMismatch
             is InstallOutcome.NotNewer -> DomainInstallOutcome.NotNewer
             is InstallOutcome.Failed -> DomainInstallOutcome.Failed(outcome.message)
         }
+    }
     override fun verifyApkSignature(apkFile: File): Boolean = installer.verifyApkSignature(apkFile)
 }

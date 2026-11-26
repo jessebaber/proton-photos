@@ -85,7 +85,7 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the album's uri lookup is the one the full rows give, in the same order`() {
-        val fromLean = albumLocalUrisByLinkId(leanDao(table))
+        val fromLean = albumLocalUrisByLinkId(lean(table))
 
         assertEquals(fullRowAlbumUris(table).toList(), fromLean.toList())
         assertEquals("the later of two rows on one cloud id stands", "uri://twin-b", fromLean["c-twin"])
@@ -95,7 +95,7 @@ class SyncSnapshotReadersTest {
 
     @Test
     fun `the vault's loose-copy set is the one the full rows give`() {
-        val rows = leanDao(table)
+        val rows = lean(table)
         val hiddenIdSets = listOf(
             emptySet<String>(),
             setOf("c-gone"),
@@ -127,8 +127,8 @@ class SyncSnapshotReadersTest {
         assertEquals(fullRowOnDeviceIds(none), syncedCloudIdsOnDevice(sync))
         assertEquals(fullRowGalleryHiddenIds(none), sync.hiddenCloudIds)
         assertEquals(fullRowViewerUris(none), syncedLocalUrisByCloudId(sync.rows))
-        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(leanDao(none)))
-        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), leanDao(none)))
+        assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(lean(none)))
+        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), lean(none)))
         assertEquals(fullRowPendingUris(none), pendingUploadUris(none))
     }
 
@@ -184,20 +184,9 @@ class SyncSnapshotReadersTest {
         states.filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
             .mapNotNull { it.localUri.takeIf { u -> u.isNotBlank() } }
 
-    /** The columns the DAO's lean read projects out of each row, in the same order. */
+    /** Domain lean rows shared by gallery/album/hidden readers. */
     private fun lean(states: List<SyncState>): List<SyncStateLiteRecord> =
         states.map { SyncStateLiteRecord(it.localUri, it.cloudFileId, it.status.name) }
-
-    private fun leanDao(states: List<SyncState>): List<eu.akoos.photos.data.db.dao.SyncStateLite> =
-        states.map {
-            eu.akoos.photos.data.db.dao.SyncStateLite(
-                localUri = it.localUri,
-                cloudFileId = it.cloudFileId,
-                localHash = it.localHash,
-                status = it.status,
-                queued = it.queued,
-            )
-        }
 
     private fun row(uri: String, cloudId: String?, status: SyncStatus, queued: Boolean = false) = SyncState(
         localUri = uri,

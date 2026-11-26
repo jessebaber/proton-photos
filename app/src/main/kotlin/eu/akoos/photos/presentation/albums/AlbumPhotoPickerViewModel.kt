@@ -46,8 +46,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
-import eu.akoos.photos.data.repository.SyncStateSnapshot
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.catalog.SyncSnapshot
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
@@ -77,10 +77,10 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val syncStateSnapshot: SyncStateSnapshot,
+    private val syncStateSnapshot: SyncSnapshot,
     private val driveRepo: DrivePhotoRepository,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
-    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
+    private val albumCatalog: AlbumCatalog,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val albumBrowseSource: AlbumBrowseSource,
 ) : ViewModel() {
@@ -115,8 +115,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     /** Cloud linkIds held by ANY album — backs the picker's unfiled-only filter. The membership
      *  cross-table is written in bursts when the Albums tab prefetches; a read landing mid-burst
      *  degrades to "nothing is filed" rather than tearing the picker down. */
-    private val inAnyAlbumLinkIds: StateFlow<Set<String>> = albumPhotoMembershipDao
-        .observeAllAssociatedPhotoLinkIds()
+    private val inAnyAlbumLinkIds: StateFlow<Set<String>> = albumCatalog.observeAllAssociatedPhotoLinkIds()
         .map { it.toSet() }
         .catch {
             Log.w("AlbumPickerVM", "album membership source failed: ${it.message}")
@@ -134,7 +133,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
 
     /** The cloud ids of the photos album [albumLinkId] holds, read from the local membership table. */
     fun albumMembers(albumLinkId: String): kotlinx.coroutines.flow.Flow<Set<String>> =
-        albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(setOf(albumLinkId))
+        albumCatalog.observeAssociatedPhotoLinkIdsForAlbums(setOf(albumLinkId))
             .map { it.toSet() }
             .catch { emit(emptySet()) }
 

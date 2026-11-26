@@ -44,7 +44,13 @@ interface HiddenVaultRestore {
     suspend fun deletePhoto(hiddenUri: String): Boolean
     suspend fun restorePhoto(hiddenUri: String, fallbackDisplayName: String? = null): Boolean
     suspend fun restoreAll(hiddenUris: List<String>): Int
+    suspend fun restoreFolder(
+        bucketName: String,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        shouldStop: () -> Boolean = { false },
+    ): Int
 }
+
 
 /** Leftover vault file discovery after sign-out / wipe. */
 interface HiddenVaultLeftover {

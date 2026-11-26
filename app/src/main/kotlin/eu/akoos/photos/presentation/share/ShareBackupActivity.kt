@@ -28,12 +28,7 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
-import eu.akoos.photos.data.share.backUpSharedMedia
-import eu.akoos.photos.data.share.sharedUrisOf
-import eu.akoos.photos.di.AppScope
-import eu.akoos.photos.domain.repository.SyncStateRepository
-import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
-import kotlinx.coroutines.CoroutineScope
+import eu.akoos.photos.domain.share.ShareBackup
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -49,9 +44,7 @@ import javax.inject.Inject
 class ShareBackupActivity : ComponentActivity() {
 
     @Inject lateinit var accountManager: AccountManager
-    @Inject lateinit var forceUpload: ForceUploadLocalUrisUseCase
-    @Inject lateinit var syncStateRepo: SyncStateRepository
-    @Inject @AppScope lateinit var appScope: CoroutineScope
+    @Inject lateinit var shareBackup: ShareBackup
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,8 +59,10 @@ class ShareBackupActivity : ComponentActivity() {
                 return@launch
             }
             // Matched and copied while the share lasts: the sender's read grant ends with this screen.
-            val message = backUpSharedMedia(
-                this@ShareBackupActivity, userId, shared, intent.type, syncStateRepo, forceUpload, appScope,
+            val message = shareBackup.backUpSharedMedia(
+                userId = userId,
+                sharedUris = shared.map { it.toString() },
+                typeHint = intent.type,
             )
             toast(message)
             finish()

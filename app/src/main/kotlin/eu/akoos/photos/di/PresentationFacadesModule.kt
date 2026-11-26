@@ -100,6 +100,7 @@ import eu.akoos.photos.domain.vault.VaultPassword
 import eu.akoos.photos.domain.work.BackgroundWork
 
 import eu.akoos.photos.data.backup.SharedBackupImpl
+import eu.akoos.photos.data.catalog.SyncSnapshotImpl
 import eu.akoos.photos.data.compression.VideoEncodersImpl
 import eu.akoos.photos.data.debug.LargeLibrarySimImpl
 import eu.akoos.photos.data.debug.SdkDebugRoutesImpl
@@ -113,6 +114,7 @@ import eu.akoos.photos.data.vault.HiddenVaultMaintenanceImpl
 import eu.akoos.photos.data.vault.VaultDiagnosticsImpl
 import eu.akoos.photos.data.vault.VaultSignOutImpl
 import eu.akoos.photos.domain.backup.SharedBackup
+import eu.akoos.photos.domain.catalog.SyncSnapshot
 import eu.akoos.photos.domain.compression.VideoEncoders
 import eu.akoos.photos.domain.debug.LargeLibrarySim
 import eu.akoos.photos.domain.debug.SdkDebugRoutes

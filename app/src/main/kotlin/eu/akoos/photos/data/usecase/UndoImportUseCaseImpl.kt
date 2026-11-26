@@ -28,6 +28,7 @@ import eu.akoos.photos.domain.usecase.UndoResult
 import eu.akoos.photos.domain.usecase.planImportUndo
 import eu.akoos.photos.domain.usecase.undoResultOf
 
+import kotlin.jvm.JvmName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -130,4 +131,3 @@ class UndoImportUseCaseImpl @Inject constructor(
         result
     }
 }
-

@@ -22,11 +22,17 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.domain.work.BackgroundWork
+import eu.akoos.photos.domain.settings.observeAlbumMirrorFolders
+import eu.akoos.photos.domain.settings.putAlbumMirrorFolders
+import eu.akoos.photos.domain.settings.albumMirrorFolders
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.AlbumMirrorFolders
 import eu.akoos.photos.domain.usecase.MoveToFolderResult
 
 import android.content.Context
 import android.content.IntentSender
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,12 +58,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.hidden.HiddenCloudPhotos
+import eu.akoos.photos.domain.vault.HiddenCloud
 import eu.akoos.photos.R
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.albumMirrorFolders
-import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -99,7 +101,7 @@ data class DeviceFolder(
  * once: the store also emits on unrelated writes, and each of these lands in the same drawer.
  */
 data class DeviceFolderPrefs(
-    val mirroredAsAlbum: eu.akoos.photos.data.preferences.AlbumMirrorFolders = eu.akoos.photos.data.preferences.AlbumMirrorFolders(),
+    val mirroredAsAlbum: AlbumMirrorFolders = AlbumMirrorFolders(),
     val excludedFromBackup: Set<String> = emptySet(),
     val hiddenFromTimeline: Set<String> = emptySet(),
 )
@@ -156,6 +158,9 @@ data class AlbumsUiState(
 
 @HiltViewModel
 class AlbumsViewModel @Inject constructor(
+    private val settingsStore: SettingsStore,
+    private val hiddenCloud: HiddenCloud,
+    private val backgroundWork: BackgroundWork,
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
@@ -235,11 +240,12 @@ class AlbumsViewModel @Inject constructor(
      */
     private fun observeSortMode() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { prefs ->
-                    AlbumSortMode.fromOrdinal(prefs[SettingsKeys.ALBUMS_SORT_MODE]) to
-                        decodeAlbumOrder(prefs[SettingsKeys.ALBUMS_CUSTOM_ORDER])
-                }
+            combine(
+                settingsStore.observe(Settings.ALBUMS_SORT_MODE),
+                settingsStore.observe(Settings.ALBUMS_CUSTOM_ORDER),
+            ) { mode, order ->
+                AlbumSortMode.fromOrdinal(mode) to decodeAlbumOrder(order)
+            }
                 .distinctUntilChanged()
                 .catch { emit(AlbumSortMode.Default to emptyList()) }
                 .collect { (mode, order) ->
@@ -257,8 +263,7 @@ class AlbumsViewModel @Inject constructor(
      */
     private fun observeViewChoices() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { PhotoViewChoices.from(it) }
+            PhotoViewChoices.observe(settingsStore)
                 .distinctUntilChanged()
                 .catch { emit(PhotoViewChoices()) }
                 .collect { choices -> _uiState.update { it.copy(viewChoices = choices) } }
@@ -283,9 +288,9 @@ class AlbumsViewModel @Inject constructor(
     fun saveAlbumArrangement(orderedLinkIds: List<String>) {
         viewModelScope.launch {
             runCatching {
-                context.settingsDataStore.edit {
-                    it[SettingsKeys.ALBUMS_CUSTOM_ORDER] = encodeAlbumOrder(orderedLinkIds)
-                    it[SettingsKeys.ALBUMS_SORT_MODE] = AlbumSortMode.Custom.ordinal
+                settingsStore.edit {
+                    set(Settings.ALBUMS_CUSTOM_ORDER, encodeAlbumOrder(orderedLinkIds))
+                    set(Settings.ALBUMS_SORT_MODE, AlbumSortMode.Custom.ordinal)
                 }
             }
         }
@@ -299,11 +304,10 @@ class AlbumsViewModel @Inject constructor(
         viewModelScope.launch {
             // Both come from the same store and feed the same cards, so they are read as one pair;
             // distinctUntilChanged keeps writes to unrelated settings from re-grouping for nothing.
-            val folderPrefsFlow = context.settingsDataStore.data
-                .map { prefs ->
-                    (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
-                        FolderCoverMap.parse(prefs[SettingsKeys.FOLDER_COVER_URI_MAP])
-                }
+            val folderPrefsFlow = combine(
+                settingsStore.observe(Settings.HIDDEN_PHOTO_URIS),
+                settingsStore.observe(Settings.FOLDER_COVER_URI_MAP),
+            ) { hiddenUris, coverMap -> hiddenUris to FolderCoverMap.parse(coverMap) }
                 .distinctUntilChanged()
             combine(localMediaRepo.observeLocalMedia(), folderPrefsFlow) { items, (hiddenUris, pinnedCovers) ->
                 DeviceFolderCards.build(items, hiddenUris, pinnedCovers)
@@ -320,14 +324,17 @@ class AlbumsViewModel @Inject constructor(
         // reason the cover pair above is: one store, one destination, and distinctUntilChanged keeps
         // writes to unrelated settings from re-emitting them.
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { prefs ->
-                    DeviceFolderPrefs(
-                        mirroredAsAlbum = prefs.albumMirrorFolders(),
-                        excludedFromBackup = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
-                        hiddenFromTimeline = prefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet(),
-                    )
-                }
+            combine(
+                settingsStore.observeAlbumMirrorFolders(),
+                settingsStore.observe(Settings.EXCLUDED_FOLDER_NAMES),
+                settingsStore.observe(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES),
+            ) { mirror, excluded, timeline ->
+                DeviceFolderPrefs(
+                    mirroredAsAlbum = mirror,
+                    excludedFromBackup = excluded,
+                    hiddenFromTimeline = timeline,
+                )
+            }
                 .distinctUntilChanged()
                 .catch { emit(DeviceFolderPrefs()) }
                 .collect { prefs -> _uiState.update { it.copy(folderPrefs = prefs) } }
@@ -338,11 +345,10 @@ class AlbumsViewModel @Inject constructor(
         // preferences above are, and distinctUntilChanged keeps writes to unrelated settings, which
         // the store also emits on, from re-publishing them.
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { prefs ->
-                    (prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()) to
-                        (prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet())
-                }
+            combine(
+                settingsStore.observe(Settings.HIDDEN_ALBUM_IDS),
+                settingsStore.observe(Settings.TIMELINE_EXCLUDED_ALBUM_IDS),
+            ) { hidden, timelineExcluded -> hidden to timelineExcluded }
                 .distinctUntilChanged()
                 .catch { emit(emptySet<String>() to emptySet()) }
                 .collect { (hidden, timelineExcluded) ->
@@ -375,8 +381,7 @@ class AlbumsViewModel @Inject constructor(
      *  settings, which the store also emits on, from re-publishing the set. */
     private fun observeExcludedFromGrid() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet() }
+            settingsStore.observe(Settings.ALBUMS_GRID_EXCLUDED)
                 .distinctUntilChanged()
                 .catch { emit(emptySet()) }
                 .collect { excluded -> _uiState.update { it.copy(excludedFromGrid = excluded) } }
@@ -387,10 +392,8 @@ class AlbumsViewModel @Inject constructor(
      *  only: the album, its photos and every other list stay exactly as they are. */
     fun setAlbumExcludedFromGrid(albumLinkId: String, exclude: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] = AlbumsGridExclusion.withAlbum(
-                    prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(), albumLinkId, exclude,
-                )
+            settingsStore.update(Settings.ALBUMS_GRID_EXCLUDED) { current ->
+                AlbumsGridExclusion.withAlbum(current, albumLinkId, exclude)
             }
         }
     }
@@ -398,10 +401,8 @@ class AlbumsViewModel @Inject constructor(
     /** [setAlbumExcludedFromGrid] for the device folder [folderName]. No file moves. */
     fun setFolderExcludedFromGrid(folderName: String, exclude: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] = AlbumsGridExclusion.withFolder(
-                    prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(), folderName, exclude,
-                )
+            settingsStore.update(Settings.ALBUMS_GRID_EXCLUDED) { current ->
+                AlbumsGridExclusion.withFolder(current, folderName, exclude)
             }
         }
     }
@@ -409,13 +410,12 @@ class AlbumsViewModel @Inject constructor(
     /** The one writer for the grid's per-folder preference sets. Reading and writing inside the same
      *  edit keeps a flip atomic, matching the folder screen's own writer. */
     private suspend fun toggleFolderName(
-        key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>,
+        setting: eu.akoos.photos.domain.settings.Setting<Set<String>>,
         folderName: String,
     ) {
         if (folderName.isEmpty()) return
-        context.settingsDataStore.edit { prefs ->
-            val current = prefs[key] ?: emptySet()
-            prefs[key] = if (folderName in current) current - folderName else current + folderName
+        settingsStore.update(setting) { current ->
+            if (folderName in current) current - folderName else current + folderName
         }
     }
 
@@ -423,50 +423,49 @@ class AlbumsViewModel @Inject constructor(
     fun toggleFolderMirrorAsAlbum(folderName: String) {
         if (folderName.isEmpty()) return
         viewModelScope.launch {
-            val updated = context.settingsDataStore.edit { prefs ->
-                prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(folderName))
-            }
-            if (folderName in updated.albumMirrorFolders()) folderAlbumBackfill.onAlbumTurnedOn(folderName)
+            val next = settingsStore.albumMirrorFolders().flipped(folderName)
+            settingsStore.putAlbumMirrorFolders(next)
+            if (folderName in next) folderAlbumBackfill.onAlbumTurnedOn(folderName)
         }
     }
 
     /** Carve [folderName] out of "Back up everything", or put it back in. */
     fun toggleFolderExcludedFromBackup(folderName: String) {
         viewModelScope.launch {
-            toggleFolderName(SettingsKeys.EXCLUDED_FOLDER_NAMES, folderName)
+            toggleFolderName(Settings.EXCLUDED_FOLDER_NAMES, folderName)
             // Same follow-up the Settings picker runs: a fresh reconcile drops rows that just landed
             // in the excluded set before an in-flight sync pass can upload them.
-            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-            eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly)
+            val wifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY)
+            backgroundWork.runSyncNow(wifiOnly = wifiOnly)
         }
     }
 
     /** Show or hide [folderName]'s photos in the main timeline. Display only, so nothing to
      *  reconcile: the gallery observes the key and re-filters on the next emission. */
     fun toggleFolderHiddenFromTimeline(folderName: String) {
-        viewModelScope.launch { toggleFolderName(SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES, folderName) }
+        viewModelScope.launch { toggleFolderName(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES, folderName) }
     }
 
     /** Persist the direction [folderName] lists its photos in; no other folder changes. */
     fun setDeviceFolderSortMode(folderName: String, mode: AlbumPhotoSortMode) {
-        viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(context, folderName, mode) }
+        viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(settingsStore, folderName, mode) }
     }
 
     /** Persist the span of dates [folderName]'s headers gather; no other folder changes. */
     fun setDeviceFolderGrouping(folderName: String, grouping: AlbumPhotoGrouping) {
-        viewModelScope.launch { PhotoViewChoiceStore.setFolderGrouping(context, folderName, grouping) }
+        viewModelScope.launch { PhotoViewChoiceStore.setFolderGrouping(settingsStore, folderName, grouping) }
     }
 
     /** Persist the direction [albumLinkId] lists its photos in, the same choice the album's own screen
      *  writes, so a direction set from its card and one set inside it are one choice. */
     fun setAlbumPhotoSortMode(albumLinkId: String, mode: AlbumPhotoSortMode) {
-        viewModelScope.launch { PhotoViewChoiceStore.setAlbumSort(context, albumLinkId, mode) }
+        viewModelScope.launch { PhotoViewChoiceStore.setAlbumSort(settingsStore, albumLinkId, mode) }
     }
 
     /** Persist the span of dates [albumLinkId]'s headers gather, the same choice the album's own
      *  screen writes. */
     fun setAlbumPhotoGrouping(albumLinkId: String, grouping: AlbumPhotoGrouping) {
-        viewModelScope.launch { PhotoViewChoiceStore.setAlbumGrouping(context, albumLinkId, grouping) }
+        viewModelScope.launch { PhotoViewChoiceStore.setAlbumGrouping(settingsStore, albumLinkId, grouping) }
     }
 
     fun refresh() = loadAlbums()
@@ -592,8 +591,7 @@ class AlbumsViewModel @Inject constructor(
                 })
             }
             // Re-key the bucket→linkId cache. Match BOTH name and linkId so a same-named bucket isn't hijacked.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.ALBUM_BUCKET_MAP] ?: emptySet()
+            settingsStore.update(Settings.ALBUM_BUCKET_MAP) { current ->
                 val rebuilt = current.mapNotNull { entry ->
                     val idx = entry.indexOf('=')
                     if (idx <= 0) return@mapNotNull entry
@@ -603,9 +601,7 @@ class AlbumsViewModel @Inject constructor(
                         "$trimmed=$linkId"
                     } else entry
                 }.toSet()
-                if (rebuilt != current) {
-                    prefs[SettingsKeys.ALBUM_BUCKET_MAP] = rebuilt
-                }
+                if (rebuilt != current) rebuilt else current
             }
         }
         result.fold(
@@ -651,13 +647,13 @@ class AlbumsViewModel @Inject constructor(
         _uiState.update { it.copy(deleteWouldLosePhotosFor = null) }
 
     /**
-     * Hide a cloud album client-side by adding its linkId to [SettingsKeys.HIDDEN_ALBUM_IDS]. The
+     * Hide a cloud album client-side by adding its linkId to [Settings.HIDDEN_ALBUM_IDS]. The
      * card leaves the Albums grid and the album's photos drop from every other list. Nothing on
      * Drive changes, so the album stays intact and returns on unhide.
      */
     fun hideAlbum(albumLinkId: String) {
         viewModelScope.launch {
-            HiddenCloudPhotos.hideAlbums(context, listOf(albumLinkId))
+            hiddenCloud.hideAlbums(listOf(albumLinkId))
         }
     }
 
@@ -672,10 +668,8 @@ class AlbumsViewModel @Inject constructor(
      */
     fun toggleAlbumHiddenFromTimeline(albumLinkId: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-                prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] =
-                    AlbumTimelineHide.toggled(current, albumLinkId)
+            settingsStore.update(Settings.TIMELINE_EXCLUDED_ALBUM_IDS) { current ->
+                AlbumTimelineHide.toggled(current, albumLinkId)
             }
         }
     }

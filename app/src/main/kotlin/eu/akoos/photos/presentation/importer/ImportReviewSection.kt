@@ -96,8 +96,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.ImportAlbumCount
-import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.domain.catalog.ImportAlbumCountRecord
+import eu.akoos.photos.domain.catalog.ImportStagedRecord
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.importer.ImportAlbumMode
@@ -147,7 +147,7 @@ fun ImportReviewSection(
     newCount: Int,
     reviewAlreadyCount: Int,
     hasAlbums: Boolean,
-    albumSummary: List<ImportAlbumCount>,
+    albumSummary: List<ImportAlbumCountRecord>,
     albumMode: ImportAlbumMode,
     onAlbumModeChange: (ImportAlbumMode) -> Unit,
     onBack: () -> Unit,
@@ -170,7 +170,7 @@ fun ImportReviewSection(
     var selected by remember { mutableStateOf(emptySet<String>()) }
     val selectionMode = selected.isNotEmpty()
     // The photo whose metadata detail is open, or null while the grid is showing.
-    var detailEntry by remember { mutableStateOf<ImportStagedEntity?>(null) }
+    var detailEntry by remember { mutableStateOf<ImportStagedRecord?>(null) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
     // Confirming the upload is a real, hard-to-take-back action (a large run sends thousands of files), so
     // it goes through its own confirm sheet rather than firing on the first tap.
@@ -486,7 +486,7 @@ fun ImportReviewSection(
  */
 @Composable
 private fun ImportReviewCell(
-    row: ImportStagedEntity,
+    row: ImportStagedRecord,
     selected: Boolean,
     selectionMode: Boolean,
     onClick: () -> Unit,
@@ -581,7 +581,7 @@ private fun ImportReviewCell(
 private fun ImportReviewSummary(
     newCount: Int,
     alreadyCount: Int,
-    albumSummary: List<ImportAlbumCount>,
+    albumSummary: List<ImportAlbumCountRecord>,
     modifier: Modifier = Modifier,
 ) {
     val stats = buildList {
@@ -793,7 +793,7 @@ private fun ImportAlbumModeSheet(selected: ImportAlbumMode, onSelect: (ImportAlb
  */
 @Composable
 private fun ImportReviewDetail(
-    row: ImportStagedEntity,
+    row: ImportStagedRecord,
     onClose: () -> Unit,
 ) {
     val colors = AppColors.current

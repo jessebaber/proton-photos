@@ -95,7 +95,7 @@ fun Context.findFragmentActivity(): FragmentActivity? = findActivity() as? Fragm
  * Cold-start parity for the externally-launched ProtonCore login activities
  * (XML-based, outside this Compose tree) is provided by a single
  * `AppCompatDelegate.setApplicationLocales` call in [eu.akoos.photos.App.onCreate]
- * driven by the [eu.akoos.photos.data.preferences.LanguagePrefsBoot] mirror.
+ * driven by the [eu.akoos.photos.domain.settings.BootPreferences] mirror.
  *
  * @param language BCP-47 tag (`"en"`, `"hu"`, etc.) or `"system"` for OS default.
  */

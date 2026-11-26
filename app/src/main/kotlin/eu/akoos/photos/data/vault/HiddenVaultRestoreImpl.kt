@@ -36,4 +36,10 @@ class HiddenVaultRestoreImpl @Inject constructor(
 
     override suspend fun deletePhoto(hiddenUri: String): Boolean = restorer.deletePhoto(hiddenUri)
     override suspend fun restoreAll(hiddenUris: List<String>): Int = restorer.restoreAll(hiddenUris)
+
+    override suspend fun restoreFolder(
+        bucketName: String,
+        onProgress: (done: Int, total: Int) -> Unit,
+        shouldStop: () -> Boolean,
+    ): Int = restorer.restoreFolder(bucketName, onProgress = onProgress, shouldStop = shouldStop)
 }

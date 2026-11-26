@@ -33,9 +33,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
-import eu.akoos.photos.data.face.FaceModelAssets
-import eu.akoos.photos.data.ocr.OcrModelAssets
-import eu.akoos.photos.data.semantic.SemanticModelAssets
+import eu.akoos.photos.domain.ml.FACE_MODEL_TOTAL_DOWNLOAD_BYTES
+import eu.akoos.photos.domain.ml.OCR_MODEL_TOTAL_DOWNLOAD_BYTES
+import eu.akoos.photos.domain.ml.SEMANTIC_MODEL_TOTAL_DOWNLOAD_BYTES
 import eu.akoos.photos.presentation.onboarding.components.StepHeader
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
@@ -66,21 +66,21 @@ internal fun MlIntroStep(
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_ai_face_toggle),
-                description = described(R.string.settings_ai_face_desc, FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
+                description = described(R.string.settings_ai_face_desc, FACE_MODEL_TOTAL_DOWNLOAD_BYTES),
                 checked = face,
                 onCheckedChange = onFaceChange,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_ai_semantic),
-                description = described(R.string.settings_ai_semantic_desc, SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                description = described(R.string.settings_ai_semantic_desc, SEMANTIC_MODEL_TOTAL_DOWNLOAD_BYTES),
                 checked = semantic,
                 onCheckedChange = onSemanticChange,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_ai_ocr),
-                description = described(R.string.settings_ai_ocr_desc, OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
+                description = described(R.string.settings_ai_ocr_desc, OCR_MODEL_TOTAL_DOWNLOAD_BYTES),
                 checked = ocr,
                 onCheckedChange = onOcrChange,
             )
