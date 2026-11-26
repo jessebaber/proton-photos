@@ -27,7 +27,11 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.catalog.PeopleCatalogImpl
 import eu.akoos.photos.data.face.FaceEditCounter
+import eu.akoos.photos.data.ml.FaceEditsImpl
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+import eu.akoos.photos.domain.ml.FaceEdits
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import io.mockk.coEvery
@@ -81,20 +85,28 @@ class ReviewSuggestionsBulkMergeDbTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel(personDao: eu.akoos.photos.data.db.dao.PersonDao = db.personDao()): ReviewSuggestionsViewModel {
+    private fun catalog(personDao: eu.akoos.photos.data.db.dao.PersonDao = db.personDao()): PeopleCatalog =
+        PeopleCatalogImpl(
+            db = db,
+            personDao = personDao,
+            faceDao = db.faceDao(),
+            notPersonDao = db.notPersonDao(),
+            personManualPhotoDao = db.personManualPhotoDao(),
+            personCoverDao = db.personCoverDao(),
+            faceCurationTimeDao = db.faceCurationTimeDao(),
+            clusterSummaryDao = db.clusterSummaryDao(),
+        )
+
+    private fun viewModel(peopleCatalog: PeopleCatalog = catalog()): ReviewSuggestionsViewModel {
         val accounts = mockk<AccountManager>(relaxed = true)
         coEvery { accounts.getPrimaryUserId() } returns flowOf(UserId(acct))
         return ReviewSuggestionsViewModel(
             accountManager = accounts,
             observePeopleUseCase = mockk(relaxed = true),
             getGalleryItems = mockk(relaxed = true),
-            appDatabase = db,
-            faceDao = db.faceDao(),
-            personDao = personDao,
-            personManualPhotoDao = db.personManualPhotoDao(),
-            notPersonDao = db.notPersonDao(),
+            peopleCatalog = peopleCatalog,
             ignorePeople = mockk(relaxed = true),
-            faceEdits = FaceEditCounter(),
+            faceEdits = FaceEditsImpl(FaceEditCounter()),
         )
     }
 
@@ -148,7 +160,7 @@ class ReviewSuggestionsBulkMergeDbTest {
     @Test
     fun `a read that throws is reported instead of ending the app`() = runBlocking {
         cluster(1, listOf("a", "b"))
-        val failing = spyk(db.personDao())
+        val failing = spyk(catalog())
         coEvery { failing.namedPeopleForUser(any()) } throws IllegalStateException("torn read")
         val vm = viewModel(failing)
 
@@ -162,8 +174,8 @@ class ReviewSuggestionsBulkMergeDbTest {
     fun `a write that throws leaves the clusters as they were`() = runBlocking {
         cluster(1, listOf("a", "b", "c"))
         cluster(2, listOf("d", "e"))
-        val failing = spyk(db.personDao())
-        coEvery { failing.deleteEmpty(any()) } throws IllegalStateException("write failed")
+        val failing = spyk(catalog())
+        coEvery { failing.deleteEmptyPeople(any()) } throws IllegalStateException("write failed")
         val vm = viewModel(failing)
 
         vm.bulkMerge(setOf(1, 2), "Anna")

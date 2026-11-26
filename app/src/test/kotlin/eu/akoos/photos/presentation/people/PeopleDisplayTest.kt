@@ -22,8 +22,10 @@
 
 package eu.akoos.photos.presentation.people
 
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
-import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -39,10 +41,10 @@ class PeopleDisplayTest {
     @Test
     fun `by default the page follows the Albums tab's view and size`() {
         val prefs = mutablePreferencesOf(
-            SettingsKeys.ALBUMS_VIEW_MODE to AlbumsViewMode.List.ordinal,
-            SettingsKeys.ALBUM_GRID_COLUMNS to 4,
-            SettingsKeys.PEOPLE_VIEW_MODE to AlbumsViewMode.Grid.ordinal,
-            SettingsKeys.PEOPLE_GRID_COLUMNS to 3,
+            intPreferencesKey(Settings.ALBUMS_VIEW_MODE.name) to AlbumsViewMode.List.ordinal,
+            intPreferencesKey(Settings.ALBUM_GRID_COLUMNS.name) to 4,
+            intPreferencesKey(Settings.PEOPLE_VIEW_MODE.name) to AlbumsViewMode.Grid.ordinal,
+            intPreferencesKey(Settings.PEOPLE_GRID_COLUMNS.name) to 3,
         )
         assertEquals(PeopleDisplay(AlbumsViewMode.List, 4), peopleDisplayOf(prefs))
     }
@@ -50,10 +52,10 @@ class PeopleDisplayTest {
     @Test
     fun `with the switch off the page keeps its own view and size`() {
         val prefs = mutablePreferencesOf(
-            SettingsKeys.PEOPLE_FOLLOW_ALBUMS to false,
-            SettingsKeys.ALBUMS_VIEW_MODE to AlbumsViewMode.List.ordinal,
-            SettingsKeys.ALBUM_GRID_COLUMNS to 4,
-            SettingsKeys.PEOPLE_GRID_COLUMNS to 3,
+            booleanPreferencesKey(Settings.PEOPLE_FOLLOW_ALBUMS.name) to false,
+            intPreferencesKey(Settings.ALBUMS_VIEW_MODE.name) to AlbumsViewMode.List.ordinal,
+            intPreferencesKey(Settings.ALBUM_GRID_COLUMNS.name) to 4,
+            intPreferencesKey(Settings.PEOPLE_GRID_COLUMNS.name) to 3,
         )
         assertEquals(PeopleDisplay(AlbumsViewMode.Grid, 3), peopleDisplayOf(prefs))
         assertEquals(peopleDisplayOf(prefs), ownPeopleDisplayOf(prefs))
@@ -61,7 +63,7 @@ class PeopleDisplayTest {
 
     @Test
     fun `a size outside the offered choices falls back to two`() {
-        val prefs = mutablePreferencesOf(SettingsKeys.ALBUM_GRID_COLUMNS to 7)
+        val prefs = mutablePreferencesOf(intPreferencesKey(Settings.ALBUM_GRID_COLUMNS.name) to 7)
         assertEquals(2, peopleDisplayOf(prefs).columns)
     }
 }

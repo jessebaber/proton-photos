@@ -22,11 +22,31 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.domain.catalog.PersonRecord
+
+import eu.akoos.photos.domain.catalog.PersonManualPhotoRecord
+
+import eu.akoos.photos.domain.catalog.NotPersonRecord
+
+import eu.akoos.photos.domain.catalog.FaceBoxRecord
+
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.ml.FaceIndexing
+
+import eu.akoos.photos.domain.ml.FaceEdits
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+
+import eu.akoos.photos.domain.usecase.personPhotoCount
+
 import eu.akoos.photos.domain.usecase.samePersonName
 import android.content.Context
 import android.util.Log
-import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
-import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.util.retryOnDbTear
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -54,19 +74,6 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import androidx.compose.ui.geometry.Offset
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.FaceOnPhoto
-import eu.akoos.photos.data.db.dao.NotPersonDao
-import eu.akoos.photos.data.db.dao.PersonCoverDao
-import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
-import eu.akoos.photos.data.db.entity.PersonCoverEntity
-import eu.akoos.photos.data.db.entity.PersonEntity
-import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
-import eu.akoos.photos.data.db.entity.NotPersonEntity
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.AUTO_MERGE_THRESHOLD
 import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase
@@ -118,24 +125,19 @@ data class PersonDetailUiState(
 @HiltViewModel
 class PersonDetailViewModel @Inject constructor(
     private val accountManager: AccountManager,
-    private val faceDao: FaceDao,
-    private val personDao: PersonDao,
-    private val personManualPhotoDao: PersonManualPhotoDao,
-    private val notPersonDao: NotPersonDao,
-    private val personCoverDao: PersonCoverDao,
-    private val faceCurationTimeDao: FaceCurationTimeDao,
-    private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
+    private val peopleCatalog: PeopleCatalog,
     private val notThisPerson: eu.akoos.photos.domain.usecase.NotThisPersonUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val assignPersonName: eu.akoos.photos.domain.usecase.AssignPersonNameUseCase,
-    private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
+    private val faceIndexing: FaceIndexing,
     private val ignorePeople: eu.akoos.photos.domain.usecase.IgnorePeopleUseCase,
     private val renamePerson: eu.akoos.photos.domain.usecase.RenamePersonUseCase,
     private val assignFacesToPerson: eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase,
-    private val faceEdits: eu.akoos.photos.data.face.FaceEditCounter,
+    private val faceEdits: FaceEdits,
     private val personCentroids: PersonCentroids,
     private val selectionFactory: eu.akoos.photos.presentation.common.GalleryItemSelectionController.Factory,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -211,10 +213,10 @@ class PersonDetailViewModel @Inject constructor(
         loadJob = viewModelScope.launch {
             try {
                 val userId = accountManager.getPrimaryUserId().first()
-                val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+                val account = userId?.id ?: LOCAL_PARTITION
                 // Faces off: read no face data and show an empty grid.
-                val prefs = context.settingsDataStore.data.first()
-                val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+                val faceOn = settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                settingsStore.get(Settings.FACE_ENABLED)
                 if (!faceOn) {
                     _uiState.update { it.copy(isLoading = false, items = emptyList()) }
                     return@launch
@@ -229,13 +231,13 @@ class PersonDetailViewModel @Inject constructor(
                     wasNamed = name != null
 
                     val manualKeys = if (name == null) flowOf(emptyList())
-                        else personManualPhotoDao.photoKeysForName(account, name)
+                        else peopleCatalog.photoKeysForName(account, name)
 
                     combine(
-                        faceDao.photoKeysForPerson(account, personId),
+                        peopleCatalog.photoKeysForPerson(account, personId),
                         manualKeys,
                         library,
-                        faceDao.observeFaceBoxesForPerson(account, personId),
+                        peopleCatalog.observeFaceBoxesForPerson(account, personId),
                     ) { faceKeys, added, items, boxes ->
                         val keys = (faceKeys + added).toSet()
                         val matched = items.filter { it.stableId in keys }
@@ -258,7 +260,7 @@ class PersonDetailViewModel @Inject constructor(
      *  disappears later (merged away, or an emptied Unsorted bucket) emits nothing, so the title holds
      *  while the page leaves. */
     private fun observeIdentity(account: String, personId: Long): Flow<PageIdentity> =
-        personDao.observePersonForUser(account, personId)
+        peopleCatalog.observePersonForUser(account, personId)
             .retryOnDbTear(IDENTITY_TEAR_TAG, maxAttempts = 5, onRetry = { FaceDiagnostics.recordDbTear(IDENTITY_TEAR_TAG, it) })
             .withIndex()
             .filter { (index, row) -> index == 0 || row != null }
@@ -274,14 +276,14 @@ class PersonDetailViewModel @Inject constructor(
     fun loadKeys(personId: Long) {
         keysJob?.cancel()
         keysJob = viewModelScope.launch {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val prefs = context.settingsDataStore.data.first()
-            val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val faceOn = settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                settingsStore.get(Settings.FACE_ENABLED)
             if (!faceOn) { _keysForPicker.value = emptySet(); return@launch }
-            val name = personDao.personById(personId)?.displayName
+            val name = peopleCatalog.personById(personId)?.displayName
             val manual = if (name.isNullOrBlank()) flowOf(emptyList())
-                else personManualPhotoDao.photoKeysForName(account, name)
-            combine(faceDao.photoKeysForPerson(account, personId), manual) { faceKeys, added ->
+                else peopleCatalog.photoKeysForName(account, name)
+            combine(peopleCatalog.photoKeysForPerson(account, personId), manual) { faceKeys, added ->
                 (faceKeys + added).toSet()
             }.collect { _keysForPicker.value = it }
         }
@@ -296,7 +298,7 @@ class PersonDetailViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val userId = accountManager.getPrimaryUserId().first()
-                val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+                val account = userId?.id ?: LOCAL_PARTITION
                 val people = observePeopleUseCase(
                     userId,
                     if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
@@ -339,10 +341,10 @@ class PersonDetailViewModel @Inject constructor(
         if (name.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             val target = foldPersonInto(account, personId, name)
             // The merged name may match faces still sitting in other clusters; re-cluster so they join now.
-            faceIndexingScheduler.requestRecluster(userId)
+            faceIndexing.requestRecluster(userId)
             if (target == personId) {
                 _uiState.update { it.copy(personName = name) }
                 _message.value = R.string.person_msg_renamed
@@ -392,28 +394,28 @@ class PersonDetailViewModel @Inject constructor(
         // A candidate merged away since it was offered (from its own page, opened off the card) would
         // keep a card up for a group that no longer exists until the lookup below settles; drop it now.
         _mergeSuggestion.value?.let { held ->
-            if (dropsHeldSuggestion(personDao.personById(held.personId))) {
+            if (dropsHeldSuggestion(peopleCatalog.personById(held.personId))) {
                 _mergeSuggestion.compareAndSet(held, null)
             }
         }
         val userId = accountManager.getPrimaryUserId().first()
-        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val name = personDao.personById(personId)?.displayName
+        val account = userId?.id ?: LOCAL_PARTITION
+        val name = peopleCatalog.personById(personId)?.displayName
         if (name.isNullOrBlank()) { _mergeSuggestion.value = null; return }
         // The Unsorted bucket is a mixed pile of junk, so its mean face is meaningless: never offer it
         // as a "might also be this person" merge, which would fold the whole pile into a named person.
-        val otherId = personDao.otherPersonId(account)
+        val otherId = peopleCatalog.otherPersonId(account)
         var bestSimilarity = -1f
         val bestId = withContext(Dispatchers.Default) {
             val centroids = personCentroids.load(account, exactFor = personId) { it != otherId }
             val target = centroids[personId] ?: return@withContext -1L
-            val rejectedFaceIds = notPersonDao.allForUser(account)
+            val rejectedFaceIds = peopleCatalog.allNotPersonForUser(account)
                 .filter { samePersonName(it.personName, name) }.mapTo(HashSet()) { it.faceId }
             val ranked = rankSuggestionCandidates(
                 target, centroids, skip = setOfNotNull(personId, otherId), threshold = FACE_SUGGEST_THRESHOLD,
             )
             for (pid in ranked) {
-                val pidFaces = faceDao.faceIdsForPerson(account, pid)
+                val pidFaces = peopleCatalog.faceIdsForPerson(account, pid)
                 // Never re-offer a cluster the user already said is not this person.
                 if (pidFaces.any { it in rejectedFaceIds }) continue
                 // Nor one already accepted/dismissed this session, even if a recluster re-split it
@@ -430,11 +432,11 @@ class PersonDetailViewModel @Inject constructor(
         // one, so a named person absorbs its whole chain of close look-alikes with no taps. Only an UNNAMED
         // candidate is auto-accepted; a looser match or a rare named-vs-named suggestion still surfaces as
         // a card so the user decides, never silently merging two people they named apart.
-        val autoMerge = context.settingsDataStore.data.first()[SettingsKeys.FACE_AUTO_MERGE] == true
-        val candidateNamed = !personDao.personById(bestId)?.displayName.isNullOrBlank()
+        val autoMerge = settingsStore.get(Settings.FACE_AUTO_MERGE)
+        val candidateNamed = !peopleCatalog.personById(bestId)?.displayName.isNullOrBlank()
         if (autoMerge && !candidateNamed && autoAcceptsSuggestion(bestSimilarity)) {
             foldPersonInto(account, bestId, name, confirm = false)
-            faceIndexingScheduler.requestRecluster(userId)
+            faceIndexing.requestRecluster(userId)
             loadMergeSuggestion(personId)
             return
         }
@@ -455,10 +457,10 @@ class PersonDetailViewModel @Inject constructor(
         _mergeSuggestion.value = null
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             // Capture the faces BEFORE the fold (after it, candidateId owns none) so a recluster that
             // re-splits them can't re-offer the same faces.
-            val faceIds = faceDao.faceIdsForPerson(account, candidateId)
+            val faceIds = peopleCatalog.faceIdsForPerson(account, candidateId)
             val folded = runCatching { foldPersonInto(account, candidateId, name) }
                 .onFailure { Log.w("PersonDetailVM", "acceptMergeSuggestion fold failed: ${it.message}") }
                 .isSuccess
@@ -467,7 +469,7 @@ class PersonDetailViewModel @Inject constructor(
             // silently hiding a merge that never happened.
             if (folded) {
                 handledCandidateFaceIds += faceIds
-                faceIndexingScheduler.requestRecluster(userId)
+                faceIndexing.requestRecluster(userId)
             }
             loadMergeSuggestion(personId)
         }
@@ -483,11 +485,11 @@ class PersonDetailViewModel @Inject constructor(
         // next-lookup run in the background.
         _mergeSuggestion.value = null
         viewModelScope.launch(Dispatchers.IO) {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val faceIds = faceDao.faceIdsForPerson(account, candidateId)
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val faceIds = peopleCatalog.faceIdsForPerson(account, candidateId)
             faceEdits.edit {
-                if (faceIds.isNotEmpty()) notPersonDao.add(faceIds.map { NotPersonEntity(account, name, it) })
-                FaceCurationLog.notPerson(faceCurationTimeDao, account, name, faceIds, removed = false, System.currentTimeMillis())
+                if (faceIds.isNotEmpty()) peopleCatalog.addNotPersonMarks(faceIds.map { NotPersonRecord(account, name, it) })
+                peopleCatalog.noteNotPerson(account, name, faceIds, removed = false, System.currentTimeMillis())
             }
             handledCandidateFaceIds += faceIds
             loadMergeSuggestion(personId)
@@ -504,17 +506,17 @@ class PersonDetailViewModel @Inject constructor(
         val trimmed = newName.trim().ifEmpty { null }
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             // Renaming onto a name another person already holds is a merge, not a duplicate: fold this
             // person into that one (same name = same person) so a rebuild cannot silently collapse two
             // same-named rows and lose the smaller. The caller navigates away, since this person is gone.
-            if (trimmed != null && personDao.namedPeopleForUser(account)
+            if (trimmed != null && peopleCatalog.namedPeopleForUser(account)
                     .any { samePersonName(it.displayName, trimmed) && it.id != personId }
             ) {
                 foldPersonInto(account, personId, trimmed)
                 // The fresh name attracts more of that person's faces than the fold moved; re-cluster now
                 // so they join without waiting for a drained pass that may never come.
-                faceIndexingScheduler.requestRecluster(userId)
+                faceIndexing.requestRecluster(userId)
                 withContext(Dispatchers.Main) { onMergedAway() }
                 return@launch
             }
@@ -524,7 +526,7 @@ class PersonDetailViewModel @Inject constructor(
             renamePerson(account, personId, trimmed)
             // Naming anchors these faces; re-cluster now so the name pulls in its other faces instead of
             // waiting for the next drained pass. Forced, so it runs even while indexing is paused.
-            if (trimmed != null) faceIndexingScheduler.requestRecluster(userId)
+            if (trimmed != null) faceIndexing.requestRecluster(userId)
             _uiState.update { it.copy(personName = trimmed) }
             load(personId)
             // Surface the merge prompt right after naming, so a freshly named cluster offers its
@@ -541,8 +543,8 @@ class PersonDetailViewModel @Inject constructor(
     fun removePhotos(personId: Long, photoKeys: Collection<String>) {
         if (photoKeys.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val faceIds = faceDao.faceIdsForPersonInPhotos(account, personId, photoKeys)
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val faceIds = peopleCatalog.faceIdsForPersonInPhotos(account, personId, photoKeys)
             notThisPerson(account, personId, faceIds, photoKeys)
             _message.value = R.string.person_msg_removed
         }
@@ -558,16 +560,16 @@ class PersonDetailViewModel @Inject constructor(
     fun markSelectedNotPerson(personId: Long, photoKeys: Collection<String>) {
         if (photoKeys.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val name = personDao.personById(personId)?.displayName
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val name = peopleCatalog.personById(personId)?.displayName
             faceEdits.edit {
-                faceDao.rejectFacesForPersonInPhotos(account, personId, photoKeys)
+                peopleCatalog.rejectFacesForPersonInPhotos(account, personId, photoKeys)
                 refreshPersonCoverAndCount(account, personId, name)
                 // Rejected faces changed the cluster; drop the stale summary and recluster so the count and
                 // any regrouping stay honest.
-                clusterSummaryDao.deleteByPerson(personId)
+                peopleCatalog.deleteClusterSummaryForPerson(personId)
             }
-            faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
+            faceIndexing.requestRecluster(accountManager.getPrimaryUserId().first())
             _message.value = R.string.person_msg_dismissed
         }
     }
@@ -582,8 +584,8 @@ class PersonDetailViewModel @Inject constructor(
         if (name.isEmpty() || photoKeys.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            val faceIds = faceDao.faceIdsForPersonInPhotos(account, fromPersonId, photoKeys)
+            val account = userId?.id ?: LOCAL_PARTITION
+            val faceIds = peopleCatalog.faceIdsForPersonInPhotos(account, fromPersonId, photoKeys)
             if (faceIds.isEmpty()) return@launch
             val moved = assignFacesToPerson(userId, faceIds, AssignFacesToPersonUseCase.Target.Named(name))
             if (moved >= 0) _message.value = R.string.person_msg_moved
@@ -592,10 +594,10 @@ class PersonDetailViewModel @Inject constructor(
 
     private suspend fun refreshPersonCoverAndCount(account: String, personId: Long, name: String?) {
         val manual = if (name.isNullOrBlank()) emptyList()
-            else personManualPhotoDao.photoKeysForNameList(account, name)
-        val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
+            else peopleCatalog.photoKeysForNameList(account, name)
+        val count = personPhotoCount(peopleCatalog.distinctPhotoKeysForPerson(account, personId), manual)
         val cover = resolveCover(account, personId, name)
-        personDao.updateCoverAndCount(personId, cover, count)
+        peopleCatalog.updateCoverAndCount(personId, cover, count)
     }
 
     /** "This is not a person": reject every face in the cluster so it never groups again, along with the
@@ -605,9 +607,9 @@ class PersonDetailViewModel @Inject constructor(
     fun ignorePerson(personId: Long, onDone: () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             ignorePeople(account, listOf(personId))
-            faceIndexingScheduler.requestRecluster(userId)
+            faceIndexing.requestRecluster(userId)
             withContext(Dispatchers.Main) { onDone() }
         }
     }
@@ -619,18 +621,18 @@ class PersonDetailViewModel @Inject constructor(
     fun addPhotos(personId: Long, photoKeys: Collection<String>) {
         if (photoKeys.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val name = personDao.personById(personId)?.displayName
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val name = peopleCatalog.personById(personId)?.displayName
             if (name.isNullOrBlank()) return@launch
             faceEdits.edit {
-                personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(account, name, it) })
-                FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys, removed = false, System.currentTimeMillis())
+                peopleCatalog.addManualPhotos(photoKeys.map { PersonManualPhotoRecord(account, name, it) })
+                peopleCatalog.noteManualPhotos(account, name, photoKeys, removed = false, System.currentTimeMillis())
                 // Refresh the cached count so the People tile matches the grid (which observes the manual
                 // keys live); otherwise the tile stays stale until the next clustering rebuild.
-                val manual = personManualPhotoDao.photoKeysForNameList(account, name)
-                val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
+                val manual = peopleCatalog.photoKeysForNameList(account, name)
+                val count = personPhotoCount(peopleCatalog.distinctPhotoKeysForPerson(account, personId), manual)
                 val cover = resolveCover(account, personId, name)
-                personDao.updateCoverAndCount(personId, cover, count)
+                peopleCatalog.updateCoverAndCount(personId, cover, count)
             }
             _message.value = R.string.person_msg_added
         }
@@ -644,18 +646,18 @@ class PersonDetailViewModel @Inject constructor(
      */
     fun setCover(personId: Long, photoKey: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val faceId = faceDao.topFaceForPersonPhoto(account, personId, photoKey)
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val faceId = peopleCatalog.topFaceForPersonPhoto(account, personId, photoKey)
             if (faceId == null) {
                 _message.value = R.string.person_cover_no_face
                 return@launch
             }
             faceEdits.edit {
-                personDao.updateCover(personId, faceId)
-                val name = personDao.personById(personId)?.displayName
+                peopleCatalog.updateCover(personId, faceId)
+                val name = peopleCatalog.personById(personId)?.displayName
                 if (!name.isNullOrBlank()) {
-                    personCoverDao.set(PersonCoverEntity(account, name, photoKey))
-                    FaceCurationLog.cover(faceCurationTimeDao, account, name, removed = false, System.currentTimeMillis())
+                    peopleCatalog.setCoverPhoto(account, name, photoKey)
+                    peopleCatalog.noteCover(account, name, removed = false, System.currentTimeMillis())
                 }
             }
         }
@@ -665,9 +667,9 @@ class PersonDetailViewModel @Inject constructor(
      *  clearest face. Used wherever the cached cover is recomputed after curation. */
     private suspend fun resolveCover(account: String, personId: Long, name: String?): String? {
         val chosen = name?.takeIf { it.isNotBlank() }
-            ?.let { personCoverDao.photoKeyForName(account, it) }
-            ?.let { key -> faceDao.topFaceForPersonPhoto(account, personId, key) }
-        return chosen ?: faceDao.topFaceForPerson(account, personId)
+            ?.let { peopleCatalog.coverPhotoKeyForName(account, it) }
+            ?.let { key -> peopleCatalog.topFaceForPersonPhoto(account, personId, key) }
+        return chosen ?: peopleCatalog.topFaceForPerson(account, personId)
     }
 }
 
@@ -681,16 +683,16 @@ class PersonDetailViewModel @Inject constructor(
  * photo. A box stored in pixels (an older face, a coordinate past 1) or an empty one gives no point, so that
  * photo's tile keeps its centred crop. Pure so it is unit-tested without Android.
  */
-internal fun faceFocusByPhoto(faces: List<FaceOnPhoto>): Map<String, Offset> {
-    val best = HashMap<String, FaceOnPhoto>()
+internal fun faceFocusByPhoto(faces: List<FaceBoxRecord>): Map<String, Offset> {
+    val best = HashMap<String, FaceBoxRecord>()
     for (face in faces) {
-        val usable = face.boxLeft in 0f..1f && face.boxTop in 0f..1f && face.boxRight <= 1f && face.boxBottom <= 1f &&
-            face.boxRight > face.boxLeft && face.boxBottom > face.boxTop
+        val usable = face.left in 0f..1f && face.top in 0f..1f && face.right <= 1f && face.bottom <= 1f &&
+            face.right > face.left && face.bottom > face.top
         if (!usable) continue
         val held = best[face.photoKey]
         if (held == null || face.score > held.score) best[face.photoKey] = face
     }
-    return best.mapValues { (_, f) -> Offset((f.boxLeft + f.boxRight) / 2f, (f.boxTop + f.boxBottom) / 2f) }
+    return best.mapValues { (_, f) -> Offset((f.left + f.right) / 2f, (f.top + f.bottom) / 2f) }
 }
 
 /**
@@ -708,4 +710,4 @@ internal fun looksForSuggestionOnNaming(wasNamed: Boolean?, isNamed: Boolean): B
  * row ([candidateRow]) is gone, the candidate was merged away, so the card would offer a group that no
  * longer exists.
  */
-internal fun dropsHeldSuggestion(candidateRow: PersonEntity?): Boolean = candidateRow == null
+internal fun dropsHeldSuggestion(candidateRow: PersonRecord?): Boolean = candidateRow == null

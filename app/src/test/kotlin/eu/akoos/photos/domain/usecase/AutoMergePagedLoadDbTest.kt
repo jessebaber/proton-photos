@@ -42,6 +42,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 import kotlin.random.Random
+import eu.akoos.photos.data.usecase.AssignPersonNameUseCaseImpl
+import eu.akoos.photos.data.usecase.AutoMergePeopleUseCase
 
 /**
  * Proves the auto-merge's sliced read chooses exactly what the whole-table read did: over a real database
@@ -72,7 +74,7 @@ class AutoMergePagedLoadDbTest {
             .also { dbs += it }
     }
 
-    private fun assignPersonName(db: AppDatabase) = AssignPersonNameUseCase(
+    private fun assignPersonName(db: AppDatabase) = AssignPersonNameUseCaseImpl(
         db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
         db.personCoverDao(), db.clusterSummaryDao(), db,
     )

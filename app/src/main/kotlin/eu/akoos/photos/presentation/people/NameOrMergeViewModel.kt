@@ -24,16 +24,24 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.ml.FaceIndexing
+
+import eu.akoos.photos.domain.ml.FaceEdits
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase
 import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase
 import eu.akoos.photos.domain.usecase.AssignPersonNameUseCase
@@ -84,9 +92,9 @@ class NameOrMergeViewModel @Inject constructor(
     private val assignFacesToPerson: AssignFacesToPersonUseCase,
     private val addPhotosToPerson: AddPhotosToPersonUseCase,
     private val assignPersonName: AssignPersonNameUseCase,
-    private val faceIndexingScheduler: FaceIndexingScheduler,
-    private val personDao: PersonDao,
-    private val faceDao: FaceDao,
+    private val faceIndexing: FaceIndexing,
+    private val peopleCatalog: PeopleCatalog,
+    
     private val personCentroids: PersonCentroids,
 ) : ViewModel() {
 
@@ -121,7 +129,7 @@ class NameOrMergeViewModel @Inject constructor(
                 userId,
                 if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
                 namedOnly = true,
-            ).map { summaries -> (userId?.id ?: PhotoLocationEntity.LOCAL_USER) to summaries.mapNotNull { it.toPersonUi() } }
+            ).map { summaries -> (userId?.id ?: LOCAL_PARTITION) to summaries.mapNotNull { it.toPersonUi() } }
         }
         .combine(subject) { (account, list), subject ->
             Pickable(account, subject, NameOrMergeRules.pickablePeople(list, (subject as? NameOrMergeSubject.Group)?.personId))
@@ -174,7 +182,7 @@ class NameOrMergeViewModel @Inject constructor(
         if (faceIds.isEmpty()) return null
         val sum = CentroidSum()
         faceIds.chunked(FACE_ID_CHUNK).forEach { chunk ->
-            faceDao.vectorsByIdsChunk(account, chunk).forEach { sum.add(it.embedding) }
+            peopleCatalog.faceVectorsByIds(account, chunk).forEach { sum.add(it.embedding) }
         }
         return sum.centroid()
     }
@@ -217,7 +225,7 @@ class NameOrMergeViewModel @Inject constructor(
     fun assignFaces(subject: NameOrMergeSubject.Faces, target: AssignFacesToPersonUseCase.Target) =
         launchAction(subject) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             val faceIds = subject.faces.map { it.faceId }
             val assigned = if (faceIds.isEmpty()) -1L
                 else assignFacesToPerson(userId, faceIds, target, recluster = false)
@@ -229,13 +237,13 @@ class NameOrMergeViewModel @Inject constructor(
                 addPhotosToPerson(personId, NameOrMergeRules.manualPhotoKeys(subject, facesAssigned))
                 Outcome.Done(subject.key, personId, R.string.person_msg_added)
             } finally {
-                if (facesAssigned) faceIndexingScheduler.requestRecluster(userId)
+                if (facesAssigned) faceIndexing.requestRecluster(userId)
             }
         }
 
     /** Whether [personId] is a live named person of [account], the only kind a plain add attaches to. */
     private suspend fun takesPhotos(account: String, personId: Long): Boolean {
-        val person = personDao.personById(personId) ?: return false
+        val person = peopleCatalog.personById(personId) ?: return false
         return person.userId == account && !person.isOther && !person.displayName.isNullOrBlank()
     }
 
@@ -254,16 +262,16 @@ class NameOrMergeViewModel @Inject constructor(
      *  pulls in faces still sitting elsewhere, then the page's own "Renamed" or "People merged". */
     private fun foldGroup(subject: NameOrMergeSubject.Group, name: String) = launchAction(subject) {
         val userId = accountManager.getPrimaryUserId().first()
-        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        val account = userId?.id ?: LOCAL_PARTITION
         // Only a live group of this account takes a name: never the Unsorted bucket, whose leftover faces
         // would all be confirmed under it, and never a group a regroup has since removed.
-        val group = personDao.personById(subject.personId)
+        val group = peopleCatalog.personById(subject.personId)
         if (group == null || group.userId != account || group.isOther) return@launchAction failed(subject)
         val personId = assignPersonName(account, subject.personId, name)
         if (personId < 0) {
             failed(subject)
         } else {
-            faceIndexingScheduler.requestRecluster(userId)
+            faceIndexing.requestRecluster(userId)
             Outcome.Done(subject.key, personId, NameOrMergeRules.groupMessage(subject.personId, personId))
         }
     }

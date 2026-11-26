@@ -56,32 +56,9 @@ private const val TAG = "CloudTrashSvc"
  *  chunks of this many before each request. */
 private const val TRASH_BATCH = 150
 
-/** Per-link result of a restore-from-trash batch. [failedLinkIds] are the links the
- *  server rejected (per-item code != 1000) and that therefore stayed in trash.
- *  [galleryRefreshFailed] is true when the restore itself succeeded but the follow-up
- *  stream refresh couldn't run — the restored photos are back on the server but won't
- *  reappear in the gallery until a manual pull-to-refresh. */
-data class CloudRestoreOutcome(
-    val restoredLinkIds: Set<String>,
-    val failedLinkIds: Set<String>,
-    val galleryRefreshFailed: Boolean,
-)
-
-/** Per-link result of a permanent-delete batch. [failedLinkIds] are the links the
- *  server rejected (per-item code != 1000) and that therefore remain in trash. */
-data class CloudDeleteOutcome(
-    val deletedLinkIds: Set<String>,
-    val failedLinkIds: Set<String>,
-)
-
-/** Per-link result of a move-to-trash batch. [trashedLinkIds] are the links the server
- *  accepted (per-item code 1000); [failedLinkIds] are the ones it rejected and that are
- *  therefore still on the cloud. A caller can use the failed count to avoid reporting a
- *  delete as fully successful when some links stayed put. */
-data class CloudTrashOutcome(
-    val trashedLinkIds: Set<String>,
-    val failedLinkIds: Set<String>,
-)
+typealias CloudRestoreOutcome = eu.akoos.photos.domain.repository.CloudRestoreOutcome
+typealias CloudDeleteOutcome = eu.akoos.photos.domain.repository.CloudDeleteOutcome
+typealias CloudTrashOutcome = eu.akoos.photos.domain.repository.CloudTrashOutcome
 
 /** Proton per-link code for "the server no longer holds this link" (same value PhotoStreamService
  *  reads as EVENT_ANCHOR_NOT_EXISTS). In a trash / delete response it means the link is already gone,

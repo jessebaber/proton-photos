@@ -47,6 +47,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import eu.akoos.photos.data.usecase.ClusterFacesUseCase
+import eu.akoos.photos.data.usecase.IncrementalBatch
+import eu.akoos.photos.data.usecase.assignIncrementalParallel
 
 /**
  * How a library too big for the whole-library rebuild gets its people: the batched placement opens the

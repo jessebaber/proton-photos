@@ -22,6 +22,16 @@
 
 package eu.akoos.photos.presentation.duplicates
 
+import eu.akoos.photos.domain.duplicates.PerceptualHashing
+
+import eu.akoos.photos.domain.duplicates.LocalContentHashes
+
+import eu.akoos.photos.domain.catalog.PhotoCatalog
+
+import eu.akoos.photos.domain.catalog.PerceptualHashLiteRecord
+
+import eu.akoos.photos.domain.usecase.DeletePhotoResult
+
 import android.util.Log
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -45,13 +55,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.db.dao.PerceptualHashDao
-import eu.akoos.photos.data.db.dao.PerceptualHashLite
-import eu.akoos.photos.data.repository.LocalContentHashFiller
-import eu.akoos.photos.data.repository.drive.PerceptualHashScheduler
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import android.app.PendingIntent
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -71,7 +78,7 @@ private data class LeanHash(val fingerprint: PdqHash.Fingerprint, val freshness:
 private data class Sources(
     val items: List<GalleryItem>,
     val localHashes: Map<String, String>,
-    val hashRows: List<PerceptualHashLite>,
+    val hashRows: List<PerceptualHashLiteRecord>,
     val deleted: Set<String>,
 )
 
@@ -109,12 +116,12 @@ internal fun shouldRecluster(current: Map<String, Long>, last: Map<String, Long>
 class DuplicateFinderViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val findDuplicates: FindDuplicatesUseCase,
-    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val deletePhotoUseCase: DeletePhotoUseCase<PendingIntent>,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
-    private val perceptualHashDao: PerceptualHashDao,
-    private val perceptualHashScheduler: PerceptualHashScheduler,
-    private val localContentHashFiller: LocalContentHashFiller,
+    private val photoCatalog: PhotoCatalog,
+    private val perceptualHashing: PerceptualHashing,
+    private val localContentHashes: LocalContentHashes,
     private val ignoreStore: DuplicateIgnoreStore,
 ) : ViewModel() {
 
@@ -162,7 +169,7 @@ class DuplicateFinderViewModel @Inject constructor(
     private val recentlyDeleted = MutableStateFlow<Set<String>>(emptySet())
 
     /** Deferred cloud-delete work held while the Android 11+ system trash dialog is up. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingPermissionResult: DeletePhotoResult.NeedsMediaWritePermission<PendingIntent>? = null
 
     // The item list last handed to the background hash scheduler. The combined flow re-emits on
     // every single hash write, but the scheduler only needs to (re)scan when the library itself
@@ -233,8 +240,8 @@ class DuplicateFinderViewModel @Inject constructor(
                     else getGalleryItems.invoke(userId)
                 combine(
                     libraryFlow,
-                    localContentHashFiller.hashes,
-                    perceptualHashDao.observeLite(PdqHash.ALGO_VERSION),
+                    localContentHashes.hashes,
+                    photoCatalog.observePerceptualHashes(PdqHash.ALGO_VERSION),
                     recentlyDeleted,
                 ) { items, localHashes, hashRows, deleted ->
                     Sources(items, localHashes, hashRows, deleted)
@@ -299,10 +306,10 @@ class DuplicateFinderViewModel @Inject constructor(
                     lastScheduledItems = items
                     // A guest (null userId) hashes its local files the same way; the scheduler only
                     // needs an account to warm a cold cloud thumbnail, which a guest never has.
-                    perceptualHashScheduler.request(items, primaryUserId)
+                    perceptualHashing.request(items, primaryUserId)
                     // Fill the exact-duplicate device hashes on device, with or without an account, so
                     // the "Identical" groups cover local files the backup pipeline never hashed.
-                    localContentHashFiller.request(items)
+                    localContentHashes.request(items)
                 }
             }
         }
@@ -313,7 +320,7 @@ class DuplicateFinderViewModel @Inject constructor(
      * excluded (a backed-up pair, not two copies); the remaining LocalOnly / CloudOnly candidates
      * are looked up by stable id in [storedHashes], split device/cloud so groups stay homogeneous,
      * and clustered by [group]. Anything not yet hashed is simply absent here and gets filled in by
-     * [perceptualHashScheduler] in the background, this re-runs as the cache Flow re-emits. While
+     * [perceptualHashing] in the background, this re-runs as the cache Flow re-emits. While
      * any candidate still lacks a fresh stored hash the scan is reported as in progress.
      *
      * A photo already in an exact group ([exactIds]) is skipped, so an exact duplicate is shown only
@@ -542,18 +549,18 @@ class DuplicateFinderViewModel @Inject constructor(
                     deleteFromCloud = true,
                 )
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // A copy Android 10 refused to remove is still there, so it stays in its group.
                         val landed = result.landed(toDelete)
                         removeFromGroup(group, landed.map { it.stableId }.toSet())
                         markDeleted(landed)
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         _uiState.update { it.copy(pendingDeleteIntent = result.pendingIntent) }
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    is DeletePhotoResult.CloudDeleteFailed ->
                         _uiState.update { it.copy(errorMessage = "drive") }
                 }
             } catch (e: Exception) {
@@ -613,7 +620,7 @@ class DuplicateFinderViewModel @Inject constructor(
                     deleteFromCloud = true,
                 )
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         // A copy Android 10 refused to remove is still there, so it stays in its group.
                         perGroup.forEach { (group, items) ->
                             removeFromGroup(group, result.landed(items).map { it.stableId }.toSet())
@@ -621,11 +628,11 @@ class DuplicateFinderViewModel @Inject constructor(
                         markDeleted(result.landed(toDelete))
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         pendingPermissionResult = result
                         _uiState.update { it.copy(pendingDeleteIntent = result.pendingIntent) }
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    is DeletePhotoResult.CloudDeleteFailed ->
                         _uiState.update { it.copy(errorMessage = "drive") }
                 }
             } catch (e: Exception) {
@@ -656,11 +663,11 @@ class DuplicateFinderViewModel @Inject constructor(
                 // later chunk declined leaves exactly the earlier ones marked.
                 val result = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> {
+                    is DeletePhotoResult.Success -> {
                         markDeleted(pending.itemsBeingDeleted)
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                    is DeletePhotoResult.CloudDeleteFailed -> {
                         // The system already carried out the device delete before handing back
                         // here, so this copy IS gone from the phone even though Drive kept its own.
                         // It has to be recorded as deleted for exactly that reason: left out, the
@@ -669,7 +676,7 @@ class DuplicateFinderViewModel @Inject constructor(
                         markDeleted(pending.itemsBeingDeleted)
                         _uiState.update { it.copy(errorMessage = "drive") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
                         // The next chunk, launched like the first.
                         markDeleted(pending.itemsBeingDeleted)
                         pendingPermissionResult = result
@@ -733,7 +740,7 @@ class DuplicateFinderViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> item.cloud.linkId
             }
         }
-        runCatching { perceptualHashDao.deleteByKeys(keys) }
+        runCatching { photoCatalog.deletePerceptualHashesByKeys(keys) }
             .onFailure { Log.w(TAG, "perceptual-hash evict failed: ${it.message}") }
     }
 }

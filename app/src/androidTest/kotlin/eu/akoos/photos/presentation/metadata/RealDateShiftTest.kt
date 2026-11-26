@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.metadata
 
+import eu.akoos.photos.data.usecase.WriteLocalPhotoMetadataUseCaseImpl
+import android.content.IntentSender
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.net.Uri
@@ -72,7 +74,7 @@ class RealDateShiftTest {
 
     /** The real write the editor drives. It takes a Context and nothing else, so it is built here
      *  rather than injected. */
-    private val writeMetadata = WriteLocalPhotoMetadataUseCase(context)
+    private val writeMetadata = WriteLocalPhotoMetadataUseCaseImpl(context)
 
     /** Every MediaStore row this run inserted, in insertion order. */
     private val inserted = mutableListOf<Uri>()
@@ -214,8 +216,8 @@ class RealDateShiftTest {
 
     /** True when the OS demanded consent for any of [results]. A file this test created is owned by
      *  the app and should need none, so a device that asks cannot stage the write at all. */
-    private fun demandedConsent(results: List<MetadataWriteResult>): Boolean =
-        results.any { it is MetadataWriteResult.NeedsPermission }
+    private fun demandedConsent(results: List<MetadataWriteResult<IntentSender>>): Boolean =
+        results.any { it is MetadataWriteResult.NeedsPermission<IntentSender> }
 
     /**
      * The promise of the shift, on real files: three photos taken at uneven distances are moved by one

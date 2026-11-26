@@ -22,14 +22,16 @@
 
 package eu.akoos.photos.presentation.people
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
-import eu.akoos.photos.data.face.FaceCurationLog
-import eu.akoos.photos.data.face.FaceEditCounter
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+import eu.akoos.photos.domain.ml.FaceEdits
+import eu.akoos.photos.domain.ml.FaceIndexing
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.presentation.gallery.FaceBox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,13 +39,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.NotPersonDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.presentation.gallery.FaceBox
 import javax.inject.Inject
 
 /** One excluded face reduced to what a tile needs: which face, its photo, and the box to crop to. */
@@ -80,12 +75,10 @@ data class FaceExclusionsUiState(
 @HiltViewModel
 class FaceExclusionsViewModel @Inject constructor(
     private val accountManager: AccountManager,
-    private val faceDao: FaceDao,
-    private val notPersonDao: NotPersonDao,
-    private val faceCurationTimeDao: FaceCurationTimeDao,
-    private val faceIndexingScheduler: FaceIndexingScheduler,
-    private val faceEdits: FaceEditCounter,
-    @ApplicationContext private val context: Context,
+    private val peopleCatalog: PeopleCatalog,
+    private val faceIndexing: FaceIndexing,
+    private val faceEdits: FaceEdits,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FaceExclusionsUiState())
@@ -95,26 +88,26 @@ class FaceExclusionsViewModel @Inject constructor(
      *  how the People screen gates on the same two switches. */
     fun load() {
         viewModelScope.launch {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val prefs = context.settingsDataStore.data.first()
-            val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val faceOn = settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                settingsStore.get(Settings.FACE_ENABLED)
             if (!faceOn) {
                 _uiState.value = FaceExclusionsUiState(isLoading = false)
                 return@launch
             }
-            val groups = notPersonDao.facesForUser(account)
+            val groups = peopleCatalog.notPersonFacesForUser(account)
                 .groupBy { it.personName }
                 .map { (name, rows) ->
                     NotThisPersonGroup(
                         name = name,
                         faces = rows.map {
-                            ExcludedFaceUi(it.faceId, it.photoKey, FaceBox(it.boxLeft, it.boxTop, it.boxRight, it.boxBottom))
+                            ExcludedFaceUi(it.faceId, it.photoKey, FaceBox(it.left, it.top, it.right, it.bottom))
                         },
                     )
                 }
                 .sortedBy { it.name.lowercase() }
-            val ignored = faceDao.rejectedFacesForUser(account)
-                .map { ExcludedFaceUi(it.id, it.photoKey, FaceBox(it.boxLeft, it.boxTop, it.boxRight, it.boxBottom)) }
+            val ignored = peopleCatalog.rejectedFacesForUser(account)
+                .map { ExcludedFaceUi(it.id, it.photoKey, FaceBox(it.left, it.top, it.right, it.bottom)) }
             _uiState.value = FaceExclusionsUiState(isLoading = false, notThisPerson = groups, ignored = ignored)
         }
     }
@@ -124,12 +117,12 @@ class FaceExclusionsViewModel @Inject constructor(
     fun undoNotThisPerson(name: String, faceId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val account = userId?.id ?: LOCAL_PARTITION
             faceEdits.edit {
-                notPersonDao.deleteMark(account, name, faceId)
-                FaceCurationLog.notPerson(faceCurationTimeDao, account, name, listOf(faceId), removed = true, System.currentTimeMillis())
+                peopleCatalog.deleteNotPersonMark(account, name, faceId)
+                peopleCatalog.noteNotPerson(account, name, listOf(faceId), removed = true, System.currentTimeMillis())
             }
-            faceIndexingScheduler.requestIndex(userId)
+            faceIndexing.requestIndex(userId)
             load()
         }
     }
@@ -139,8 +132,8 @@ class FaceExclusionsViewModel @Inject constructor(
     fun undoIgnored(faceId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            faceEdits.edit { faceDao.unrejectFace(faceId) }
-            faceIndexingScheduler.requestIndex(userId)
+            faceEdits.edit { peopleCatalog.unrejectFace(faceId) }
+            faceIndexing.requestIndex(userId)
             load()
         }
     }

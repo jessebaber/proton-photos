@@ -53,15 +53,15 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
-import eu.akoos.photos.domain.usecase.FACE_INDEX_VERSION_V3
+import eu.akoos.photos.data.usecase.FACE_INDEX_VERSION_V3
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
 import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
-import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
-import eu.akoos.photos.domain.usecase.ParsedFace
-import eu.akoos.photos.domain.usecase.ParsedPerson
-import eu.akoos.photos.domain.usecase.accountTag
-import eu.akoos.photos.domain.usecase.writeBody
-import eu.akoos.photos.domain.usecase.writeFaceIndexEnvelope
+import eu.akoos.photos.data.usecase.ImportFaceIndexUseCaseImpl
+import eu.akoos.photos.data.usecase.ParsedFace
+import eu.akoos.photos.data.usecase.ParsedPerson
+import eu.akoos.photos.data.usecase.accountTag
+import eu.akoos.photos.data.usecase.writeBody
+import eu.akoos.photos.data.usecase.writeFaceIndexEnvelope
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -855,7 +855,7 @@ class FaceSnapshotRoundTripTest {
         every { cryptoHelper.decryptAndVerifyData(any<String>(), any<List<ByteArray>>(), any()) } answers {
             VerifiedBytes(Base64.getDecoder().decode(firstArg<String>()), verified = true)
         }
-        val importFaceIndex = ImportFaceIndexUseCase(
+        val importFaceIndex = ImportFaceIndexUseCaseImpl(
             context,
             accountManager,
             cryptoHelper,

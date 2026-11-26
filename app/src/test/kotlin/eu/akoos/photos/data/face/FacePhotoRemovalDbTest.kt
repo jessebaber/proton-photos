@@ -36,7 +36,7 @@ import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
-import eu.akoos.photos.domain.usecase.RekeyPhotoFacesUseCase
+import eu.akoos.photos.data.usecase.RekeyPhotoFacesUseCase
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals

@@ -27,13 +27,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import eu.akoos.photos.data.preferences.AlbumGridPrefsBoot
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.presentation.gallery.AlbumsViewMode
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 
 /** How the People page lays out its people: [columns] cards per row in a grid, or one row each in a list. */
 data class PeopleDisplay(val viewMode: AlbumsViewMode, val columns: Int)
@@ -43,22 +43,28 @@ internal val PeopleColumnChoices = listOf(2, 3, 4)
 
 private fun columnsOf(stored: Int?): Int = stored?.takeIf { it in PeopleColumnChoices } ?: 2
 
-/** The People page's layout from the stored settings: the Albums tab's while it follows that, else its own. */
-internal fun peopleDisplayOf(prefs: Preferences): PeopleDisplay =
-    if (prefs[SettingsKeys.PEOPLE_FOLLOW_ALBUMS] ?: true) {
+/**
+ * The People page's layout from raw DataStore preferences. Kept for call sites that still hold a
+ * [Preferences] snapshot; keys match [Settings] names so defaults stay aligned.
+ */
+internal fun peopleDisplayOf(prefs: Preferences): PeopleDisplay {
+    val follow = prefs[booleanPreferencesKey(Settings.PEOPLE_FOLLOW_ALBUMS.name)]
+        ?: Settings.PEOPLE_FOLLOW_ALBUMS.default
+    return if (follow) {
         PeopleDisplay(
-            AlbumsViewMode.fromOrdinal(prefs[SettingsKeys.ALBUMS_VIEW_MODE]),
-            columnsOf(prefs[SettingsKeys.ALBUM_GRID_COLUMNS]),
+            AlbumsViewMode.fromOrdinal(prefs[intPreferencesKey(Settings.ALBUMS_VIEW_MODE.name)]),
+            columnsOf(prefs[intPreferencesKey(Settings.ALBUM_GRID_COLUMNS.name)]),
         )
     } else {
         ownPeopleDisplayOf(prefs)
     }
+}
 
 /** The People page's own layout, the one it takes while it does not follow the Albums tab. */
 internal fun ownPeopleDisplayOf(prefs: Preferences): PeopleDisplay =
     PeopleDisplay(
-        AlbumsViewMode.fromOrdinal(prefs[SettingsKeys.PEOPLE_VIEW_MODE]),
-        columnsOf(prefs[SettingsKeys.PEOPLE_GRID_COLUMNS]),
+        AlbumsViewMode.fromOrdinal(prefs[intPreferencesKey(Settings.PEOPLE_VIEW_MODE.name)]),
+        columnsOf(prefs[intPreferencesKey(Settings.PEOPLE_GRID_COLUMNS.name)]),
     )
 
 /**
@@ -68,14 +74,28 @@ internal fun ownPeopleDisplayOf(prefs: Preferences): PeopleDisplay =
 @Composable
 fun rememberPeopleDisplay(): PeopleDisplay {
     val context = LocalContext.current
+    val store = rememberSettingsStore()
+    val boot = remember(context) { context.bootPreferences() }
     val initial = remember {
         PeopleDisplay(
-            AlbumsViewMode.fromOrdinal(AlbumGridPrefsBoot.readViewMode(context)),
-            columnsOf(AlbumGridPrefsBoot.read(context)),
+            AlbumsViewMode.fromOrdinal(boot.albumsViewMode()),
+            columnsOf(boot.albumGridColumns()),
         )
     }
-    val display by remember {
-        context.settingsDataStore.data.map(::peopleDisplayOf).distinctUntilChanged()
+    val display by remember(store) {
+        combine(
+            store.observe(Settings.PEOPLE_FOLLOW_ALBUMS),
+            store.observe(Settings.ALBUMS_VIEW_MODE),
+            store.observe(Settings.ALBUM_GRID_COLUMNS),
+            store.observe(Settings.PEOPLE_VIEW_MODE),
+            store.observe(Settings.PEOPLE_GRID_COLUMNS),
+        ) { follow, albumsMode, albumsCols, peopleMode, peopleCols ->
+            if (follow) {
+                PeopleDisplay(AlbumsViewMode.fromOrdinal(albumsMode), columnsOf(albumsCols))
+            } else {
+                PeopleDisplay(AlbumsViewMode.fromOrdinal(peopleMode), columnsOf(peopleCols))
+            }
+        }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = initial)
     return display
 }

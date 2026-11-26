@@ -22,6 +22,11 @@
 
 package eu.akoos.photos.presentation.location
 
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.LocationCatalog
+import eu.akoos.photos.domain.catalog.PhotoLocationRecord
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -42,8 +47,6 @@ import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
-import eu.akoos.photos.data.db.dao.PhotoLocationDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -100,7 +103,7 @@ data class LocationDetailUiState(
 class LocationDetailViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
-    private val photoLocationDao: PhotoLocationDao,
+    private val locationCatalog: LocationCatalog,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val driveRepo: DrivePhotoRepository,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
@@ -162,8 +165,8 @@ class LocationDetailViewModel @Inject constructor(
                 // this is a sub-millisecond scan per row. Keep those matching the tapped place and map
                 // each to its library item by the entity id (local content uri or cloud linkId).
                 // Read the local partition when signed out, so a guest's place resolves its photos too.
-                val located: List<PhotoLocationEntity> =
-                    photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER).first()
+                val located: List<PhotoLocationRecord> =
+                    locationCatalog.observeLocationsForUser(userId?.id ?: LOCAL_PARTITION).first()
                 val matched = withContext(Dispatchers.Default) {
                     val seen = LinkedHashSet<String>()
                     val out = ArrayList<GalleryItem>()

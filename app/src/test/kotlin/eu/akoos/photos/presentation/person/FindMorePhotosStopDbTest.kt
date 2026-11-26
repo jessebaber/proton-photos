@@ -23,20 +23,21 @@
 package eu.akoos.photos.presentation.person
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.catalog.PeopleCatalogImpl
 import eu.akoos.photos.data.face.FaceEditCounter
-import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.face.FaceSweepEvent
-import eu.akoos.photos.data.face.SweepStop
-import eu.akoos.photos.data.face.sweepStopReason
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.ml.FaceEditsImpl
+import eu.akoos.photos.domain.ml.FaceIndexing
+import eu.akoos.photos.domain.ml.FaceSweepEvent
+import eu.akoos.photos.domain.ml.SweepStop
+import eu.akoos.photos.domain.ml.sweepStopReason
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import io.mockk.coEvery
@@ -86,10 +87,6 @@ class FindMorePhotosStopDbTest {
             .allowMainThreadQueries()
             .setQueryExecutor { it.run() }
             .build()
-        context.settingsDataStore.edit {
-            it[SettingsKeys.AI_FEATURES_ENABLED] = true
-            it[SettingsKeys.FACE_ENABLED] = true
-        }
         db.personDao().upsert(PersonEntity(id = 1L, userId = acct, displayName = "Anna", faceCount = 1))
         val buffer = ByteBuffer.allocate(FACE_EMBEDDING_DIM * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
         for (i in 0 until FACE_EMBEDDING_DIM) buffer.putFloat(if (i == 0) 1f else 0f)
@@ -104,7 +101,6 @@ class FindMorePhotosStopDbTest {
 
     @After
     fun tearDown() = runBlocking {
-        context.settingsDataStore.edit { it.clear() }
         db.close()
         Dispatchers.resetMain()
     }
@@ -112,18 +108,29 @@ class FindMorePhotosStopDbTest {
     private fun viewModel(sweep: Flow<FaceSweepEvent>): FindMorePhotosViewModel {
         val accounts = mockk<AccountManager>(relaxed = true)
         coEvery { accounts.getPrimaryUserId() } returns flowOf(UserId(acct))
-        val scheduler = mockk<FaceIndexingScheduler>(relaxed = true)
-        every { scheduler.sweepFacelessForPerson(any(), any(), any()) } returns sweep
+        val faceIndexing = mockk<FaceIndexing>(relaxed = true)
+        every { faceIndexing.sweepFacelessForPerson(any(), any(), any()) } returns sweep
         val gallery = mockk<GetGalleryItemsUseCase>(relaxed = true)
         every { gallery.invoke(any()) } returns flowOf(emptyList())
+        val settings = mockk<SettingsStore>(relaxed = true)
+        coEvery { settings.get(Settings.AI_FEATURES_ENABLED) } returns true
+        coEvery { settings.get(Settings.FACE_ENABLED) } returns true
         return FindMorePhotosViewModel(
             accountManager = accounts,
-            faceDao = db.faceDao(),
-            personDao = db.personDao(),
-            personManualPhotoDao = db.personManualPhotoDao(),
-            faceIndexingScheduler = scheduler,
+            peopleCatalog = PeopleCatalogImpl(
+                db = db,
+                personDao = db.personDao(),
+                faceDao = db.faceDao(),
+                notPersonDao = db.notPersonDao(),
+                personManualPhotoDao = db.personManualPhotoDao(),
+                personCoverDao = db.personCoverDao(),
+                faceCurationTimeDao = db.faceCurationTimeDao(),
+                clusterSummaryDao = db.clusterSummaryDao(),
+            ),
+            faceIndexing = faceIndexing,
             getGalleryItems = gallery,
-            faceEdits = FaceEditCounter(),
+            faceEdits = FaceEditsImpl(FaceEditCounter()),
+            settingsStore = settings,
             context = context,
         )
     }

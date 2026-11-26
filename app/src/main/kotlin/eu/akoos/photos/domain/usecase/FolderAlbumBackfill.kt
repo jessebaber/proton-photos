@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.usecase.DrivePairLookup
+
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import kotlinx.coroutines.CancellationException
