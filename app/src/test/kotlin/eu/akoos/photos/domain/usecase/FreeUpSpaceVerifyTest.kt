@@ -25,6 +25,9 @@ package eu.akoos.photos.domain.usecase
 import android.content.Context
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
+import eu.akoos.photos.data.db.dao.FreeUpVerifiedDao
+import eu.akoos.photos.data.db.entity.FreeUpVerifiedEntity
+import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -40,19 +43,12 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.io.IOException
+import java.net.UnknownHostException
 
 /**
- * Pins the safety decision the manual "Free up space" now makes before deleting anything: only a
- * device copy whose Drive link is confirmed active RIGHT NOW is reclaimed. The old path walked the
- * whole volume; [FreeUpSpaceUseCase.verifyActiveBackups] instead checks the on-device candidates'
- * links in one batched call and keeps only the ones the server returns at State == 1.
- *
- * The invariant is stricter than the [FreeUpSpaceUseCaseTest] eligibility gate: a candidate is kept
- * ONLY on a live State == 1 answer, and dropped (left on the device) when its link is trashed, absent
- * from the answer, or has no cloudFileId to check. A transient lookup failure must PROPAGATE so the
- * caller aborts and nothing is deleted against an unconfirmed batch. No Android, no network: a mocked
- * repo supplies the volume id and a mocked batch helper supplies the answer.
+ * Pins chunked [FreeUpSpaceUseCase.verifyForReclaim] / [FreeUpSpaceUseCase.readyToReclaim]:
+ * successful chunks persist and appear in the ready set; resume skips fresh verified rows; a failed
+ * or offline chunk never marks those URIs ready.
  */
 class FreeUpSpaceVerifyTest {
 
@@ -60,9 +56,11 @@ class FreeUpSpaceVerifyTest {
     private val volumeId = "vol-1"
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var linkDetailHelpers: LinkDetailHelpers
+    private lateinit var freeUpVerifiedDao: FreeUpVerifiedDao
     private lateinit var useCase: FreeUpSpaceUseCase
 
-    /** A SYNCED, backed-up candidate carrying [linkId] as its cloud link (null = never paired). */
+    private val persisted = mutableListOf<FreeUpVerifiedEntity>()
+
     private fun candidate(linkId: String?) = SyncState(
         localUri = "content://media/external/images/media/${linkId ?: "none"}",
         cloudFileId = linkId,
@@ -75,91 +73,128 @@ class FreeUpSpaceVerifyTest {
         sizeBytes = 1024L,
     )
 
-    /** A batch answer for [linkId] at the given Link.State (1 = active, anything else = not active). */
     private fun linkAt(linkId: String, state: Int) =
         BatchLinkDto(link = LinkCoreDto(linkId = linkId, type = 2, state = state))
 
+    private fun entityFor(row: FreeUpVerifiedEntity) = SyncStateEntity(
+        localUri = row.localUri,
+        userId = row.userId,
+        cloudFileId = row.cloudFileId,
+        localHash = "hash",
+        cloudHash = null,
+        status = SyncStatus.SYNCED,
+        lastSyncAttemptMs = 0L,
+        lastSyncSuccessMs = 1L,
+        backedUpAtMs = 1L,
+        sizeBytes = 1024L,
+    )
+
     @Before
     fun setUp() {
+        persisted.clear()
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
+        freeUpVerifiedDao = mockk(relaxed = true)
         val context = mockk<Context>(relaxed = true)
         val syncStateRepo = mockk<SyncStateRepository>(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, syncStateRepo, cloudRepo, linkDetailHelpers)
+        useCase = FreeUpSpaceUseCase(
+            context,
+            syncStateRepo,
+            cloudRepo,
+            linkDetailHelpers,
+            freeUpVerifiedDao,
+        )
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
+        coEvery { freeUpVerifiedDao.upsert(any<FreeUpVerifiedEntity>()) } coAnswers {
+            persisted += firstArg<FreeUpVerifiedEntity>()
+        }
+        coEvery { freeUpVerifiedDao.upsert(any<List<FreeUpVerifiedEntity>>()) } coAnswers {
+            persisted += firstArg<List<FreeUpVerifiedEntity>>()
+        }
+        coEvery { freeUpVerifiedDao.freshLocalUris(any(), any()) } answers {
+            val since = secondArg<Long>()
+            persisted.filter { it.userId == userId.id && it.verifiedAtMs >= since }.map { it.localUri }
+        }
+        coEvery { freeUpVerifiedDao.readyToReclaim(userId.id, any()) } answers {
+            val since = secondArg<Long>()
+            persisted
+                .filter { it.userId == userId.id && it.verifiedAtMs >= since }
+                .map { entityFor(it) }
+        }
     }
 
     @Test
-    fun `a candidate whose link is active is kept`() = runTest {
+    fun `after a successful chunk those URIs appear in readyToReclaim`() = runTest {
         val row = candidate("cloud-1")
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns
-            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } returns mapOf("cloud-1" to linkAt("cloud-1", state = 1))
 
-        val verified = useCase.verifyActiveBackups(userId, listOf(row))
+        useCase.verifyForReclaim(userId, listOf(row))
+        val ready = useCase.readyToReclaim(userId)
 
-        assertEquals(listOf(row.localUri), verified.map { it.localUri })
+        assertEquals(listOf(row.localUri), ready.map { it.localUri })
+        assertTrue("successful chunk must persist a verified row", persisted.isNotEmpty())
     }
 
     @Test
-    fun `a candidate whose link is trashed is dropped`() = runTest {
-        // State 2 is a trashed link: present on the server but not a copy the sweep may act on.
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns
-            mapOf("cloud-1" to linkAt("cloud-1", state = 2))
-
-        val verified = useCase.verifyActiveBackups(userId, listOf(candidate("cloud-1")))
-
-        assertTrue("a trashed link must not be reclaimed", verified.isEmpty())
-    }
-
-    @Test
-    fun `a candidate absent from the answer is dropped`() = runTest {
-        // A link the server omits (404 / gone) never appears in the map, so it stays on the device.
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns emptyMap()
-
-        val verified = useCase.verifyActiveBackups(userId, listOf(candidate("cloud-1")))
-
-        assertTrue("an unconfirmed link must not be reclaimed", verified.isEmpty())
-    }
-
-    @Test
-    fun `a candidate with no cloud link is dropped and never looked up`() = runTest {
-        val verified = useCase.verifyActiveBackups(userId, listOf(candidate(null)))
-
-        assertTrue("a row with no cloud link cannot be verified, so it is dropped", verified.isEmpty())
-        // A null-link-only set short-circuits before any network call.
-        coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any()) }
-    }
-
-    @Test
-    fun `only the active links survive a mixed batch`() = runTest {
-        val rows = listOf(candidate("a"), candidate("b"), candidate("c"), candidate(null))
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns mapOf(
-            "a" to linkAt("a", state = 1),   // active  -> kept
-            "b" to linkAt("b", state = 2),   // trashed -> dropped
-            // "c" absent                     // gone    -> dropped
-            // null-link "none"               // no id   -> dropped
+    fun `resume skips candidates already freshly verified`() = runTest {
+        val row = candidate("cloud-1")
+        persisted += FreeUpVerifiedEntity(
+            userId = userId.id,
+            localUri = row.localUri,
+            cloudFileId = "cloud-1",
+            verifiedAtMs = System.currentTimeMillis(),
         )
 
-        val verified = useCase.verifyActiveBackups(userId, rows)
+        useCase.verifyForReclaim(userId, listOf(row))
 
-        assertEquals(listOf("a"), verified.mapNotNull { it.cloudFileId })
+        coVerify(exactly = 0) {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(any(), any(), any())
+        }
     }
 
     @Test
-    fun `a transient verification failure propagates so the sweep aborts`() = runTest {
-        // batchFetchLinkDetails re-throws a 429 / 5xx / network error rather than returning a short
-        // map; verifyActiveBackups must not swallow it, or the caller would delete against an
-        // unconfirmed batch.
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } throws
-            IOException("simulated 429/5xx transient error")
+    fun `a failed chunk never marks those URIs ready`() = runTest {
+        val rows = listOf(candidate("a"), candidate("b"))
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } throws RuntimeException("chunk failed")
+
+        runCatching { useCase.verifyForReclaim(userId, rows) }
+        val ready = useCase.readyToReclaim(userId)
+
+        assertTrue("failed chunk must not persist ready rows", ready.isEmpty())
+        assertTrue(persisted.isEmpty())
+    }
+
+    @Test
+    fun `offline lookup throws so the worker can retry`() = runTest {
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } throws UnknownHostException("no route")
 
         val propagated: Throwable? = try {
-            useCase.verifyActiveBackups(userId, listOf(candidate("cloud-1")))
+            useCase.verifyForReclaim(userId, listOf(candidate("cloud-1")))
             null
-        } catch (e: IOException) {
+        } catch (e: UnknownHostException) {
             e
         }
 
-        assertNotNull("a transient verification error must propagate, not be swallowed", propagated)
+        assertNotNull("offline must propagate for WorkManager retry", propagated)
+        assertTrue(persisted.isEmpty())
+    }
+
+    @Test
+    fun `trashed links are not persisted as ready`() = runTest {
+        coEvery {
+            linkDetailHelpers.batchFetchLinkDetailsStrict(userId, volumeId, any())
+        } returns mapOf("cloud-1" to linkAt("cloud-1", state = 2))
+
+        useCase.verifyForReclaim(userId, listOf(candidate("cloud-1")))
+        val ready = useCase.readyToReclaim(userId)
+
+        assertTrue(ready.isEmpty())
+        assertTrue(persisted.isEmpty())
     }
 }

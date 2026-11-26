@@ -1346,6 +1346,41 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v41_to_v42_createsFreeUpVerifiedTable() {
+        Migrations.MIGRATION_41_42.migrate(db)
+
+        db.execSQL(
+            "INSERT INTO free_up_verified (userId, localUri, cloudFileId, verifiedAtMs) " +
+                "VALUES ('u1', 'content://media/1', 'cloud-1', 1000)",
+        )
+        db.query(
+            "SELECT userId, localUri, cloudFileId, verifiedAtMs FROM free_up_verified " +
+                "WHERE userId = 'u1' AND localUri = 'content://media/1'",
+        ).use { cur ->
+            assertTrue("expected the inserted verified row to be readable", cur.moveToFirst())
+            assertEquals("u1", cur.getString(0))
+            assertEquals("content://media/1", cur.getString(1))
+            assertEquals("cloud-1", cur.getString(2))
+            assertEquals(1000L, cur.getLong(3))
+        }
+
+        // Composite PK (userId, localUri): a second write for the same pair replaces.
+        db.execSQL(
+            "INSERT OR REPLACE INTO free_up_verified (userId, localUri, cloudFileId, verifiedAtMs) " +
+                "VALUES ('u1', 'content://media/1', 'cloud-2', 2000)",
+        )
+        db.query(
+            "SELECT COUNT(*), MAX(cloudFileId), MAX(verifiedAtMs) FROM free_up_verified " +
+                "WHERE userId = 'u1' AND localUri = 'content://media/1'",
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+            assertEquals("cloud-2", cur.getString(1))
+            assertEquals(2000L, cur.getLong(2))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(
