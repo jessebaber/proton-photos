@@ -21,6 +21,10 @@
 data-presentation eu/akoos/photos/data/usecase/ImportTakeoutUseCase.kt
 data-presentation eu/akoos/photos/data/usecase/StageImportUseCase.kt
 
+# stream: feat/presentation-settings
+
+# stream: feat/presentation-media
+
 # stream: feat/presentation-albums
 presentation-data eu/akoos/photos/presentation/albums/AlbumBrowseSource.kt
 presentation-data eu/akoos/photos/presentation/albums/AlbumDetailScreen.kt
@@ -52,22 +56,4 @@ presentation-worker eu/akoos/photos/presentation/folders/DeviceFolderDetailViewM
 presentation-worker eu/akoos/photos/presentation/importer/ImportViewModel.kt
 
 # stream: feat/presentation-people
-presentation-data eu/akoos/photos/presentation/calendar/CalendarViewModel.kt
-presentation-data eu/akoos/photos/presentation/calendar/DayDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/duplicates/DuplicateFinderViewModel.kt
-presentation-data eu/akoos/photos/presentation/duplicates/DuplicateIgnoreStore.kt
-presentation-data eu/akoos/photos/presentation/location/LocationDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/map/MapViewModel.kt
-presentation-data eu/akoos/photos/presentation/memories/MemoriesViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/AddToPersonFaceViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/FaceExclusionsViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/NameOrMergeViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/PeopleDisplay.kt
-presentation-data eu/akoos/photos/presentation/people/PeopleViewModel.kt
-presentation-data eu/akoos/photos/presentation/people/ReviewSuggestionsViewModel.kt
-presentation-data eu/akoos/photos/presentation/person/FindMorePhotosViewModel.kt
-presentation-data eu/akoos/photos/presentation/person/PersonDetailViewModel.kt
-presentation-data eu/akoos/photos/presentation/search/PhotoPlaceIndex.kt
-presentation-data eu/akoos/photos/presentation/search/SearchFilter.kt
-presentation-data eu/akoos/photos/presentation/search/SearchViewModel.kt
 

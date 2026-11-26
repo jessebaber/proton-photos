@@ -22,6 +22,22 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.domain.ml.FaceSweepEvent
+
+import eu.akoos.photos.domain.catalog.FaceRecord
+
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.ml.FaceIndexing
+
+import eu.akoos.photos.domain.ml.FaceEdits
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+
 import eu.akoos.photos.domain.usecase.personPhotoCount
 
 import android.content.Context
@@ -42,16 +58,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
-import eu.akoos.photos.data.db.entity.FaceEntity
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.face.FaceEditCounter
-import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.face.FaceSweepEvent
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_SUGGEST_THRESHOLD
@@ -84,12 +90,12 @@ data class FindMoreUiState(
 @HiltViewModel
 class FindMorePhotosViewModel @Inject constructor(
     private val accountManager: AccountManager,
-    private val faceDao: FaceDao,
-    private val personDao: PersonDao,
-    private val personManualPhotoDao: PersonManualPhotoDao,
-    private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val peopleCatalog: PeopleCatalog,
+    
+    private val faceIndexing: FaceIndexing,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val faceEdits: FaceEditCounter,
+    private val faceEdits: FaceEdits,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -122,15 +128,15 @@ class FindMorePhotosViewModel @Inject constructor(
     private suspend fun sweep(personId: Long) {
         val userId = accountManager.getPrimaryUserId().first()
         // Faces off: nothing to sweep, so end the run without touching the index.
-        val prefs = context.settingsDataStore.data.first()
-        val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+        val faceOn = settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                settingsStore.get(Settings.FACE_ENABLED)
         if (!faceOn) return
-        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val name = personDao.personById(personId)?.displayName
+        val account = userId?.id ?: LOCAL_PARTITION
+        val name = peopleCatalog.personById(personId)?.displayName
         _uiState.value = _uiState.value.copy(personName = name)
 
         val centroid = withContext(Dispatchers.Default) {
-            meanEmbedding(faceDao.facesForPerson(account, personId))
+            meanEmbedding(peopleCatalog.facesForPerson(account, personId))
         }
         // The person has no usable faces to match against, so there is nothing to look for.
         if (centroid == null) return
@@ -144,11 +150,11 @@ class FindMorePhotosViewModel @Inject constructor(
         // Photos already on this person (their faces, plus any manually attached), so a photo the
         // user has already added never reappears as a suggestion to add again.
         val alreadyIn = buildSet {
-            addAll(faceDao.distinctPhotoKeysForPerson(account, personId))
-            if (!name.isNullOrBlank()) addAll(personManualPhotoDao.photoKeysForNameList(account, name))
+            addAll(peopleCatalog.distinctPhotoKeysForPerson(account, personId))
+            if (!name.isNullOrBlank()) addAll(peopleCatalog.photoKeysForNameList(account, name))
         }
 
-        faceIndexingScheduler.sweepFacelessForPerson(userId, centroid, FACE_SUGGEST_THRESHOLD)
+        faceIndexing.sweepFacelessForPerson(userId, centroid, FACE_SUGGEST_THRESHOLD)
             .collect { event ->
                 when (event) {
                     is FaceSweepEvent.Progress ->
@@ -178,10 +184,10 @@ class FindMorePhotosViewModel @Inject constructor(
         val picks = _uiState.value.found.filter { it.faceId in selectedFaceIds }
         if (picks.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val name = personDao.personById(personId)?.displayName
+            val account = accountManager.getPrimaryUserId().first()?.id ?: LOCAL_PARTITION
+            val name = peopleCatalog.personById(personId)?.displayName
             val rows = picks.map { p ->
-                FaceEntity(
+                FaceRecord(
                     id = p.faceId,
                     userId = account,
                     photoKey = p.match.photoKey,
@@ -196,20 +202,20 @@ class FindMorePhotosViewModel @Inject constructor(
                 )
             }
             faceEdits.edit {
-                faceDao.upsert(rows)
+                peopleCatalog.upsertFaces(rows)
                 // Count the person the same way every other path does: their face photos unioned with any
                 // manually attached ones, de-duplicated, so a person carrying manual adds is not under-counted.
                 val manual = if (name.isNullOrBlank()) emptyList()
-                    else personManualPhotoDao.photoKeysForNameList(account, name)
-                val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
-                val cover = personDao.personById(personId)?.coverFaceId ?: faceDao.topFaceForPerson(account, personId)
-                personDao.updateCoverAndCount(personId, cover, count)
+                    else peopleCatalog.photoKeysForNameList(account, name)
+                val count = personPhotoCount(peopleCatalog.distinctPhotoKeysForPerson(account, personId), manual)
+                val cover = peopleCatalog.personById(personId)?.coverFaceId ?: peopleCatalog.topFaceForPerson(account, personId)
+                peopleCatalog.updateCoverAndCount(personId, cover, count)
             }
         }
     }
 
     /** L2-normalised mean of a person's face embeddings, or null when none are usable. */
-    private fun meanEmbedding(faces: List<FaceEntity>): FloatArray? {
+    private fun meanEmbedding(faces: List<FaceRecord>): FloatArray? {
         var sum: DoubleArray? = null
         var used = 0
         for (f in faces) {

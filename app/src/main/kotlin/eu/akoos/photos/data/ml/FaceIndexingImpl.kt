@@ -25,10 +25,15 @@ package eu.akoos.photos.data.ml
 import eu.akoos.photos.data.face.FaceIndexingProgress as DataProgress
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState as DataState
+import eu.akoos.photos.data.face.FaceSweepEvent as DataSweepEvent
+import eu.akoos.photos.data.face.SweepStop as DataSweepStop
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.ml.FaceIndexing
 import eu.akoos.photos.domain.ml.FaceIndexingProgress
 import eu.akoos.photos.domain.ml.FaceIndexingState
+import eu.akoos.photos.domain.ml.FaceSweepEvent
+import eu.akoos.photos.domain.ml.SweepStop
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -61,6 +66,30 @@ class FaceIndexingImpl @Inject constructor(
     override suspend fun rescan(userId: UserId?) = scheduler.rescan(userId)
     override suspend fun wipeFaceData(userId: UserId?, thenIndex: Boolean) =
         scheduler.wipeFaceData(userId, thenIndex)
+
+    override fun sweepFacelessForPerson(
+        userId: UserId?,
+        centroid: FloatArray,
+        matchThreshold: Float,
+    ): Flow<FaceSweepEvent> =
+        scheduler.sweepFacelessForPerson(userId, centroid, matchThreshold).map { it.toDomain() }
+
+    private fun DataSweepEvent.toDomain(): FaceSweepEvent = when (this) {
+        is DataSweepEvent.Progress -> FaceSweepEvent.Progress(done, total)
+        is DataSweepEvent.Match -> FaceSweepEvent.Match(
+            photoKey, index, box, landmarks, embedding, score, blur,
+        )
+        is DataSweepEvent.Stopped -> FaceSweepEvent.Stopped(
+            reason = when (reason) {
+                DataSweepStop.COMPLETED -> SweepStop.COMPLETED
+                DataSweepStop.MODEL_STALLED -> SweepStop.MODEL_STALLED
+                DataSweepStop.CANCELLED -> SweepStop.CANCELLED
+                DataSweepStop.FAILED -> SweepStop.FAILED
+            },
+            done = done,
+            total = total,
+        )
+    }
 
     private fun DataProgress.toDomain() = FaceIndexingProgress(
         state = when (state) {

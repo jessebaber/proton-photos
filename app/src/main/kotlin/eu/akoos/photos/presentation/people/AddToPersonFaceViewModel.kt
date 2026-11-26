@@ -22,20 +22,28 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.catalog.PersonRecord
+
+import eu.akoos.photos.domain.catalog.FaceOnPhotoRecord
+
+import eu.akoos.photos.domain.settings.SettingsStore
+
+import eu.akoos.photos.domain.settings.Settings
+
+import eu.akoos.photos.domain.ml.FaceIndexing
+
+import eu.akoos.photos.domain.ml.FaceEdits
+
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+
 import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.FaceOnPhoto
-import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.entity.PersonEntity
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.FaceBox
 import kotlinx.coroutines.CancellationException
@@ -96,9 +104,10 @@ data class AddToPersonFaceUiState(
 @HiltViewModel
 class AddToPersonFaceViewModel @Inject constructor(
     private val accountManager: AccountManager,
-    private val faceDao: FaceDao,
-    private val personDao: PersonDao,
-    private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val peopleCatalog: PeopleCatalog,
+    
+    private val faceIndexing: FaceIndexing,
+    private val settingsStore: SettingsStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -159,19 +168,19 @@ class AddToPersonFaceViewModel @Inject constructor(
         if (!row.canFindFaces || row.findingFaces) return
         updateRow(s, photoKey) { it.copy(findingFaces = true) }
         viewModelScope.launch {
-            val faces: List<FaceOnPhoto> = withContext(Dispatchers.Default) {
+            val faces: List<FaceOnPhotoRecord> = withContext(Dispatchers.Default) {
                 try {
-                    if (!faceIndexingScheduler.indexPhotoOnDemand(row.item, s.userId, force = true)) {
-                        emptyList<FaceOnPhoto>()
+                    if (!faceIndexing.indexPhotoOnDemand(row.item, s.userId, force = true)) {
+                        emptyList<FaceOnPhotoRecord>()
                     } else {
-                        val onPhoto = faceDao.facesOnPhotos(s.account, listOf(photoKey))
+                        val onPhoto = peopleCatalog.facesOnPhotos(s.account, listOf(photoKey))
                         AddToPersonFaces.facesByPhoto(onPhoto)[photoKey].orEmpty()
                     }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
                     Log.w(TAG, "face search failed: ${e.message}")
-                    emptyList<FaceOnPhoto>()
+                    emptyList<FaceOnPhotoRecord>()
                 }
             }
             updateRow(s, photoKey) { current ->
@@ -183,10 +192,10 @@ class AddToPersonFaceViewModel @Inject constructor(
 
     private suspend fun openSession(request: AddToPersonFaceRequest): Session {
         val userId = accountManager.getPrimaryUserId().first()
-        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val prefs = context.settingsDataStore.data.first()
-        val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
-        val named = if (faceOn) AddToPersonFaces.namedPeople(personDao.namedPeopleForUser(account)) else emptyMap()
+        val account = userId?.id ?: LOCAL_PARTITION
+        val faceOn = settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                settingsStore.get(Settings.FACE_ENABLED)
+        val named = if (faceOn) AddToPersonFaces.namedPeople(peopleCatalog.namedPeopleForUser(account)) else emptyMap()
         return Session(request, userId, account, faceOn, named)
     }
 
@@ -194,12 +203,12 @@ class AddToPersonFaceViewModel @Inject constructor(
         // With face recognition off no face data is read, so every photo goes in without a face.
         if (!s.faceRecognitionOn) return ordered.map { AddToPersonPhotoRow(it) }
         val keys = ordered.map { it.stableId }
-        val facesByPhoto = AddToPersonFaces.facesByPhoto(faceDao.facesOnPhotos(s.account, keys))
+        val facesByPhoto = AddToPersonFaces.facesByPhoto(peopleCatalog.facesOnPhotos(s.account, keys))
         // A photo whose only faces were removed from People lists none here, and is kept from a search
         // of its own, which would detect those faces again over the removal.
         val faceless = keys.filter { facesByPhoto[it].isNullOrEmpty() }
         val anyFaceRow: Set<String> =
-            if (faceless.isEmpty()) emptySet() else faceDao.facePhotoKeysIn(s.account, faceless).toHashSet()
+            if (faceless.isEmpty()) emptySet() else peopleCatalog.facePhotoKeysIn(s.account, faceless).toHashSet()
         return ordered.map { item ->
             val key = item.stableId
             rowFor(s, item, facesByPhoto[key].orEmpty(), hasAnyFaceRow = key in anyFaceRow)
@@ -209,7 +218,7 @@ class AddToPersonFaceViewModel @Inject constructor(
     private fun rowFor(
         s: Session,
         item: GalleryItem,
-        faces: List<FaceOnPhoto>,
+        faces: List<FaceOnPhotoRecord>,
         hasAnyFaceRow: Boolean,
     ): AddToPersonPhotoRow {
         val options = AddToPersonFaces.options(faces, s.namedPeople)
@@ -240,7 +249,7 @@ class AddToPersonFaceViewModel @Inject constructor(
  */
 internal object AddToPersonFaces {
 
-    private val clearestFirst = compareByDescending<FaceOnPhoto> { it.score }.thenBy { it.id }
+    private val clearestFirst = compareByDescending<FaceOnPhotoRecord> { it.score }.thenBy { it.id }
 
     /** The selection in timeline order, newest first with the stable id as the tie-break, one row per
      *  photo. */
@@ -249,12 +258,12 @@ internal object AddToPersonFaces {
             .sortedWith(compareByDescending<GalleryItem> { it.captureTimeMs }.thenBy { it.stableId })
 
     /** [faces] grouped per photo, each photo's faces clearest first with the id as the tie-break. */
-    fun facesByPhoto(faces: Collection<FaceOnPhoto>): Map<String, List<FaceOnPhoto>> =
+    fun facesByPhoto(faces: Collection<FaceOnPhotoRecord>): Map<String, List<FaceOnPhotoRecord>> =
         faces.groupBy { it.photoKey }.mapValues { (_, onPhoto) -> onPhoto.sortedWith(clearestFirst) }
 
     /** The named people by id, the names a face can show under it: never the Unsorted bucket, and never a
      *  blank name. */
-    fun namedPeople(people: List<PersonEntity>): Map<Long, String> = buildMap {
+    fun namedPeople(people: List<PersonRecord>): Map<Long, String> = buildMap {
         for (person in people) {
             val name = person.displayName?.takeIf { it.isNotBlank() } ?: continue
             if (!person.isOther) put(person.id, name)
@@ -263,11 +272,11 @@ internal object AddToPersonFaces {
 
     /** One photo's [faces] as the row offers them, each carrying the name of the named person it is
      *  grouped under; an ungrouped face, or one in an unnamed group or the Unsorted bucket, has none. */
-    fun options(faces: List<FaceOnPhoto>, namedPeople: Map<Long, String>): List<AddToPersonFaceOption> =
+    fun options(faces: List<FaceOnPhotoRecord>, namedPeople: Map<Long, String>): List<AddToPersonFaceOption> =
         faces.map { face ->
             AddToPersonFaceOption(
                 faceId = face.id,
-                box = FaceBox(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom),
+                box = FaceBox(face.left, face.top, face.right, face.bottom),
                 personName = face.personId?.let { namedPeople[it] },
             )
         }

@@ -25,8 +25,8 @@ package eu.akoos.photos.presentation.map
 import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.domain.usecase.PlaceCountry
 import eu.akoos.photos.domain.usecase.PlacesData
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.db.entity.isNullIsland
+import eu.akoos.photos.domain.catalog.PhotoLocationRecord
+import eu.akoos.photos.domain.catalog.isNullIsland
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -71,7 +71,7 @@ class GlobeMapTest {
 
     @Test
     fun a_fix_at_zero_zero_is_a_null_island_and_any_other_is_not() {
-        fun fix(lat: Double, lng: Double) = PhotoLocationEntity(id = "x", userId = "u", latitude = lat, longitude = lng)
+        fun fix(lat: Double, lng: Double) = PhotoLocationRecord(id = "x", userId = "u", latitude = lat, longitude = lng)
         assertTrue(fix(0.0, 0.0).isNullIsland())
         assertFalse(fix(0.0, 19.0).isNullIsland())
         assertFalse(fix(47.5, 0.0).isNullIsland())

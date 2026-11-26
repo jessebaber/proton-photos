@@ -57,9 +57,12 @@ class PhotoCatalogImpl @Inject constructor(
     override fun observePerceptualHashes(algo: Int): Flow<List<PerceptualHashLiteRecord>> =
         perceptualHashDao.observeLite(algo).map { list ->
             list.map {
-                PerceptualHashLiteRecord(it.key, it.h0, it.h1, it.h2, it.h3, it.quality, it.freshness)
+                PerceptualHashLiteRecord(it.key, it.h0, it.h1, it.h2, it.h3, it.quality, it.color, it.freshness)
             }
         }
+
+    override suspend fun deletePerceptualHashesByKeys(keys: List<String>) =
+        perceptualHashDao.deleteByKeys(keys)
 
     override suspend fun embeddingCount(userId: String): Int = imageEmbeddingDao.countForUser(userId)
     override fun observeEmbeddingCount(userId: String): Flow<Int> =

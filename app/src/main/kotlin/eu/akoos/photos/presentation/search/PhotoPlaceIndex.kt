@@ -22,10 +22,14 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+
+import eu.akoos.photos.domain.catalog.PhotoLocationRecord
+
+import eu.akoos.photos.domain.catalog.LocationCatalog
+
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.db.dao.PhotoLocationDao
-import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.countryName
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +60,7 @@ import javax.inject.Singleton
 class PhotoPlaceIndex @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
-    private val photoLocationDao: PhotoLocationDao,
+    private val locationCatalog: LocationCatalog,
 ) {
     private val cellLabels = ConcurrentHashMap<Long, Pair<String, String>>()
 
@@ -66,11 +70,11 @@ class PhotoPlaceIndex @Inject constructor(
      * as the background location read fills them in.
      */
     fun observe(locale: Locale): Flow<Map<String, String>> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId -> photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
+        .flatMapLatest { userId -> locationCatalog.observeLocationsForUser(userId?.id ?: LOCAL_PARTITION) }
         .mapLatest { rows -> textFor(rows, locale) }
         .flowOn(Dispatchers.Default)
 
-    private suspend fun textFor(rows: List<PhotoLocationEntity>, locale: Locale): Map<String, String> {
+    private suspend fun textFor(rows: List<PhotoLocationRecord>, locale: Locale): Map<String, String> {
         val textByCell = HashMap<Long, String>()
         val out = HashMap<String, String>(rows.size)
         for (row in rows) {

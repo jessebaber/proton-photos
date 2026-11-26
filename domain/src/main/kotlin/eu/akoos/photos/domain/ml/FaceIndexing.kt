@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.ml
 
 import eu.akoos.photos.domain.entity.GalleryItem
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import me.proton.core.domain.entity.UserId
 
@@ -51,4 +52,10 @@ interface FaceIndexing {
     suspend fun reset()
     suspend fun rescan(userId: UserId?)
     suspend fun wipeFaceData(userId: UserId?, thenIndex: Boolean = true)
+    fun sweepFacelessForPerson(
+        userId: UserId?,
+        centroid: FloatArray,
+        matchThreshold: Float,
+    ): Flow<FaceSweepEvent>
 }
+

@@ -126,6 +126,14 @@ import eu.akoos.photos.domain.vault.HiddenVaultMaintenance
 import eu.akoos.photos.domain.vault.VaultDiagnostics
 import eu.akoos.photos.domain.vault.VaultSignOut
 import javax.inject.Singleton
+import eu.akoos.photos.data.ml.FaceEditsImpl
+import eu.akoos.photos.domain.ml.FaceEdits
+import eu.akoos.photos.data.location.LocalExifBackfillImpl
+import eu.akoos.photos.domain.location.LocalExifBackfill
+import eu.akoos.photos.data.duplicates.PerceptualHashingImpl
+import eu.akoos.photos.domain.duplicates.PerceptualHashing
+import eu.akoos.photos.data.duplicates.LocalContentHashesImpl
+import eu.akoos.photos.domain.duplicates.LocalContentHashes
 
 /**
  * Binds presentation-facing domain facades to their data implementations.
@@ -193,6 +201,10 @@ abstract class PresentationFacadesModule {
     @Binds @Singleton abstract fun bindEditUploadNotifier(impl: EditUploadNotifierImpl): EditUploadNotifier
     @Binds @Singleton abstract fun bindFaceDetectorFactory(impl: FaceDetectorFactoryImpl): FaceDetectorFactory
     @Binds @Singleton abstract fun bindTextRecognizerFactory(impl: TextRecognizerFactoryImpl): TextRecognizerFactory
+    @Binds @Singleton abstract fun bindFaceEdits(impl: FaceEditsImpl): FaceEdits
+    @Binds @Singleton abstract fun bindLocalExifBackfill(impl: LocalExifBackfillImpl): LocalExifBackfill
+    @Binds @Singleton abstract fun bindPerceptualHashing(impl: PerceptualHashingImpl): PerceptualHashing
+    @Binds @Singleton abstract fun bindLocalContentHashes(impl: LocalContentHashesImpl): LocalContentHashes
 }
 
 
