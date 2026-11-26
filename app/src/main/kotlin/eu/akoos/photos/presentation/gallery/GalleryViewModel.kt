@@ -24,6 +24,30 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.entity.LOCAL_PARTITION
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.vault.HiddenCloud
+import eu.akoos.photos.domain.vault.HiddenFolders
+import eu.akoos.photos.domain.vault.HiddenVaultJournalOps
+import eu.akoos.photos.domain.vault.VaultDiagnostics
+import eu.akoos.photos.domain.vault.VaultDecisions
+import eu.akoos.photos.domain.vault.VaultJournalEntry
+import eu.akoos.photos.domain.vault.VaultHideSplit
+import eu.akoos.photos.domain.vault.HiddenFolderProgress
+import eu.akoos.photos.domain.vault.RemoteHideQueue
+import eu.akoos.photos.domain.offline.OfflineStorage
+import eu.akoos.photos.domain.transfer.Transfers
+import eu.akoos.photos.domain.transfer.TransferKind
+import eu.akoos.photos.domain.catalog.SyncSnapshot
+import eu.akoos.photos.domain.catalog.SyncSnapshotRows
+import eu.akoos.photos.domain.catalog.PhotoCatalog
+import eu.akoos.photos.domain.catalog.PeopleCatalog
+import eu.akoos.photos.domain.catalog.AlbumCatalog
+import eu.akoos.photos.domain.thumbnails.ThumbnailUrls
+import eu.akoos.photos.domain.work.BackgroundWork
+
 import eu.akoos.photos.domain.usecase.MoveToFolderResult
 import eu.akoos.photos.domain.usecase.DeletePhotoResult
 import eu.akoos.photos.domain.usecase.SameNamedPeopleMerge
@@ -76,29 +100,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
-import eu.akoos.photos.data.hidden.HiddenCloudPhotos
-import eu.akoos.photos.data.hidden.HiddenSyncTimes
-import eu.akoos.photos.data.hidden.HiddenFolderProgress
-import eu.akoos.photos.data.hidden.HiddenFolderRecords
-import eu.akoos.photos.data.hidden.HiddenStorageManager
-import eu.akoos.photos.data.hidden.HiddenVaultDecisions
-import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
-import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.presentation.util.dayMonthYearFormat
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.presentation.util.monthYearFormat
-import eu.akoos.photos.data.offline.OfflineStorageManager
-import eu.akoos.photos.data.transfer.TransferCenter
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.PersonSummary
-import eu.akoos.photos.data.repository.SyncStateSnapshot
-import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -125,7 +134,6 @@ import eu.akoos.photos.util.computeOnThisDay
 import eu.akoos.photos.util.onThisDayWindowDays
 import eu.akoos.photos.util.isBatteryLow
 import eu.akoos.photos.util.retryOnDbTear
-import eu.akoos.photos.worker.SyncWorker
 import java.util.Date
 import javax.inject.Inject
 
@@ -181,14 +189,14 @@ private data class GalleryComputed(
 /**
  * Cloud ids of the SYNCED rows that name a device file: the backed-up photos this device also holds.
  * A row with a blank uri names no file and leaves its id out. With no such row the answer is the
- * snapshot's own [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
+ * snapshot's own [SyncSnapshotRows.syncedCloudIds], shared with its other readers.
  */
-internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
-    if (sync.rows.none { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }) {
+internal fun syncedCloudIdsOnDevice(sync: SyncSnapshotRows): Set<String> =
+    if (sync.rows.none { it.status == "SYNCED" && it.localUri.isBlank() }) {
         sync.syncedCloudIds
     } else {
         sync.rows.asSequence()
-            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() }
+            .filter { it.status == "SYNCED" && it.localUri.isNotBlank() }
             .mapNotNull { it.cloudFileId }
             .toSet()
     }
@@ -242,8 +250,8 @@ class GalleryViewModel @Inject constructor(
     private val sameNamedPeopleMerge: eu.akoos.photos.domain.usecase.SameNamedPeopleMerge,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
-    private val photoStreamService: PhotoStreamService,
-    private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore,
+    private val backgroundWork: BackgroundWork,
+    private val thumbnailUrlsStore: ThumbnailUrls,
     private val localRepo: LocalMediaRepository,
     private val accountManager: AccountManager,
     private val observeUser: ObserveUser,
@@ -253,23 +261,26 @@ class GalleryViewModel @Inject constructor(
     private val upload: UploadPendingUseCase,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
-    private val hiddenStorage: HiddenStorageManager,
-    private val hiddenVaultJournal: HiddenVaultJournal,
-    private val offlineStore: OfflineStorageManager,
-    private val transferCenter: TransferCenter,
+    private val hiddenStorage: HiddenStorage,
+    private val hiddenVaultJournal: HiddenVaultJournalOps,
+    private val hiddenCloud: HiddenCloud,
+    private val hiddenFolders: HiddenFolders,
+    private val vaultDiagnostics: VaultDiagnostics,
+    private val settingsStore: SettingsStore,
+    private val offlineStore: OfflineStorage,
+    private val transferCenter: Transfers,
     private val undoController: eu.akoos.photos.presentation.common.UndoController,
     private val syncStateRepo: SyncStateRepository,
-    private val syncStateSnapshot: SyncStateSnapshot,
+    private val syncStateSnapshot: SyncSnapshot,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
-    private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
-    private val photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao,
+    private val albumCatalog: AlbumCatalog,
+    private val photoCatalog: PhotoCatalog,
+    private val peopleCatalog: PeopleCatalog,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val updateOrchestrator: eu.akoos.photos.presentation.updater.UpdateOrchestrator,
     private val newsRepository: eu.akoos.photos.domain.repository.NewsRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val favoriteWriter: FavoriteWriter,
-    private val cryptoServiceClient: eu.akoos.photos.crypto.CryptoServiceClient,
-    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val moveToFolder: MoveToFolderUseCase<IntentSender>,
     private val folderDelete: eu.akoos.photos.presentation.folders.DeviceFolderDeleteController,
@@ -341,7 +352,7 @@ class GalleryViewModel @Inject constructor(
      *  a sustained scroll, the large-library OOM), so a cloud cell reads its URL from this map and
      *  repaints just itself when its own entry lands. Threaded into the grid alongside the other live
      *  per-cell sets. */
-    val thumbnailUrls: StateFlow<Map<String, String>> = thumbnailUrlStore.urls
+    val thumbnailUrls: StateFlow<Map<String, String>> = thumbnailUrlsStore.urls
 
     /** DEBUG-only "usedMB / maxMB" Java-heap readout, sampled ~1/s, so a tester can watch memory while
      *  scrolling a large library and confirm the sustained-scroll heap stays flat. Empty (and never
@@ -375,8 +386,10 @@ class GalleryViewModel @Inject constructor(
     /** Whether on-device face recognition is on (the AI master and the face switch), which offers Add to
      *  person on the selection, for a guest as for an account. Off until the switches resolve, so the
      *  action never flashes in. */
-    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+    val faceEnabled: StateFlow<Boolean> = combine(
+        settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+        settingsStore.observe(Settings.FACE_ENABLED),
+    ) { ai, face -> ai && face }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
@@ -539,20 +552,20 @@ class GalleryViewModel @Inject constructor(
      * Idle frames clear the flag; per-file Uploading/Queued frames set it.
      */
     // The avatar's UP arrow has two independent sources: the backup pipeline (upload.progress) and
-    // any TransferCenter UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
+    // any Transfers UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
     // two are ORed into hasActiveUpload, so a frame from one source never clears what the other set.
     private var backupUploading = false
     private var transferUploading = false
 
-    /** Drives the avatar's DOWN arrow from the TransferCenter (downloads + offline pins), and folds a
-     *  TransferCenter UPLOAD transfer into the UP arrow alongside the backup pipeline. */
+    /** Drives the avatar's DOWN arrow from the Transfers (downloads + offline pins), and folds a
+     *  Transfers UPLOAD transfer into the UP arrow alongside the backup pipeline. */
     private fun observeActiveTransfers() {
         viewModelScope.launch {
             transferCenter.active.collect { active ->
                 val down = active.any {
-                    it.kind == TransferCenter.Kind.DOWNLOAD || it.kind == TransferCenter.Kind.OFFLINE
+                    it.kind == TransferKind.DOWNLOAD || it.kind == TransferKind.OFFLINE
                 }
-                transferUploading = active.any { it.kind == TransferCenter.Kind.UPLOAD }
+                transferUploading = active.any { it.kind == TransferKind.UPLOAD }
                 _uiState.update {
                     it.copy(hasActiveDownload = down, hasActiveUpload = backupUploading || transferUploading)
                 }
@@ -593,7 +606,7 @@ class GalleryViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 isSyncing = syncing,
-                // The up arrow ORs the backup pipeline with any TransferCenter UPLOAD (an
+                // The up arrow ORs the backup pipeline with any Transfers UPLOAD (an
                 // editor edit-upload); downloads/offline come from observeActiveTransfers.
                 hasActiveUpload = backupUploading || transferUploading,
                 uploadDoneIdx = if (syncing) evt.doneIdx else 0,
@@ -604,8 +617,7 @@ class GalleryViewModel @Inject constructor(
 
     private fun observeFavorites() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.FAVORITE_IDS] ?: emptySet() }
+            settingsStore.observe(Settings.FAVORITE_IDS)
                 .distinctUntilChanged()
                 .collect { favIds ->
                     val state = _uiState.value
@@ -632,8 +644,7 @@ class GalleryViewModel @Inject constructor(
      *  itself is showing (otherwise its list would go stale on an un-pin). */
     private fun observeOfflinePins() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
+            settingsStore.observe(Settings.OFFLINE_PIN_IDS)
                 .distinctUntilChanged()
                 .collect { ids ->
                     val state = _uiState.value
@@ -668,8 +679,10 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observePeople() {
         val peopleFlow = combine(
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+            combine(
+        settingsStore.observe(Settings.AI_FEATURES_ENABLED),
+        settingsStore.observe(Settings.FACE_ENABLED),
+    ) { ai, face -> ai && face }
                 .distinctUntilChanged(),
             accountManager.getPrimaryUserId(),
         ) { aiOn, userId -> aiOn to userId }
@@ -721,9 +734,9 @@ class GalleryViewModel @Inject constructor(
                 return@launch
             }
             val account = accountManager.getPrimaryUserId().first()?.id
-                ?: eu.akoos.photos.data.db.entity.PhotoLocationEntity.LOCAL_USER
+                ?: LOCAL_PARTITION
             val keys = try {
-                faceDao.photoKeysForPerson(account, personId).first().toSet()
+                peopleCatalog.photoKeysForPerson(account, personId).first().toSet()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -751,14 +764,17 @@ class GalleryViewModel @Inject constructor(
 
     private fun observeGridPreferences() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { prefs ->
+            combine(
+                settingsStore.observe(Settings.GRID_REMEMBER_LAST),
+                settingsStore.observe(Settings.GRID_DEFAULT_COLUMNS),
+                settingsStore.observe(Settings.GRID_LAST_LEVEL),
+                settingsStore.observe(Settings.DENSE_GRID_WARNING_DISMISSED),
+            ) { rememberLast, defaultColumns, lastLevel, denseWarningDismissed ->
                     GridPrefs(
-                        rememberLast = prefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
-                        defaultColumns = prefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: GridZoom.DEFAULT_COLUMNS,
-                        lastLevel = (prefs[SettingsKeys.GRID_LAST_LEVEL] ?: GridZoom.DEFAULT_LEVEL)
-                            .coerceIn(0, GridZoom.LEVELS.lastIndex),
-                        denseWarningDismissed = prefs[SettingsKeys.DENSE_GRID_WARNING_DISMISSED] ?: false,
+                        rememberLast = rememberLast,
+                        defaultColumns = defaultColumns,
+                        lastLevel = lastLevel.coerceIn(0, GridZoom.LEVELS.lastIndex),
+                        denseWarningDismissed = denseWarningDismissed,
                     )
                 }
                 .distinctUntilChanged()
@@ -822,17 +838,17 @@ class GalleryViewModel @Inject constructor(
             f.name.startsWith("thumb_") && f.name.endsWith(".jpg")
         }?.isEmpty() ?: true // null = dir missing/unreadable, treat as empty
         if (cacheEmpty) {
-            val hasSeedRows = runCatching { photoListingDao.getThumbnailUrlSeed(userId.id).isNotEmpty() }
+            val hasSeedRows = runCatching { photoCatalog.getThumbnailUrlSeed(userId.id).isNotEmpty() }
                 .getOrDefault(false)
             if (hasSeedRows) {
-                runCatching { photoListingDao.clearCachedThumbnailUrls() }
-                thumbnailUrlStore.clear()
+                runCatching { photoCatalog.clearCachedThumbnailUrls() }
+                thumbnailUrlsStore.clear()
                 // The forced re-decrypt of the whole visible set is a cold-open storm; damp it 1-wide.
-                cryptoServiceClient.armColdOpenDamping()
+                backgroundWork.armColdOpenDamping()
                 return
             }
         }
-        thumbnailUrlStore.seed(userId)
+        thumbnailUrlsStore.seed(userId)
     }
 
     private fun observeGallery() {
@@ -855,9 +871,7 @@ class GalleryViewModel @Inject constructor(
             runCatching { reconcileThumbnailCacheThenSeed(userId) }
         }
 
-        val hiddenUrisFlow = context.settingsDataStore.data.map {
-            it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-        }.catch {
+        val hiddenUrisFlow = settingsStore.observe(Settings.HIDDEN_PHOTO_URIS).catch {
             // A DataStore read hiccup degrades to "nothing hidden" rather than
             // throwing into combine and killing the whole timeline.
             android.util.Log.w("GalleryVM", "hiddenUris source failed: ${it.message}")
@@ -876,14 +890,10 @@ class GalleryViewModel @Inject constructor(
             emit(emptySet())
         } else flowOf(emptySet())
 
-        val hideInAlbumsFlow = context.settingsDataStore.data.map {
-            it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true
-        }
+        val hideInAlbumsFlow = settingsStore.observe(Settings.HIDE_PHOTOS_IN_ALBUMS)
         // Cloud album linkIds the user hid individually (per-album timeline toggle), separate
         // from the master "hide all album photos" switch above.
-        val excludedAlbumIdsFlow = context.settingsDataStore.data.map {
-            it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-        }
+        val excludedAlbumIdsFlow = settingsStore.observe(Settings.TIMELINE_EXCLUDED_ALBUM_IDS)
         // Cloud linkIds to drop from the timeline: the master toggle hides every photo in any
         // album; otherwise only photos in the individually-hidden albums. Master OFF + no
         // per-album hides short-circuits to emptySet() so non-users pay zero query cost.
@@ -891,9 +901,9 @@ class GalleryViewModel @Inject constructor(
             hideAll to excludedIds
         }.flatMapLatest { (hideAll, excludedIds) ->
             when {
-                hideAll -> albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
+                hideAll -> albumCatalog.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
                 excludedIds.isNotEmpty() ->
-                    albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(excludedIds).map { it.toSet() }
+                    albumCatalog.observeAssociatedPhotoLinkIdsForAlbums(excludedIds).map { it.toSet() }
                 else -> flowOf(emptySet())
             }
         }.catch {
@@ -907,9 +917,7 @@ class GalleryViewModel @Inject constructor(
         // Bucket display names the user chose to hide from the timeline. Display-only:
         // matching items stay on the device and keep backing up — they're just dropped
         // from every tab below. A DataStore read hiccup degrades to "exclude nothing".
-        val timelineExcludedBucketsFlow = context.settingsDataStore.data.map {
-            it[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet()
-        }.distinctUntilChanged().catch {
+        val timelineExcludedBucketsFlow = settingsStore.observe(Settings.TIMELINE_EXCLUDED_FOLDER_NAMES).distinctUntilChanged().catch {
             android.util.Log.w("GalleryVM", "timelineExcludedBuckets source failed: ${it.message}")
             emit(emptySet())
         }
@@ -1067,8 +1075,7 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observeHiddenAlbumIds() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet() }
+            settingsStore.observe(Settings.HIDDEN_ALBUM_IDS)
                 .distinctUntilChanged()
                 .collect { ids -> _uiState.update { state -> state.copy(hiddenAlbumIds = ids) } }
         }
@@ -1092,8 +1099,7 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observeHideInAlbums() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true }
+            settingsStore.observe(Settings.HIDE_PHOTOS_IN_ALBUMS)
                 .distinctUntilChanged()
                 .collect { hide ->
                     if (!hide) return@collect
@@ -1113,7 +1119,7 @@ class GalleryViewModel @Inject constructor(
         // full refresh speeds back up to the normal pace on its next chunk. Done before the
         // userId await so it takes effect immediately on arrival. The refresh below coalesces
         // onto that same in-flight one (the walk is single-flighted) — no second refresh.
-        photoStreamService.setGentleSync(false)
+        backgroundWork.setGentleSync(false)
         viewModelScope.launch {
             accountManager.getPrimaryUserId().filterNotNull().distinctUntilChanged().collectLatest { userId ->
                 doSync(userId)
@@ -1143,9 +1149,8 @@ class GalleryViewModel @Inject constructor(
             // out-of-scope LOCAL_ONLY row is not upload work, so it must not keep waking the worker.
             val pending = syncStateRepo.countPendingUploads(userId).first()
             if (pending > 0) {
-                val wifiOnly = context.settingsDataStore.data
-                    .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
-                SyncWorker.runNow(context, wifiOnly)
+                val wifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY)
+                backgroundWork.runSyncNow(wifiOnly)
             }
         } catch (e: Exception) {
             // Rethrow cancellation so the parent coroutine's structured concurrency stays
@@ -1168,12 +1173,11 @@ class GalleryViewModel @Inject constructor(
     private fun resumeFaceIndexingOnLaunch() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val facePrefs = context.settingsDataStore.data.first()
-                if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
-                    facePrefs[SettingsKeys.FACE_ENABLED] != true
+                if (!settingsStore.get(Settings.AI_FEATURES_ENABLED) ||
+                    !settingsStore.get(Settings.FACE_ENABLED) != true
                 ) return@launch
                 val userId = accountManager.getPrimaryUserId().first()
-                runCatching { sameNamedPeopleMerge.runOnce(userId?.id ?: eu.akoos.photos.data.db.entity.PhotoLocationEntity.LOCAL_USER) }
+                runCatching { sameNamedPeopleMerge.runOnce(userId?.id ?: LOCAL_PARTITION) }
                     .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                 // Guest (no account) rescans the local partition with no battery gate; the signed-in
                 // walk reuses the refresh path's gate so a low battery defers it.
@@ -1197,9 +1201,8 @@ class GalleryViewModel @Inject constructor(
     private fun resumeSemanticIndexingOnLaunch() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val prefs = context.settingsDataStore.data.first()
-                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
-                    prefs[SettingsKeys.SEMANTIC_ENABLED] != true
+                if (!settingsStore.get(Settings.AI_FEATURES_ENABLED) ||
+                    !settingsStore.get(Settings.SEMANTIC_ENABLED) != true
                 ) return@launch
                 val userId = accountManager.getPrimaryUserId().first()
                 if (userId != null && context.isBatteryLow()) return@launch
@@ -1218,8 +1221,7 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observeFolderSettings() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.SYNC_FOLDER_NAMES] }
+            settingsStore.observe(Settings.SYNC_FOLDER_NAMES)
                 .distinctUntilChanged()
                 .drop(1) // skip the initial emission already handled by syncOnLaunch
                 .collect { folders ->
@@ -1274,14 +1276,14 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { it.copy(timelineGrouping = GridZoom.groupingForLevel(clamped)) }
         if (_uiState.value.gridRememberLast) {
             viewModelScope.launch {
-                context.settingsDataStore.edit { it[SettingsKeys.GRID_LAST_LEVEL] = clamped }
+                settingsStore.set(Settings.GRID_LAST_LEVEL, clamped )
             }
         }
     }
 
     fun dismissDenseGridWarning() {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.DENSE_GRID_WARNING_DISMISSED] = true }
+            settingsStore.set(Settings.DENSE_GRID_WARNING_DISMISSED, true )
             _uiState.update { it.copy(denseGridWarningDismissed = true) }
         }
     }
@@ -1289,11 +1291,11 @@ class GalleryViewModel @Inject constructor(
     /** Whether the one-time post-notifications auto-request has not yet fired. Read fresh from the
      *  store so a stale UI-state value cannot re-ask (and re-show the snackbar) after a navigation. */
     suspend fun shouldAskNotificationPermission(): Boolean =
-        !(context.settingsDataStore.data.first()[SettingsKeys.NOTIFICATION_PERMISSION_ASKED] ?: false)
+        !(settingsStore.get(Settings.NOTIFICATION_PERMISSION_ASKED))
 
     fun markNotificationPermissionAsked() {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.NOTIFICATION_PERMISSION_ASKED] = true }
+            settingsStore.set(Settings.NOTIFICATION_PERMISSION_ASKED, true )
         }
     }
 
@@ -1343,16 +1345,15 @@ class GalleryViewModel @Inject constructor(
             if (!_uiState.value.isSignedIn) {
                 localRepo.notifyMediaChanged()
                 viewModelScope.launch {
-                    val facePrefs = context.settingsDataStore.data.first()
-                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                        facePrefs[SettingsKeys.FACE_ENABLED] == true
+                    if (settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                        settingsStore.get(Settings.FACE_ENABLED)
                     ) {
                         viewModelScope.launch(Dispatchers.IO) {
                             runCatching { cloudRepo.backfillFaces(null) }
                         }
                     }
-                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                        facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                    if (settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                        settingsStore.get(Settings.SEMANTIC_ENABLED)
                     ) {
                         viewModelScope.launch(Dispatchers.IO) {
                             runCatching { cloudRepo.backfillSemantic(null) }
@@ -1371,16 +1372,15 @@ class GalleryViewModel @Inject constructor(
                 localRepo.notifyMediaChanged()
                 // Faces work without an account too: kick the same on-device face backfill the signed-in
                 // path runs, gated on the same switches, over the guest (local) partition.
-                val facePrefs = context.settingsDataStore.data.first()
-                if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                    facePrefs[SettingsKeys.FACE_ENABLED] == true
+                if (settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                    settingsStore.get(Settings.FACE_ENABLED)
                 ) {
                     viewModelScope.launch(Dispatchers.IO) {
                         runCatching { cloudRepo.backfillFaces(null) }
                     }
                 }
-                if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                    facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                if (settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                    settingsStore.get(Settings.SEMANTIC_ENABLED)
                 ) {
                     viewModelScope.launch(Dispatchers.IO) {
                         runCatching { cloudRepo.backfillSemantic(null) }
@@ -1425,9 +1425,8 @@ class GalleryViewModel @Inject constructor(
                     // are off, paused, or the models are absent; gate on the master and face switches
                     // here so the common (faces-off) path never even launches a coroutine that returns
                     // at once.
-                    val facePrefs = context.settingsDataStore.data.first()
-                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                        facePrefs[SettingsKeys.FACE_ENABLED] == true
+                    if (settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                        settingsStore.get(Settings.FACE_ENABLED)
                     ) {
                         viewModelScope.launch(Dispatchers.IO) {
                             runCatching { cloudRepo.backfillFaces(userId) }
@@ -1436,8 +1435,8 @@ class GalleryViewModel @Inject constructor(
                     // Index photos for semantic search, gated on the master and semantic switches. The
                     // scheduler no-ops when off or the model is absent; gate here so the common path never
                     // launches a coroutine that returns at once.
-                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                        facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                    if (settingsStore.get(Settings.AI_FEATURES_ENABLED) &&
+                        settingsStore.get(Settings.SEMANTIC_ENABLED)
                     ) {
                         viewModelScope.launch(Dispatchers.IO) {
                             runCatching { cloudRepo.backfillSemantic(userId) }
@@ -1451,9 +1450,8 @@ class GalleryViewModel @Inject constructor(
                 // the moment it starts, so waking it with nothing to upload flashed that notification
                 // every time the gallery was entered again (for instance on leaving the search).
                 wakeSyncIfUploadQueued(syncStateRepo, userId) {
-                    val wifiOnly = context.settingsDataStore.data
-                        .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
-                    SyncWorker.runNow(context, wifiOnly)
+                    val wifiOnly = settingsStore.get(Settings.SYNC_WIFI_ONLY)
+                    backgroundWork.runSyncNow(wifiOnly)
                 }
             }.onFailure { e ->
                 // Silent-swallow for network-shaped failures — the avatar offline dot
@@ -1764,8 +1762,8 @@ class GalleryViewModel @Inject constructor(
      * The very split [runHide] runs on, read from the same selection, so the sheet describes exactly
      * what the Hide button is about to do rather than what hiding does in general.
      */
-    fun hideSplitForSelection(): HiddenFolderRecords.HideSplit =
-        HiddenFolderRecords.hideSplit(_uiState.value.selectedItems.toList())
+    fun hideSplitForSelection(): VaultHideSplit =
+        hiddenFolders.hideSplit(_uiState.value.selectedItems.toList())
 
     /**
      * Batch-hide every currently-selected gallery item. Every photo with a device file — backed up
@@ -1775,7 +1773,7 @@ class GalleryViewModel @Inject constructor(
      * device file to move and hides by its cloud linkId instead. Nothing on Drive changes either way.
      *
      * The intent is journalled BEFORE that delete and confirmed after it, so an interruption between
-     * the two leaves a repairable record instead of bytes nothing refers to — see [HiddenVaultJournal].
+     * the two leaves a repairable record instead of bytes nothing refers to — see [HiddenVaultJournalOps].
      */
     fun hideSelected() {
         val items = _uiState.value.selectedItems.toList()
@@ -1788,7 +1786,7 @@ class GalleryViewModel @Inject constructor(
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
             // A selection is short enough to watch behind the blocking sheet the state above raises,
             // so it reports no count of its own; [hideFolder] runs the same body with progress.
-            runHide(HiddenFolderRecords.hideSplit(items), reportProgress = false)
+            runHide(hiddenFolders.hideSplit(items), reportProgress = false)
         }
     }
 
@@ -1806,13 +1804,13 @@ class GalleryViewModel @Inject constructor(
      * delete, so those photos end up in the vault rather than copied for nothing, and everything
      * after the stop is left untouched on the device.
      */
-    private suspend fun runHide(split: HiddenFolderRecords.HideSplit, reportProgress: Boolean) {
+    private suspend fun runHide(split: VaultHideSplit, reportProgress: Boolean) {
         val vaultable = split.vaultable
-        HiddenVaultDiagnostics.hideStarted(split)
+        vaultDiagnostics.hideStarted(split)
         // Client-side hide for the cloud-only members: add their linkIds to the hidden set so the
         // shared merge filter drops them from every listing. They have no device file at all, so
         // nothing moves and unhide is a pure toggle with no re-pairing.
-        HiddenCloudPhotos.hide(context, split.cloudLinkIds)
+        hiddenCloud.hide(split.cloudLinkIds)
         pendingHideCloudLinkIds = split.cloudLinkIds
         if (vaultable.isEmpty()) {
             // Nothing to copy, so the client-side hide above is the whole operation and it is
@@ -1843,7 +1841,7 @@ class GalleryViewModel @Inject constructor(
         // Step 2: copy every device file into app-private hidden storage. A backed-up photo also
         // stashes its cloud linkId, which is what lets the reveal re-pair it to its Drive copy
         // instead of uploading a second one.
-        val collected = mutableListOf<HiddenVaultJournal.Entry>()
+        val collected = mutableListOf<VaultJournalEntry>()
         var hideFailures = 0
         if (reportProgress) {
             _folderHideProgress.value = HiddenFolderProgress(0, vaultable.size, restoring = false)
@@ -1856,7 +1854,7 @@ class GalleryViewModel @Inject constructor(
                 local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
             )
             if (privateUri != null) {
-                collected += HiddenVaultJournal.Entry(
+                collected += VaultJournalEntry(
                     privateUri = privateUri,
                     sourceUri = local.uri,
                     sourceFolder = sourceFolder,
@@ -1872,7 +1870,7 @@ class GalleryViewModel @Inject constructor(
                     HiddenFolderProgress(collected.size, vaultable.size, restoring = false)
             }
         }
-        HiddenVaultDiagnostics.copied(collected.size, hideFailures)
+        vaultDiagnostics.copied(collected.size, hideFailures)
         if (collected.isEmpty()) {
             rollbackPendingHide()
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_copy_to_hidden_failed))) }
@@ -1894,7 +1892,7 @@ class GalleryViewModel @Inject constructor(
         // Step 4: delete the MediaStore originals of exactly what was copied (one system-trash
         // dialog on Android 11+). Narrowing to the copied files is what leaves a photo whose copy
         // failed, and everything a stopped pass never reached, where the user can still see it.
-        val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
+        val deleting = VaultDecisions.deletableOriginals(vaultable, collected)
         // Hiding a device photo needs no account; the vault is app-private and the use case only
         // requires a signed-in user for a cloud trash, which a hide never performs (deleteFromCloud =
         // false). Pass the nullable userId through instead of aborting a guest hide here.
@@ -1908,7 +1906,7 @@ class GalleryViewModel @Inject constructor(
         )
         when (result) {
             is DeletePhotoResult.Success -> {
-                HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
+                vaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                 // Snapshot both halves before commitPendingHide() clears the pending list, so Undo
                 // reverses exactly the hide that just landed.
                 val hideUris = pendingHidePrivateUris
@@ -1922,7 +1920,7 @@ class GalleryViewModel @Inject constructor(
                 ) }
             }
             is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
-                HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
+                vaultDiagnostics.originalsAwaitingConsent(deleting.size)
                 // Stash both the delete intent AND the hide-private URIs — onHidePermissionGranted
                 // commits them once the user confirms the system dialog.
                 pendingPermissionResult = result
@@ -1961,7 +1959,7 @@ class GalleryViewModel @Inject constructor(
      */
     data class FolderHideRequest(
         val bucketName: String,
-        val split: HiddenFolderRecords.HideSplit? = null,
+        val split: VaultHideSplit? = null,
     )
 
     private val _folderHideRequest = MutableStateFlow<FolderHideRequest?>(null)
@@ -2015,7 +2013,7 @@ class GalleryViewModel @Inject constructor(
      * set of vaulted photos with no folder to reach them by. It is also the first thing this hide
      * writes at all: everything before the confirmation only reads.
      */
-    private fun hideFolder(bucketName: String, split: HiddenFolderRecords.HideSplit) {
+    private fun hideFolder(bucketName: String, split: VaultHideSplit) {
         if (bucketName.isEmpty() || folderHideJob?.isActive == true) return
         stopFolderHide.set(false)
         folderHideJob = viewModelScope.launch {
@@ -2024,10 +2022,7 @@ class GalleryViewModel @Inject constructor(
                 // name to show. That makes it one more thing a failed hide has to give back, so the
                 // name is held until the hide is known to have landed.
                 pendingHideFolderName = bucketName
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] = current + bucketName
-                }
+                settingsStore.update(Settings.HIDDEN_FOLDER_NAMES) { current -> current + bucketName }
                 if (!split.isEmpty) runHide(split, reportProgress = true)
             } finally {
                 _folderHideProgress.value = null
@@ -2079,14 +2074,14 @@ class GalleryViewModel @Inject constructor(
      * and the one record a reveal needs to re-pair rather than re-upload. [HiddenFolderRecords] then
      * routes them, exactly as it does for the same folder opened from its own screen.
      */
-    private suspend fun folderHideSplit(bucketName: String): HiddenFolderRecords.HideSplit {
+    private suspend fun folderHideSplit(bucketName: String): VaultHideSplit {
         val userId = accountManager.getPrimaryUserId().first()
         val bucketItems = localRepo.queryByBucket(bucketName)
-        if (bucketItems.isEmpty()) return HiddenFolderRecords.HideSplit.EMPTY
+        if (bucketItems.isEmpty()) return VaultHideSplit.EMPTY
         // Without an account no device photo is paired to a Drive copy, so the split is all-local.
         val pairedLinkIds: Map<String, String> =
             if (userId != null) syncStateRepo.cloudPairedLinkIds(userId, bucketItems.map { it.uri }) else emptyMap()
-        return HiddenFolderRecords.folderHideSplit(
+        return hiddenFolders.folderHideSplit(
             items = bucketItems.map { GalleryItem.LocalOnly(it) },
             bucketName = bucketName,
             cloudLinkIdByUri = pairedLinkIds,
@@ -2134,8 +2129,8 @@ class GalleryViewModel @Inject constructor(
      */
     private fun watchRemoteHides() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { HiddenSyncTimes.remoteHideQueue(it) }
+            settingsStore.observe(Settings.HIDDEN_REMOTE_HIDE_QUEUE)
+                .map { RemoteHideQueue.parse(it) }
                 .distinctUntilChanged()
                 .collect { queue ->
                     if (queue.isEmpty() || remoteHideBatch.isNotEmpty()) return@collect
@@ -2152,15 +2147,17 @@ class GalleryViewModel @Inject constructor(
                         link != null && link in queue
                     }
                     val cloudOnly = waiting.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId }
-                    for (link in cloudOnly) HiddenCloudPhotos.hide(context, listOf(link), queue.getValue(link))
-                    if (cloudOnly.isNotEmpty()) context.settingsDataStore.edit { prefs ->
-                        HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - cloudOnly.toSet())
+                    for (link in cloudOnly) hiddenCloud.hide(listOf(link), queue.getValue(link))
+                    if (cloudOnly.isNotEmpty()) {
+                        settingsStore.update(Settings.HIDDEN_REMOTE_HIDE_QUEUE) { entries ->
+                            RemoteHideQueue.format(RemoteHideQueue.parse(entries) - cloudOnly.toSet())
+                        }
                     }
                     val synced = waiting.filterIsInstance<GalleryItem.Synced>()
                     if (synced.isEmpty()) return@collect
                     remoteHideBatch = synced.mapTo(HashSet()) { it.cloud.linkId }
                     _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
-                    runHide(HiddenFolderRecords.hideSplit(synced), reportProgress = false)
+                    runHide(hiddenFolders.hideSplit(synced), reportProgress = false)
                 }
         }
     }
@@ -2181,20 +2178,17 @@ class GalleryViewModel @Inject constructor(
         // A hide another device asked for that did not land here, the system prompt declined or the copy refused,
         // leaves the queue: asking again at every opening would be a prompt the user has already answered.
         if (declinedRemote.isNotEmpty()) viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - declinedRemote)
+            settingsStore.update(Settings.HIDDEN_REMOTE_HIDE_QUEUE) { entries ->
+                RemoteHideQueue.format(RemoteHideQueue.parse(entries) - declinedRemote)
             }
         }
         if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
         viewModelScope.launch {
             if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
-            HiddenCloudPhotos.reveal(context, cloudIds)
+            hiddenCloud.reveal(cloudIds)
             // Nothing was vaulted, so a folder left flagged would list in the vault holding no
             // photos while its card is gone from Albums, with no way back except revealing it.
-            if (folderName != null) context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] = current - folderName
-            }
+            if (folderName != null) settingsStore.update(Settings.HIDDEN_FOLDER_NAMES) { current -> current - folderName }
         }
     }
 
@@ -2208,7 +2202,7 @@ class GalleryViewModel @Inject constructor(
             // One thumbnail URI per selected photo so the Activity screen lists them individually.
             val thumbUris = items.map { thumbUriFor(it) }
             val transferId = transferCenter.start(
-                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
+                TransferKind.DOWNLOAD, items.size, items = thumbUris,
                 onCancel = { job?.cancel() },
             )
             // Resolve per-photo album folder so cloud-album photos go to DCIM/<AlbumName>/
@@ -2235,7 +2229,7 @@ class GalleryViewModel @Inject constructor(
                 transferCenter.finish(transferId)
             }
             transferCenter.log(
-                TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),
+                TransferKind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),
             )
             _uiState.update { it.copy(
                 multiDownloadState = MultiDownloadState.Done(result.done - result.failed, result.failed),
@@ -2295,10 +2289,7 @@ class GalleryViewModel @Inject constructor(
             // Remove from offline — instant, no network: drop the pins and their blobs.
             val linkIds = cloudItems.map { it.cloud.linkId }
             viewModelScope.launch {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkIds.toSet()
-                }
+                settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current - linkIds.toSet() }
                 linkIds.forEach { offlineStore.delete(it) }
                 _uiState.update { it.copy(selectedItems = emptySet()) }
                 // Negative = "removed" so the screen shows the un-pin message, not a pin count.
@@ -2313,16 +2304,13 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             // Optimistic pin: add every linkId in one edit so the badges light up before any byte is
             // fetched; failures below remove the ones that didn't land.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
-            }
+            settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current + linkIds }
             _uiState.update { it.copy(selectedItems = emptySet()) }
             val userId = accountManager.getPrimaryUserId().first()
             var succeeded = 0
             val failedLinkIds = mutableListOf<String>()
             val savedPaths = mutableListOf<String>()
-            val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, toPin.size)
+            val transferId = transferCenter.start(TransferKind.OFFLINE, toPin.size)
             try {
                 for (item in toPin) {
                     val linkId = item.cloud.linkId
@@ -2345,19 +2333,16 @@ class GalleryViewModel @Inject constructor(
             // Revert the optimistic pin for anything that didn't download, so a failed item never
             // looks pinned with no blob behind it.
             if (failedLinkIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
-                }
+                settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current - failedLinkIds.toSet() }
                 failedLinkIds.forEach { offlineStore.delete(it) }
             }
             // Drop any blob whose pin was removed (un-pinned, or a sign-out) while its download was
             // in flight, so a blob never outlives its pin.
-            val finalPins = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+            val finalPins = settingsStore.get(Settings.OFFLINE_PIN_IDS)
             (linkIds - failedLinkIds.toSet()).forEach { id ->
                 if (id !in finalPins) offlineStore.delete(id)
             }
-            transferCenter.log(TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths)
+            transferCenter.log(TransferKind.OFFLINE, succeeded, uris = savedPaths)
             _offlineBatchResult.emit(succeeded)
         }
     }

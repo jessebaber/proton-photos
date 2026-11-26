@@ -95,6 +95,8 @@ interface BackgroundWork {
         val coverUri: String?,
     )
 
+    fun armColdOpenDamping()
+    fun setGentleSync(active: Boolean)
 
     /** Progress / result Data keys for workers, so presentation need not import worker classes. */
     object ImportKeys {

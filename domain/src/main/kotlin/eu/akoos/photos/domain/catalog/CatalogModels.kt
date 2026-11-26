@@ -194,3 +194,8 @@ data class OwnStreamTotalsRecord(
     val bytes: Long,
 )
 
+data class AlbumMembershipRecord(
+    val albumLinkId: String,
+    val photoLinkId: String,
+)
+

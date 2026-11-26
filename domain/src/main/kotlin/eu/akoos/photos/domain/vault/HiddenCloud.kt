@@ -27,7 +27,7 @@ package eu.akoos.photos.domain.vault
  * Context is held by the implementation.
  */
 interface HiddenCloud {
-    suspend fun hide(linkIds: Collection<String>)
+    suspend fun hide(linkIds: Collection<String>, atMs: Long? = null)
     suspend fun reveal(linkIds: Collection<String>)
     suspend fun hideAlbums(albumLinkIds: Collection<String>)
     suspend fun revealAlbums(albumLinkIds: Collection<String>)

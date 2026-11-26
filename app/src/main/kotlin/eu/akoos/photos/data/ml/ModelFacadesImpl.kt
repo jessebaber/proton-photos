@@ -75,11 +75,7 @@ class OcrModelsImpl @Inject constructor(
     override val totalDownloadBytes: Long get() = OcrModelAssets.TOTAL_DOWNLOAD_BYTES
     override fun filesPresentQuick(): Boolean = manager.filesPresentQuick()
     override suspend fun ensure(onDownloadStart: () -> Unit): OcrModelPreparation =
-        when (recognizer.prepare(onDownloadStart)) {
-            eu.akoos.photos.data.ocr.OcrModelPreparation.Ready -> OcrModelPreparation.Ready
-            eu.akoos.photos.data.ocr.OcrModelPreparation.NeedsConsent -> OcrModelPreparation.NeedsConsent
-            eu.akoos.photos.data.ocr.OcrModelPreparation.Failed -> OcrModelPreparation.Failed
-        }
+        recognizer.prepare(onDownloadStart)
     override suspend fun deleteAll() = manager.deleteAll()
 }
 

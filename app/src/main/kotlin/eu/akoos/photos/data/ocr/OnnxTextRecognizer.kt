@@ -34,6 +34,8 @@
 
 package eu.akoos.photos.data.ocr
 
+import eu.akoos.photos.domain.ml.OcrModelPreparation
+
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -56,19 +58,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-
-/** Whether the text reader can run right now, and what stands in the way when it cannot. */
-sealed interface OcrModelPreparation {
-
-    /** The models are on this device and a read can start. */
-    data object Ready : OcrModelPreparation
-
-    /** Nothing is on disk yet and the user has not agreed to the download. */
-    data object NeedsConsent : OcrModelPreparation
-
-    /** The download was attempted and did not produce usable models. */
-    data object Failed : OcrModelPreparation
-}
 
 /**
  * Reads the text in a photo with the on-device models.
@@ -124,7 +113,7 @@ class OnnxTextRecognizer @Inject constructor(
      * as the download takes, so a caller shows progress around it; [onDownloadStart] fires just
      * before the first byte moves so that wait can be labelled as the download it is.
      */
-    suspend fun prepare(onDownloadStart: () -> Unit = {}): OcrModelPreparation {
+    override suspend fun prepare(onDownloadStart: () -> Unit): OcrModelPreparation {
         if (closed) return OcrModelPreparation.Failed
         if (COMPONENTS.all { models.onDisk(it) != null }) return OcrModelPreparation.Ready
         if (!downloadAccepted()) return OcrModelPreparation.NeedsConsent
@@ -137,7 +126,7 @@ class OnnxTextRecognizer @Inject constructor(
     }
 
     /** Records that the user agreed to fetch the models. Takes effect immediately and is remembered. */
-    fun allowModelDownload() {
+    override fun allowModelDownload() {
         downloadAccepted = true
         background.launch {
             appContext.settingsDataStore.edit { it[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] = true }
@@ -145,12 +134,10 @@ class OnnxTextRecognizer @Inject constructor(
     }
 
     /** How many bytes accepting the prompt fetches. */
-    val downloadBytes: Long get() = OcrModelAssets.TOTAL_DOWNLOAD_BYTES
-
-    override suspend fun recognize(frame: Bitmap): List<RecognizedTextBlock> = recognize(frame) {}
+    override val downloadBytes: Long get() = OcrModelAssets.TOTAL_DOWNLOAD_BYTES
 
     /** As [recognize], reporting which stage the read has reached so a caller can say so on screen. */
-    suspend fun recognize(
+    override suspend fun recognize(
         frame: Bitmap,
         onStage: (TextReadStage) -> Unit,
     ): List<RecognizedTextBlock> = withContext(Dispatchers.IO) {

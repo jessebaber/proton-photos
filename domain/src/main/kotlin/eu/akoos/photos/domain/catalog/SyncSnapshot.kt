@@ -25,7 +25,7 @@ package eu.akoos.photos.domain.catalog
 import kotlinx.coroutines.flow.Flow
 import me.proton.core.domain.entity.UserId
 
-/** Lean sync_state projection shared by gallery/widget. */
+/** Lean sync_state projection shared by gallery/viewer/widget. */
 data class SyncSnapshotRows(
     val rows: List<SyncStateLiteRecord>,
 ) {

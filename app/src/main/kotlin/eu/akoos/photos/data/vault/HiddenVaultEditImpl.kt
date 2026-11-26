@@ -23,6 +23,14 @@
 package eu.akoos.photos.data.vault
 
 import eu.akoos.photos.data.hidden.HiddenVaultEditor
+import eu.akoos.photos.data.hidden.VaultMove as DataVaultMove
+import eu.akoos.photos.domain.vault.VaultMove
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CoroutineScope
+import eu.akoos.photos.di.AppScope
+import kotlinx.coroutines.flow.SharingStarted
 import eu.akoos.photos.domain.vault.HiddenVaultEdit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,7 +38,13 @@ import javax.inject.Singleton
 @Singleton
 class HiddenVaultEditImpl @Inject constructor(
     private val editor: HiddenVaultEditor,
+    @AppScope private val scope: CoroutineScope,
 ) : HiddenVaultEdit {
+    override val moves: StateFlow<Map<String, VaultMove>> =
+        editor.moves.map { raw ->
+            raw.mapValues { (_, m) -> VaultMove(m.uri, m.displayName) }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
     override suspend fun rename(uri: String, newName: String): String? = editor.rename(uri, newName)
     override suspend fun copy(uri: String, newName: String): String? = editor.copy(uri, newName)
     override suspend fun adoptCopy(sourceUri: String, copyUri: String, displayName: String) =

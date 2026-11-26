@@ -29,6 +29,9 @@ import android.net.Uri
 import android.provider.MediaStore
 import eu.akoos.photos.data.preferences.InMemoryPreferencesDataStore
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.settings.SettingsBindings
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.settings.SettingsStore
 import eu.akoos.photos.util.CaptureDateOverride
 import io.mockk.every
 import io.mockk.mockk
@@ -56,11 +59,13 @@ class EditorCopyCaptureDateTest {
     private val resolver = mockk<ContentResolver>()
     private val context = mockk<Context>()
     private val store = InMemoryPreferencesDataStore()
+    private lateinit var settingsStore: SettingsStore
 
     @Before
     fun setUp() {
         every { context.contentResolver } returns resolver
         InMemoryPreferencesDataStore.install(context, store)
+        settingsStore = SettingsBindings.create(store)
     }
 
     @After
@@ -78,7 +83,7 @@ class EditorCopyCaptureDateTest {
     fun `a copy whose date the media store dropped records the original date`() = runTest {
         storedRow(dateTaken = 0L, modifiedSeconds = 1_700_000_000L)
 
-        recordCaptureDateIfUnset(context, uri, originalMs)
+        recordCaptureDateIfUnset(context, settingsStore, uri, originalMs)
 
         assertEquals(setOf(CaptureDateOverride.encode(uri.toString(), originalMs, 1_700_000_000L)), overrides())
     }
@@ -87,7 +92,7 @@ class EditorCopyCaptureDateTest {
     fun `a copy whose date the media store kept records nothing`() = runTest {
         storedRow(dateTaken = originalMs, modifiedSeconds = 1_700_000_000L)
 
-        recordCaptureDateIfUnset(context, uri, originalMs)
+        recordCaptureDateIfUnset(context, settingsStore, uri, originalMs)
 
         assertNull(overrides())
     }
@@ -96,7 +101,7 @@ class EditorCopyCaptureDateTest {
     fun `an original with no known date records nothing`() = runTest {
         storedRow(dateTaken = 0L, modifiedSeconds = 1_700_000_000L)
 
-        recordCaptureDateIfUnset(context, uri, 0L)
+        recordCaptureDateIfUnset(context, settingsStore, uri, 0L)
 
         assertNull(overrides())
     }
@@ -109,7 +114,7 @@ class EditorCopyCaptureDateTest {
         }
         storedRow(dateTaken = 0L, modifiedSeconds = 9L)
 
-        recordCaptureDateIfUnset(context, uri, originalMs)
+        recordCaptureDateIfUnset(context, settingsStore, uri, originalMs)
 
         assertEquals(setOf(other, CaptureDateOverride.encode(uri.toString(), originalMs, 9L)), overrides())
     }
@@ -118,7 +123,7 @@ class EditorCopyCaptureDateTest {
     fun `a copy the media store cannot read back still keeps its date`() = runTest {
         every { resolver.query(uri, any(), null, null, null) } returns null
 
-        recordCaptureDateIfUnset(context, uri, originalMs)
+        recordCaptureDateIfUnset(context, settingsStore, uri, originalMs)
 
         assertEquals(setOf(CaptureDateOverride.encode(uri.toString(), originalMs, null)), overrides())
     }

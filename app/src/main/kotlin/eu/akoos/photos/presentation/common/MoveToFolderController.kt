@@ -22,14 +22,12 @@
 
 package eu.akoos.photos.presentation.common
 
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
 import eu.akoos.photos.domain.usecase.MoveToFolderResult
-
 import android.content.Context
 import android.content.IntentSender
-import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
 import eu.akoos.photos.domain.usecase.PendingMove
@@ -64,6 +62,7 @@ class MoveToFolderController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val moveToFolder: MoveToFolderUseCase<IntentSender>,
     private val localMediaRepo: LocalMediaRepository,
+    private val settingsStore: SettingsStore,
 ) {
 
     /** One-shot system write-consent request a move needs when the selection holds a file the app
@@ -131,12 +130,10 @@ class MoveToFolderController @Inject constructor(
      *  which has to read it as it was before the rename. */
     private suspend fun carryFolderChoices(from: String, to: String) {
         val fromStillUsed = localMediaRepo.queryByBucket(from).isNotEmpty()
-        context.settingsDataStore.edit { prefs ->
-            for (key in listOf(SettingsKeys.SYNC_FOLDER_NAMES, SettingsKeys.EXCLUDED_FOLDER_NAMES)) {
-                val next = renamedFolderSet(prefs[key], from, to, fromStillUsed) ?: continue
-                prefs[key] = next
-            }
-        }
+        val sync = settingsStore.get(Settings.SYNC_FOLDER_NAMES)
+        renamedFolderSet(sync, from, to, fromStillUsed)?.let { settingsStore.set(Settings.SYNC_FOLDER_NAMES, it) }
+        val excl = settingsStore.get(Settings.EXCLUDED_FOLDER_NAMES)
+        renamedFolderSet(excl, from, to, fromStillUsed)?.let { settingsStore.set(Settings.EXCLUDED_FOLDER_NAMES, it) }
     }
 
     /** Replay the deferred move on the foreign files after the user granted the system write request. */

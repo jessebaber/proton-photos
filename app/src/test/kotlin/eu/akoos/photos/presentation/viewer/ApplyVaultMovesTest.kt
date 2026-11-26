@@ -22,7 +22,7 @@
 
 package eu.akoos.photos.presentation.viewer
 
-import eu.akoos.photos.data.hidden.VaultMove
+import eu.akoos.photos.domain.vault.VaultMove
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import org.junit.Assert.assertEquals

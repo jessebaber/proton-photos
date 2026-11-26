@@ -21,32 +21,6 @@
 data-presentation eu/akoos/photos/data/usecase/ImportTakeoutUseCase.kt
 data-presentation eu/akoos/photos/data/usecase/StageImportUseCase.kt
 
-# stream: feat/presentation-media
-presentation-crypto eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
-presentation-data eu/akoos/photos/presentation/common/AddLabelsAction.kt
-presentation-data eu/akoos/photos/presentation/common/ConfirmSheet.kt
-presentation-data eu/akoos/photos/presentation/common/FavoriteSelection.kt
-presentation-data eu/akoos/photos/presentation/common/GalleryItemSelectionController.kt
-presentation-data eu/akoos/photos/presentation/common/HideConfirmation.kt
-presentation-data eu/akoos/photos/presentation/common/MoveToFolderController.kt
-presentation-data eu/akoos/photos/presentation/common/UndoController.kt
-presentation-data eu/akoos/photos/presentation/editor/PhotoEditorViewModel.kt
-presentation-data eu/akoos/photos/presentation/editor/VideoEditorViewModel.kt
-presentation-data eu/akoos/photos/presentation/gallery/AddToAlbumMembershipViewModel.kt
-presentation-data eu/akoos/photos/presentation/gallery/GalleryGrid.kt
-presentation-data eu/akoos/photos/presentation/gallery/GalleryRails.kt
-presentation-data eu/akoos/photos/presentation/gallery/GalleryScreen.kt
-presentation-data eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
-presentation-data eu/akoos/photos/presentation/gallery/GridZoom.kt
-presentation-data eu/akoos/photos/presentation/metadata/MetadataEditorViewModel.kt
-presentation-data eu/akoos/photos/presentation/viewer/DetailsMapBox.kt
-presentation-data eu/akoos/photos/presentation/viewer/LabelEditorInput.kt
-presentation-data eu/akoos/photos/presentation/viewer/PhotoViewerScreen.kt
-presentation-data eu/akoos/photos/presentation/viewer/PhotoViewerViewModel.kt
-presentation-data eu/akoos/photos/presentation/viewer/ViewerTextOverlay.kt
-presentation-service eu/akoos/photos/presentation/gifmaker/GifMakerViewModel.kt
-presentation-worker eu/akoos/photos/presentation/gallery/GalleryViewModel.kt
-
 # stream: feat/presentation-albums
 presentation-data eu/akoos/photos/presentation/albums/AlbumBrowseSource.kt
 presentation-data eu/akoos/photos/presentation/albums/AlbumDetailScreen.kt
@@ -82,7 +56,6 @@ presentation-data eu/akoos/photos/presentation/calendar/CalendarViewModel.kt
 presentation-data eu/akoos/photos/presentation/calendar/DayDetailViewModel.kt
 presentation-data eu/akoos/photos/presentation/duplicates/DuplicateFinderViewModel.kt
 presentation-data eu/akoos/photos/presentation/duplicates/DuplicateIgnoreStore.kt
-presentation-data eu/akoos/photos/presentation/location/LocationDetailScreen.kt
 presentation-data eu/akoos/photos/presentation/location/LocationDetailViewModel.kt
 presentation-data eu/akoos/photos/presentation/map/MapViewModel.kt
 presentation-data eu/akoos/photos/presentation/memories/MemoriesViewModel.kt
@@ -96,6 +69,5 @@ presentation-data eu/akoos/photos/presentation/person/FindMorePhotosViewModel.kt
 presentation-data eu/akoos/photos/presentation/person/PersonDetailViewModel.kt
 presentation-data eu/akoos/photos/presentation/search/PhotoPlaceIndex.kt
 presentation-data eu/akoos/photos/presentation/search/SearchFilter.kt
-presentation-data eu/akoos/photos/presentation/search/SearchScreen.kt
 presentation-data eu/akoos/photos/presentation/search/SearchViewModel.kt
 

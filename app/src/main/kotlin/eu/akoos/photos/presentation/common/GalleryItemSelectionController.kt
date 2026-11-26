@@ -22,8 +22,16 @@
 
 package eu.akoos.photos.presentation.common
 
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.vault.VaultHideSplit
+import eu.akoos.photos.domain.vault.VaultDiagnostics
+import eu.akoos.photos.domain.vault.VaultDecisions
+import eu.akoos.photos.domain.vault.HiddenFolders
+import eu.akoos.photos.domain.vault.HiddenCloud
+import eu.akoos.photos.domain.settings.currentShareStripConfig
+import eu.akoos.photos.domain.settings.ShareStripConfig
 import eu.akoos.photos.domain.usecase.DeletePhotoResult
-
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -32,7 +40,6 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.FileProvider
-import androidx.datastore.preferences.core.edit
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -55,17 +62,12 @@ import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
-import eu.akoos.photos.data.hidden.HiddenCloudPhotos
-import eu.akoos.photos.data.hidden.HiddenFolderRecords
-import eu.akoos.photos.data.hidden.HiddenStorageManager
-import eu.akoos.photos.data.hidden.HiddenVaultDecisions
-import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
-import eu.akoos.photos.data.hidden.HiddenVaultJournal
-import eu.akoos.photos.data.offline.OfflineStorageManager
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.currentShareStripConfig
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.vault.HiddenVaultJournalOps
+import eu.akoos.photos.domain.vault.VaultJournalEntry
+import eu.akoos.photos.domain.offline.OfflineStorage
+import eu.akoos.photos.domain.transfer.TransferKind
+import eu.akoos.photos.domain.transfer.Transfers
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -122,10 +124,14 @@ class GalleryItemSelectionController @AssistedInject constructor(
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val driveRepo: DrivePhotoRepository,
-    private val offlineStore: OfflineStorageManager,
-    private val hiddenStorage: HiddenStorageManager,
-    private val hiddenVaultJournal: HiddenVaultJournal,
-    private val transferCenter: TransferCenter,
+    private val offlineStore: OfflineStorage,
+    private val hiddenStorage: HiddenStorage,
+    private val hiddenVaultJournal: HiddenVaultJournalOps,
+    private val hiddenCloud: HiddenCloud,
+    private val hiddenFolders: HiddenFolders,
+    private val vaultDiagnostics: VaultDiagnostics,
+    private val settingsStore: SettingsStore,
+    private val transferCenter: Transfers,
     private val undoController: UndoController,
     private val accountManager: AccountManager,
     private val favoriteWriter: FavoriteWriter,
@@ -187,8 +193,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
 
     /** Cloud linkIds pinned for offline. Read here to decide which way [toggleSelectedOffline] goes,
      *  and by the surface to name that direction on the row the user presses. */
-    val offlinePinIds: StateFlow<Set<String>> = context.settingsDataStore.data
-        .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
+    val offlinePinIds: StateFlow<Set<String>> = settingsStore.observe(Settings.OFFLINE_PIN_IDS)
         .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     // ── Favourite ───────────────────────────────────────────────────────────────────────────────
@@ -259,7 +264,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
         scope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             // Null when strip-on-share is off, so each resolved URI passes through untouched below.
-            val stripConfig = currentShareStripConfig(context)
+            val stripConfig = settingsStore.currentShareStripConfig()?.toUtil()
             val uris = ArrayList<Uri>(items.size)
             for ((index, item) in items.withIndex()) {
                 runCatching {
@@ -404,7 +409,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
             // One thumbnail URI per selected photo so the Activity screen lists them individually.
             val thumbUris = items.map { thumbUriFor(it) }
             val transferId = transferCenter.start(
-                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
+                TransferKind.DOWNLOAD, items.size, items = thumbUris,
                 onCancel = { job?.cancel() },
             )
             _downloadStarted.tryEmit(items.size)
@@ -422,7 +427,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
             } finally {
                 transferCenter.finish(transferId)
             }
-            transferCenter.log(TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList())
+            transferCenter.log(TransferKind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList())
             selection.clear()
             onResult(result.done - result.failed, result.failed)
         }
@@ -447,10 +452,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
         if (allOffline) {
             val linkIds = cloudItems.map { it.cloud.linkId }
             scope.launch {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkIds.toSet()
-                }
+                settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current - linkIds.toSet() }
                 linkIds.forEach { offlineStore.delete(it) }
                 selection.clear()
                 _offlineBatchResult.emit(-linkIds.size)
@@ -462,16 +464,13 @@ class GalleryItemSelectionController @AssistedInject constructor(
         val linkIds = toPin.map { it.cloud.linkId }
         scope.launch {
             // Optimistic pin so the badges light up before any byte lands; failures below revert.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
-            }
+            settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current + linkIds }
             selection.clear()
             val userId = accountManager.getPrimaryUserId().first()
             var succeeded = 0
             val failedLinkIds = mutableListOf<String>()
             val savedPaths = mutableListOf<String>()
-            val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, toPin.size)
+            val transferId = transferCenter.start(TransferKind.OFFLINE, toPin.size)
             try {
                 for (item in toPin) {
                     val linkId = item.cloud.linkId
@@ -492,13 +491,10 @@ class GalleryItemSelectionController @AssistedInject constructor(
                 transferCenter.finish(transferId)
             }
             if (failedLinkIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
-                }
+                settingsStore.update(Settings.OFFLINE_PIN_IDS) { current -> current - failedLinkIds.toSet() }
                 failedLinkIds.forEach { offlineStore.delete(it) }
             }
-            transferCenter.log(TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths)
+            transferCenter.log(TransferKind.OFFLINE, succeeded, uris = savedPaths)
             _offlineBatchResult.emit(succeeded)
         }
     }
@@ -530,8 +526,8 @@ class GalleryItemSelectionController @AssistedInject constructor(
      * The very split [hideSelected] runs on, read from the same selection, so the sheet describes
      * exactly what the Hide button is about to do rather than what hiding does in general.
      */
-    fun hideSplitForSelection(): HiddenFolderRecords.HideSplit =
-        HiddenFolderRecords.hideSplit(selection.value.toList())
+    fun hideSplitForSelection(): VaultHideSplit =
+        hiddenFolders.hideSplit(selection.value.toList())
 
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         val items = selection.value.toList()
@@ -576,7 +572,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
      *
      * The intent is journalled BEFORE the MediaStore delete and confirmed after it, so an
      * interruption between the two leaves a repairable record instead of bytes nothing refers to —
-     * see [HiddenVaultJournal].
+     * see [HiddenVaultJournalOps].
      */
     fun hideSelected() {
         val items = selection.value.toList()
@@ -585,13 +581,13 @@ class GalleryItemSelectionController @AssistedInject constructor(
         // the timeline and the folder screens do: a photo with a device file moves into the vault
         // carrying whatever Drive pairing it has, and a cloud-only one, which has no file to move,
         // hides by its cloud linkId. Nothing on Drive changes either way.
-        val split = HiddenFolderRecords.hideSplit(items)
+        val split = hiddenFolders.hideSplit(items)
         val vaultable = split.vaultable
         scope.launch {
             _isDeleting.value = true
             try {
-                HiddenVaultDiagnostics.hideStarted(split)
-                HiddenCloudPhotos.hide(context, split.cloudLinkIds)
+                vaultDiagnostics.hideStarted(split)
+                hiddenCloud.hide(split.cloudLinkIds)
                 pendingHideCloudLinkIds = split.cloudLinkIds
                 pendingHideFailures = 0
                 if (vaultable.isEmpty()) {
@@ -619,7 +615,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                 // file that could not be copied is counted rather than dropped: its photo stays
                 // visible, so a hide that reported plain success would be describing a state the user
                 // can see is not true.
-                val collected = mutableListOf<HiddenVaultJournal.Entry>()
+                val collected = mutableListOf<VaultJournalEntry>()
                 var hideFailures = 0
                 for (target in vaultable) {
                     val local = target.local
@@ -628,7 +624,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                         local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
                     )
                     if (privateUri != null) {
-                        collected += HiddenVaultJournal.Entry(
+                        collected += VaultJournalEntry(
                             privateUri = privateUri,
                             sourceUri = local.uri,
                             sourceFolder = sourceFolder,
@@ -640,7 +636,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                         hideFailures++
                     }
                 }
-                HiddenVaultDiagnostics.copied(collected.size, hideFailures)
+                vaultDiagnostics.copied(collected.size, hideFailures)
                 if (collected.isEmpty()) {
                     rollbackPendingHide()
                     _actionFailure.tryEmit(context.getString(R.string.gallery_copy_to_hidden_failed))
@@ -660,14 +656,14 @@ class GalleryItemSelectionController @AssistedInject constructor(
                 // Delete the MediaStore originals of exactly what was copied. Narrowing to the copied
                 // files is what leaves a photo whose copy failed where the user can still see it: this
                 // delete is permanent, so passing the whole selection would take it nowhere.
-                val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
+                val deleting = VaultDecisions.deletableOriginals(vaultable, collected)
                 // Hiding a device photo needs no account; the vault is app-private and the use case
                 // only requires a signed-in user for a cloud trash, which a hide never performs. Pass
                 // the nullable userId through instead of aborting a guest hide here.
                 val userId = accountManager.getPrimaryUserId().first()
                 when (val result = deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
                     is DeletePhotoResult.Success -> {
-                        HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
+                        vaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
                         // Snapshot both halves before commitPendingHide() clears the pending list, so
                         // Undo reverses exactly the hide that just landed.
                         val hideUris = pendingHidePrivateUris
@@ -679,7 +675,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                         selection.clear()
                     }
                     is DeletePhotoResult.NeedsMediaWritePermission<PendingIntent> -> {
-                        HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
+                        vaultDiagnostics.originalsAwaitingConsent(deleting.size)
                         pendingPermissionResult = result
                         _pendingDeleteIntent.value = result.pendingIntent
                     }
@@ -721,7 +717,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
         if (uris.isEmpty() && cloudIds.isEmpty()) return
         scope.launch {
             if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
-            HiddenCloudPhotos.reveal(context, cloudIds)
+            hiddenCloud.reveal(cloudIds)
         }
     }
 
@@ -938,3 +934,11 @@ class GalleryItemSelectionController @AssistedInject constructor(
         const val TAG = "SelectionCtl"
     }
 }
+
+private fun ShareStripConfig.toUtil() = MetadataStripConfig(
+    stripGps = stripGps,
+    stripCameraInfo = stripCameraInfo,
+    stripTimestamp = stripTimestamp,
+    stripSoftwareInfo = stripSoftwareInfo,
+    stripAuthorship = stripAuthorship,
+)

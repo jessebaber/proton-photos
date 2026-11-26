@@ -58,4 +58,5 @@ interface PhotoLabels {
     suspend fun deleteForPhotos(photoKeys: Collection<String>): Int
     suspend fun clearForUser(userId: UserId): Int
     suspend fun adoptGuestLabels(accountId: String): Int
+    suspend fun reconcileKeys(items: Iterable<GalleryItem>): Int
 }

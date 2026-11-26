@@ -103,15 +103,27 @@ import eu.akoos.photos.data.backup.SharedBackupImpl
 import eu.akoos.photos.data.compression.VideoEncodersImpl
 import eu.akoos.photos.data.debug.LargeLibrarySimImpl
 import eu.akoos.photos.data.debug.SdkDebugRoutesImpl
+import eu.akoos.photos.data.ml.FaceDetectorFactoryImpl
+import eu.akoos.photos.data.notification.EditUploadNotifierImpl
+import eu.akoos.photos.data.ocr.TextRecognizerFactoryImpl
 import eu.akoos.photos.data.settings.AccountCleanupImpl
+import eu.akoos.photos.data.share.ShareBackupImpl
+import eu.akoos.photos.data.vault.HiddenVaultJournalOpsImpl
 import eu.akoos.photos.data.vault.HiddenVaultMaintenanceImpl
+import eu.akoos.photos.data.vault.VaultDiagnosticsImpl
 import eu.akoos.photos.data.vault.VaultSignOutImpl
 import eu.akoos.photos.domain.backup.SharedBackup
 import eu.akoos.photos.domain.compression.VideoEncoders
 import eu.akoos.photos.domain.debug.LargeLibrarySim
 import eu.akoos.photos.domain.debug.SdkDebugRoutes
+import eu.akoos.photos.domain.ml.FaceDetectorFactory
+import eu.akoos.photos.domain.notification.EditUploadNotifier
+import eu.akoos.photos.domain.ocr.TextRecognizerFactory
 import eu.akoos.photos.domain.settings.AccountCleanup
+import eu.akoos.photos.domain.share.ShareBackup
+import eu.akoos.photos.domain.vault.HiddenVaultJournalOps
 import eu.akoos.photos.domain.vault.HiddenVaultMaintenance
+import eu.akoos.photos.domain.vault.VaultDiagnostics
 import eu.akoos.photos.domain.vault.VaultSignOut
 import javax.inject.Singleton
 
@@ -175,6 +187,12 @@ abstract class PresentationFacadesModule {
     @Binds @Singleton abstract fun bindAccountCleanup(impl: AccountCleanupImpl): AccountCleanup
     @Binds @Singleton abstract fun bindVaultSignOut(impl: VaultSignOutImpl): VaultSignOut
     @Binds @Singleton abstract fun bindHiddenVaultMaintenance(impl: HiddenVaultMaintenanceImpl): HiddenVaultMaintenance
+    @Binds @Singleton abstract fun bindHiddenVaultJournalOps(impl: HiddenVaultJournalOpsImpl): HiddenVaultJournalOps
+    @Binds @Singleton abstract fun bindVaultDiagnostics(impl: VaultDiagnosticsImpl): VaultDiagnostics
+    @Binds @Singleton abstract fun bindShareBackup(impl: ShareBackupImpl): ShareBackup
+    @Binds @Singleton abstract fun bindEditUploadNotifier(impl: EditUploadNotifierImpl): EditUploadNotifier
+    @Binds @Singleton abstract fun bindFaceDetectorFactory(impl: FaceDetectorFactoryImpl): FaceDetectorFactory
+    @Binds @Singleton abstract fun bindTextRecognizerFactory(impl: TextRecognizerFactoryImpl): TextRecognizerFactory
 }
 
 

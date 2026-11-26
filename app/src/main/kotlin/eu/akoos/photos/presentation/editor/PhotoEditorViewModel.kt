@@ -22,6 +22,19 @@
 
 package eu.akoos.photos.presentation.editor
 
+import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.notification.EditUploadNotifier
+import eu.akoos.photos.domain.upload.LocalOverwrite
+import eu.akoos.photos.domain.transfer.TransferKind
+import eu.akoos.photos.domain.transfer.Transfers
+import eu.akoos.photos.domain.vault.HiddenVaultEdit
+import eu.akoos.photos.domain.vault.HiddenVaultIndex
+import eu.akoos.photos.domain.vault.HiddenStorage
+import eu.akoos.photos.domain.settings.SettingsStore
+import eu.akoos.photos.domain.settings.Settings
+import eu.akoos.photos.domain.ml.FaceDetectorEngine
+import eu.akoos.photos.domain.ml.FaceDetectorFactory
+import eu.akoos.photos.domain.ml.FaceModels
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -66,20 +79,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
-import androidx.datastore.preferences.core.edit
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.CaptureDateOverride
-import eu.akoos.photos.data.face.FaceDetector
-import eu.akoos.photos.data.face.FaceModelManager
-import eu.akoos.photos.data.face.FaceModelPreparation
-import eu.akoos.photos.data.hidden.HiddenVaultRecords
-import eu.akoos.photos.data.transfer.TransferCenter
-import eu.akoos.photos.data.upload.LocalOverwriteGuard
+import eu.akoos.photos.domain.ml.FaceModelPreparation
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
+import eu.akoos.photos.domain.repository.UploadXAttrMetadata
 import eu.akoos.photos.presentation.common.drawBlurredCover
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
@@ -481,7 +486,12 @@ internal fun shrinkAveraged(src: Bitmap, width: Int, height: Int): Bitmap {
  * did not stick, the date goes into the capture-date overrides, which the media scan reads ahead of the
  * column, the way a download of such a file is dated.
  */
-internal suspend fun recordCaptureDateIfUnset(context: Context, uri: Uri, dateTakenMs: Long) {
+internal suspend fun recordCaptureDateIfUnset(
+    context: Context,
+    settingsStore: SettingsStore,
+    uri: Uri,
+    dateTakenMs: Long,
+) {
     runCatching {
         val stored = context.contentResolver.query(
             uri,
@@ -489,10 +499,8 @@ internal suspend fun recordCaptureDateIfUnset(context: Context, uri: Uri, dateTa
             null, null, null,
         )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
         if (CaptureDateOverride.shouldRecord(dateTakenMs, stored?.first ?: 0L)) {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
-                prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] =
-                    current + CaptureDateOverride.encode(uri.toString(), dateTakenMs, stored?.second)
+            settingsStore.update(Settings.DOWNLOAD_DATE_OVERRIDES) { current ->
+                current + CaptureDateOverride.encode(uri.toString(), dateTakenMs, stored?.second)
             }
         }
     }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
@@ -506,11 +514,16 @@ class PhotoEditorViewModel @Inject constructor(
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     // Reports the background edit-upload to the Activity monitor + avatar ring, the same surface the
     // gallery download / offline pin loops use. The upload itself is unchanged; this only tracks it.
-    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    private val transferCenter: Transfers,
     // A vaulted photo is an app-private file with no MediaStore row: a copy of one has to be written
     // and recorded by the vault, or it leaves the hidden area.
-    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
-    private val hiddenVaultEditor: eu.akoos.photos.data.hidden.HiddenVaultEditor,
+    private val hiddenStorage: HiddenStorage,
+    private val hiddenVaultEditor: HiddenVaultEdit,
+    private val hiddenVaultIndex: HiddenVaultIndex,
+    private val localOverwrite: LocalOverwrite,
+    private val settingsStore: SettingsStore,
+    private val faceModels: FaceModels,
+    private val faceDetectorFactory: FaceDetectorFactory,
     // Application-lifetime scope for the cloud upload that outlives the editor: it must keep running
     // after save() returns and the screen navigates away (viewModelScope is cancelled at that point).
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
@@ -518,7 +531,7 @@ class PhotoEditorViewModel @Inject constructor(
     // instead of starting an upload that hangs on a connected-but-dead network.
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     // Tells the user when the upload of a cloud-only edit fails after the editor already closed.
-    private val editUploadNotifier: eu.akoos.photos.data.notification.EditUploadFailedNotifier,
+    private val editUploadNotifier: EditUploadNotifier,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(EditorUiState())
@@ -738,25 +751,23 @@ class PhotoEditorViewModel @Inject constructor(
     /** Master AI-features gate (Settings, AI and machine learning). Off hides the Hide-faces tool from
      *  the editor tool row so no face model is ever fetched. Observed, so a change made in Settings is
      *  reflected the next time the editor is opened. */
-    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+    val aiFeaturesEnabled: StateFlow<Boolean> = settingsStore.observe(Settings.AI_FEATURES_ENABLED)
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
      *  the Hide-faces tool is offered, so turning faces off drops the tool while the master AI switch
      *  stays on. Observed, so a change made in Settings is reflected the next time the editor is opened. */
-    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+    val faceEnabled: StateFlow<Boolean> = settingsStore.observe(Settings.FACE_ENABLED)
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Resolves the SCRFD model (side-loaded, cached, or downloaded on consent). Built lazily so the
      *  editor pays nothing for it until the user reaches for Hide faces. */
-    private val faceModelManager by lazy { FaceModelManager(context) }
+    private val faceModelManager by lazy { faceModels }
     /** Detector holding one open ONNX session, reused across detects and rebuilt only if the resolved
      *  model path changes. Closed in [onCleared]. */
-    private var faceDetector: FaceDetector? = null
+    private var faceDetector: FaceDetectorEngine<Bitmap>? = null
     private var faceDetectorModelPath: String? = null
 
     // A detection runs its native session off the main thread and cannot be interrupted, so the
@@ -1160,12 +1171,11 @@ class PhotoEditorViewModel @Inject constructor(
                 val sx = fullW.toFloat() / detectW.toFloat()
                 val sy = fullH.toFloat() / detectH.toFloat()
                 val covers = faces.mapNotNull { face ->
-                    if (face.landmarks.size < 2) return@mapNotNull null
-                    val leftEye = face.landmarks[0]
-                    val rightEye = face.landmarks[1]
+                    if (face.landmarks.size < 4) return@mapNotNull null
                     val oval = faceOval(
-                        face.box.left, face.box.top, face.box.right, face.box.bottom,
-                        leftEye.x, leftEye.y, rightEye.x, rightEye.y,
+                        face.left, face.top, face.right, face.bottom,
+                        face.landmarks[0], face.landmarks[1],
+                        face.landmarks[2], face.landmarks[3],
                     )
                     OvalSpec(
                         centerX = oval.centerX * sx,
@@ -1200,10 +1210,10 @@ class PhotoEditorViewModel @Inject constructor(
 
     /** The detector for [modelFile], reusing its open session unless the resolved model path changed.
      *  Called only by a counted detection, which is the only one running, so a replaced session is idle. */
-    private fun ensureFaceDetector(modelFile: File): FaceDetector = synchronized(faceDetectorLock) {
+    private fun ensureFaceDetector(modelFile: File): FaceDetectorEngine<Bitmap> = synchronized(faceDetectorLock) {
         faceDetector?.let { if (faceDetectorModelPath == modelFile.absolutePath) return@synchronized it }
         faceDetector?.close()
-        FaceDetector(modelFile).also {
+        faceDetectorFactory.open<Bitmap>(modelFile).also {
             faceDetector = it
             faceDetectorModelPath = modelFile.absolutePath
         }
@@ -1234,7 +1244,7 @@ class PhotoEditorViewModel @Inject constructor(
      */
     fun allowFaceModelDownload() {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED] = true }
+            settingsStore.set(Settings.FACE_MODEL_DOWNLOAD_ALLOWED, true )
             detectFaces()
         }
     }
@@ -2517,7 +2527,7 @@ class PhotoEditorViewModel @Inject constructor(
                     // Real internet: upload in appScope (survives navigation) and report success right away.
                     appScope.launch {
                         val thumbUri = "file://" + File(context.cacheDir, "thumbnails/thumb_${source.photo.linkId}.jpg").absolutePath
-                        val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(thumbUri))
+                        val tid = transferCenter.start(TransferKind.UPLOAD, total = 1, items = listOf(thumbUri))
                         try {
                             val failure = runCatching {
                                 saveCloud(bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs)
@@ -2526,7 +2536,7 @@ class PhotoEditorViewModel @Inject constructor(
                             transferCenter.progress(tid, 1)
                             if (failure == null) {
                                 transferCenter.log(
-                                    TransferCenter.Kind.UPLOAD, count = 1,
+                                    TransferKind.UPLOAD, count = 1,
                                     name = context.getString(R.string.activity_hist_edited), uris = listOf(thumbUri),
                                 )
                             } else {
@@ -2619,7 +2629,7 @@ class PhotoEditorViewModel @Inject constructor(
                             // Track the replacement upload on the Activity monitor + avatar ring for its
                             // duration; the saved local copy's URI is the row thumbnail. finish() runs in
                             // the finally so the ring clears whether the upload succeeds, fails, or cancels.
-                            val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(savedUriStr))
+                            val tid = transferCenter.start(TransferKind.UPLOAD, total = 1, items = listOf(savedUriStr))
                             try {
                                 val uploadResult = uploadEditAsCloudReplacement(
                                     bitmap, counterpart, effectiveMode, quality, editTimestampMs, originalCaptureMs, userId,
@@ -2628,7 +2638,7 @@ class PhotoEditorViewModel @Inject constructor(
                                 val newLinkId = uploadResult.linkId
                                 transferCenter.progress(tid, 1)
                                 transferCenter.log(
-                                    TransferCenter.Kind.UPLOAD, count = 1,
+                                    TransferKind.UPLOAD, count = 1,
                                     name = context.getString(R.string.activity_hist_edited), uris = listOf(savedUriStr),
                                 )
                                 runCatching {
@@ -2928,7 +2938,7 @@ class PhotoEditorViewModel @Inject constructor(
         hiddenVaultEditor.adoptCopy(
             sourceUri = source.uri,
             copyUri = copyUri,
-            displayName = HiddenVaultRecords.recordedName(stamp(source.displayName, editTimestampMs), "jpg"),
+            displayName = hiddenVaultIndex.recordedName(stamp(source.displayName, editTimestampMs), "jpg"),
         )
         return Uri.parse(copyUri)
     }
@@ -2946,7 +2956,7 @@ class PhotoEditorViewModel @Inject constructor(
         // The write empties the original before it fills it, so it runs behind a backup that is put
         // back when the write fails or leaves an unreadable image; a kill part way is replayed from the
         // same backup on the next launch.
-        LocalOverwriteGuard(context).run(source.uri, expectedSize = bitmap.width to bitmap.height) {
+        localOverwrite.run(source.uri, expectedWidth = bitmap.width, expectedHeight = bitmap.height) {
             context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
                 requireEncoded(bitmap.compress(format, quality, out))
             } ?: error("openOutputStream returned null for $srcUri")
@@ -3084,7 +3094,7 @@ class PhotoEditorViewModel @Inject constructor(
             runCatching { context.contentResolver.delete(uri, null, null) }
             throw e
         }
-        recordCaptureDateIfUnset(context, uri, dateTakenMs)
+        recordCaptureDateIfUnset(context, settingsStore, uri, dateTakenMs)
         return uri
     }
 
@@ -3325,17 +3335,15 @@ class PhotoEditorViewModel @Inject constructor(
      * all-false config with both flags off when the store can't be read.
      */
     private suspend fun readStripSettings(): Triple<Boolean, Boolean, MetadataStripConfig> {
-        val prefs = runCatching { context.settingsDataStore.data.first() }.getOrNull()
-            ?: return Triple(false, false, MetadataStripConfig())
-        val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
-        val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
+        val stripOnUpload = runCatching { settingsStore.get(Settings.STRIP_ON_UPLOAD) }.getOrDefault(false)
+        val mirrorStripToLocal = runCatching { settingsStore.get(Settings.MIRROR_STRIP_TO_LOCAL) }.getOrDefault(false)
         // Authorship rides on the software setting exactly as in [UploadPendingUseCase]: the upload
         // strip is driven by one preference, so both tag groups move together here too.
-        val stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false
+        val stripSoftwareInfo = runCatching { settingsStore.get(Settings.STRIP_SOFTWARE_INFO) }.getOrDefault(false)
         val config = MetadataStripConfig(
-            stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false,
-            stripCameraInfo = prefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
-            stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
+            stripGps = runCatching { settingsStore.get(Settings.STRIP_GPS) }.getOrDefault(false),
+            stripCameraInfo = runCatching { settingsStore.get(Settings.STRIP_CAMERA_INFO) }.getOrDefault(false),
+            stripTimestamp = runCatching { settingsStore.get(Settings.STRIP_TIMESTAMP) }.getOrDefault(false),
             stripSoftwareInfo = stripSoftwareInfo,
             stripAuthorship = stripSoftwareInfo,
         )
@@ -3359,7 +3367,7 @@ class PhotoEditorViewModel @Inject constructor(
 
     /**
      * Builds the photo xAttr (Location + Camera + display dimensions) for an edited cloud copy from the
-     * ORIGINAL photo's [originalExif], mirroring [eu.akoos.photos.data.upload.UploadXAttrBuilder.buildXAttrMetadata]'s image branch
+     * ORIGINAL photo's [originalExif], mirroring UploadXAttrBuilder's image branch
      * so Proton's map + camera UI keep working. The edited bitmap is always upright (rotation baked into
      * pixels), so orientation is NORMAL and the bitmap's own [displayWidth]/[displayHeight] are reported
      * as-is (a crop already changed them, no width/height swap). GPS and camera are gated by the same
