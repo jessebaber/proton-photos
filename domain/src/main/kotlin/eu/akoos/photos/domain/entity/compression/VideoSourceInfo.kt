@@ -112,4 +112,4 @@ data class EncoderCapabilities(
 }
 
 /** Rounds down to an even number; encoders want even dimensions for 4:2:0 chroma. */
-internal fun evenFloor(value: Int): Int = if (value <= 0) 0 else value - (value % 2)
+fun evenFloor(value: Int): Int = if (value <= 0) 0 else value - (value % 2)

@@ -28,7 +28,7 @@ import java.text.Collator
 /**
  * The order the Albums grid is presented in.
  *
- * Persisted as an ordinal in [eu.akoos.photos.data.preferences.SettingsKeys.ALBUMS_SORT_MODE], the
+ * Persisted as an ordinal in SettingsKeys.ALBUMS_SORT_MODE, the
  * same way the Albums view filter is stored, so these values must keep their positions.
  */
 enum class AlbumSortMode {
@@ -82,13 +82,13 @@ fun sortAlbums(
  *
  * A Drive linkId is an opaque base64 token, an alphabet that holds no pipe, so no id can be cut in
  * half by its own contents. Matches how
- * [eu.akoos.photos.data.preferences.SettingsKeys.PENDING_ORPHAN_DELETES] and the photo widget
+ * SettingsKeys.PENDING_ORPHAN_DELETES and the photo widget
  * already join Drive linkIds, which is the convention for this kind of value.
  */
 private const val CUSTOM_ORDER_SEPARATOR = "|"
 
 /**
- * Flatten an arrangement for [eu.akoos.photos.data.preferences.SettingsKeys.ALBUMS_CUSTOM_ORDER].
+ * Flatten an arrangement for SettingsKeys.ALBUMS_CUSTOM_ORDER.
  *
  * Normalises to what [decodeAlbumOrder] can give back, so the pair round-trips: blanks are dropped
  * and a repeated id keeps only its first slot.
