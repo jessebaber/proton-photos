@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.domain.usecase.personPhotoCount
+
 import android.content.Context
 import android.util.Log
 import androidx.annotation.StringRes

@@ -47,6 +47,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import eu.akoos.photos.data.usecase.HideSimilarFacesUseCase
+import eu.akoos.photos.data.usecase.IgnorePeopleUseCaseImpl
+import eu.akoos.photos.data.usecase.sweepMayRemove
 
 /**
  * "This is not a person" for whole groups, against an in-memory database: the look-alike sweep leaves a named
@@ -73,7 +76,7 @@ class IgnorePeopleDbTest {
     @After
     fun tearDown() = db.close()
 
-    private fun ignore(clusterSummaryDao: ClusterSummaryDao = db.clusterSummaryDao()) = IgnorePeopleUseCase(
+    private fun ignore(clusterSummaryDao: ClusterSummaryDao = db.clusterSummaryDao()) = IgnorePeopleUseCaseImpl(
         db.faceDao(), db.personDao(), clusterSummaryDao, db,
         HideSimilarFacesUseCase(db.faceDao(), db.personDao()), edits,
     )

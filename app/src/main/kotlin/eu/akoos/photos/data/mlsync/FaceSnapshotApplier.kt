@@ -22,6 +22,10 @@
 
 package eu.akoos.photos.data.mlsync
 
+import eu.akoos.photos.data.usecase.rekeyCurationTimes
+
+import eu.akoos.photos.data.usecase.isPortableFaceKey
+
 import eu.akoos.photos.domain.usecase.PersonNameSpelling
 import eu.akoos.photos.domain.usecase.personNameKey
 import eu.akoos.photos.data.db.AppDatabase
@@ -39,8 +43,6 @@ import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.ReattachLabel
-import eu.akoos.photos.domain.usecase.isPortableFaceKey
-import eu.akoos.photos.domain.usecase.rekeyCurationTimes
 import java.io.InputStream
 
 /** Photos a Merge matches against this device's faces per batch. */

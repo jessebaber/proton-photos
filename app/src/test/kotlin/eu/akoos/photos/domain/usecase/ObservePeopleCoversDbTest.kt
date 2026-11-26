@@ -43,6 +43,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import eu.akoos.photos.data.usecase.ObservePeopleUseCaseImpl
+import eu.akoos.photos.data.usecase.livePhotoCount
+import eu.akoos.photos.data.usecase.livePhotoCounts
 
 /**
  * The People list resolves the stored covers in a few bounded reads: past the size of one statement, a
@@ -97,7 +100,7 @@ class ObservePeopleCoversDbTest {
         db.personDao().upsert(PersonEntity(id = id, userId = acct, coverFaceId = cover, faceCount = 2))
 
     private suspend fun summaries(feed: List<GalleryItem>) =
-        ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())(UserId(acct), flowOf(feed)).first()
+        ObservePeopleUseCaseImpl(db.personDao(), db.faceDao(), db.personManualPhotoDao())(UserId(acct), flowOf(feed)).first()
 
     @Test
     fun `a face scanned under a device uri keeps its person once the photo is backed up`() = runTest {
@@ -167,7 +170,7 @@ class ObservePeopleCoversDbTest {
             }
         }
 
-        val summaries = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())(UserId(acct), flowOf(feed)).first()
+        val summaries = ObservePeopleUseCaseImpl(db.personDao(), db.faceDao(), db.personManualPhotoDao())(UserId(acct), flowOf(feed)).first()
 
         val expected = (people downTo 1).filter { it % 11 != 0 }
         assertEquals(expected.map { it.toLong() }, summaries.map { it.personId })
