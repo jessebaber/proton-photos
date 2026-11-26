@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
 
 import android.content.IntentSender
 import android.content.Context
@@ -57,6 +57,9 @@ import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.metadata.FilenameDate
+import eu.akoos.photos.domain.usecase.TextTagEdit
+import eu.akoos.photos.domain.usecase.UploadFormatNaming
+import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.ImportDiagnostics
 import eu.akoos.photos.util.MetadataStripConfig

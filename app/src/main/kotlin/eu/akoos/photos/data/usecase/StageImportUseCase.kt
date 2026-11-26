@@ -20,7 +20,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.domain.usecase
+package eu.akoos.photos.data.usecase
+
+import eu.akoos.photos.domain.usecase.StagePhase
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -65,10 +67,6 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
 
 private const val TAG = "StageImport"
-
-/** Where the staging pass is: reading the archive for the first time, stepping over what an earlier
- *  attempt already staged, or staging new entries. */
-enum class StagePhase { SCAN, CATCH_UP, STAGE }
 
 /** One progress tick of [StageImportUseCase.stage]: the [phase], entries [done] of [total], and how many
  *  file bytes of [bytesTotal] (0 when the provider did not report the size) the read has consumed. */
